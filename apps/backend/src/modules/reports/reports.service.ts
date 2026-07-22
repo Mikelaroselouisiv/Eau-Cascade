@@ -1,5 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  businessPeriodBounds,
+  nowBusinessYmd,
+  shiftBusinessYmd,
+  ymdToBusinessDayStart,
+  ymdToBusinessDayEnd,
+} from '../../common/utils/business-timezone';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -26,10 +33,9 @@ export class ReportsService {
 
   async revenue() {
     const now = new Date();
-    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const weekStart = new Date(dayStart);
-    weekStart.setDate(dayStart.getDate() - 7);
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const { from: dayStart } = businessPeriodBounds('day', now);
+    const { from: weekStart } = businessPeriodBounds('week', now);
+    const { from: monthStart } = businessPeriodBounds('month', now);
 
     const [day, week, month] = await Promise.all([
       this.sumByDate(dayStart),
@@ -266,19 +272,19 @@ export class ReportsService {
 
   async dashboardSummary(companyIds?: number[]) {
     const now = new Date();
-    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const weekStart = new Date(dayStart);
-    weekStart.setDate(dayStart.getDate() - 7);
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const { from: dayStart } = businessPeriodBounds('day', now);
+    const { from: weekStart } = businessPeriodBounds('week', now);
+    const { from: monthStart } = businessPeriodBounds('month', now);
 
-    const prevDayStart = new Date(dayStart);
-    prevDayStart.setDate(dayStart.getDate() - 1);
-
-    const prevWeekStart = new Date(weekStart);
-    prevWeekStart.setDate(weekStart.getDate() - 7);
-
-    const prevMonthStart = new Date(monthStart);
-    prevMonthStart.setMonth(monthStart.getMonth() - 1);
+    const todayYmd = nowBusinessYmd(now);
+    const prevDayStart = ymdToBusinessDayStart(shiftBusinessYmd(todayYmd, -1));
+    const prevWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const [yy, mm] = todayYmd.split('-').map(Number);
+    const prevMonth = mm === 1 ? 12 : mm - 1;
+    const prevYear = mm === 1 ? yy - 1 : yy;
+    const prevMonthStart = ymdToBusinessDayStart(
+      `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`,
+    );
 
     const [day, week, month] = await Promise.all([
       (async () => {
@@ -524,39 +530,25 @@ export class ReportsService {
     return Number(res?.[0]?.total ?? 0);
   }
 
-  /** Bornes de date alignées sur le tableau de bord (jour / 7 jours / mois en cours). */
+  /** Bornes de date alignées sur le tableau de bord (jour / 7 jours / mois en cours, Haïti). */
   private dashboardPeriodBounds(period: 'day' | 'week' | 'month'): { from: Date; to: Date } {
-    const now = new Date();
-    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const weekStart = new Date(dayStart);
-    weekStart.setDate(dayStart.getDate() - 7);
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    switch (period) {
-      case 'day':
-        return { from: dayStart, to: now };
-      case 'week':
-        return { from: weekStart, to: now };
-      case 'month':
-        return { from: monthStart, to: now };
-    }
+    return businessPeriodBounds(period);
   }
 
   private ymdToDateStart(ymd: string): Date {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
-    if (!m) throw new BadRequestException('dateFrom/dateTo attendues au format YYYY-MM-DD');
-    const y = Number(m[1]);
-    const mo = Number(m[2]);
-    const d = Number(m[3]);
-    return new Date(y, mo - 1, d, 0, 0, 0, 0);
+    try {
+      return ymdToBusinessDayStart(ymd);
+    } catch {
+      throw new BadRequestException('dateFrom/dateTo attendues au format YYYY-MM-DD');
+    }
   }
 
   private ymdToDateEnd(ymd: string): Date {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
-    if (!m) throw new BadRequestException('dateFrom/dateTo attendues au format YYYY-MM-DD');
-    const y = Number(m[1]);
-    const mo = Number(m[2]);
-    const d = Number(m[3]);
-    return new Date(y, mo - 1, d, 23, 59, 59, 999);
+    try {
+      return ymdToBusinessDayEnd(ymd);
+    } catch {
+      throw new BadRequestException('dateFrom/dateTo attendues au format YYYY-MM-DD');
+    }
   }
 
   private resolveSalesByProductRange(opts: {

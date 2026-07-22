@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InventorySessionKind, RegisterSessionStatus } from '@prisma/client';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
+import { ymdToBusinessDayEnd, ymdToBusinessDayStart } from '../../common/utils/business-timezone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -164,17 +165,17 @@ export class RegisterSessionsService {
 
     const openedAt: { gte?: Date; lte?: Date } = {};
     if (filters?.dateFrom?.trim()) {
-      const d = new Date(filters.dateFrom.trim());
-      if (Number.isFinite(d.getTime())) {
-        d.setHours(0, 0, 0, 0);
-        openedAt.gte = d;
+      try {
+        openedAt.gte = ymdToBusinessDayStart(filters.dateFrom.trim());
+      } catch {
+        /* ignore invalid dateFrom */
       }
     }
     if (filters?.dateTo?.trim()) {
-      const d = new Date(filters.dateTo.trim());
-      if (Number.isFinite(d.getTime())) {
-        d.setHours(23, 59, 59, 999);
-        openedAt.lte = d;
+      try {
+        openedAt.lte = ymdToBusinessDayEnd(filters.dateTo.trim());
+      } catch {
+        /* ignore invalid dateTo */
       }
     }
     if (openedAt.gte || openedAt.lte) where.openedAt = openedAt;

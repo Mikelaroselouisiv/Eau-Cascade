@@ -9,6 +9,11 @@ import {
   generatedMetaLine,
 } from '../../common/pdf/pdf-document';
 import { formatDateFr, formatDateTimeFr, formatMoneyHtg } from '../../common/pdf/pdf-format';
+import {
+  ymdToBusinessDayEnd,
+  ymdToBusinessDayStart,
+  ymdToBusinessNoon,
+} from '../../common/utils/business-timezone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { PurchasingService } from '../purchasing/purchasing.service';
@@ -36,28 +41,28 @@ export class FinanceService {
   ) {}
 
   private ymdToDateStart(ymd: string): Date {
-    const [y, m, d] = ymd.split('-').map((x) => Number.parseInt(x, 10));
-    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    try {
+      return ymdToBusinessDayStart(ymd);
+    } catch {
       throw new BadRequestException('Date invalide');
     }
-    return new Date(y, m - 1, d, 0, 0, 0, 0);
   }
 
   private ymdToDateEnd(ymd: string): Date {
-    const [y, m, d] = ymd.split('-').map((x) => Number.parseInt(x, 10));
-    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    try {
+      return ymdToBusinessDayEnd(ymd);
+    } catch {
       throw new BadRequestException('Date invalide');
     }
-    return new Date(y, m - 1, d, 23, 59, 59, 999);
   }
 
-  /** Date « jour » pour une entrée créée manuellement (midi local pour limiter les dérives fuseau). */
+  /** Date « jour » pour une entrée créée manuellement (midi Haïti pour ancrer le jour métier). */
   private entryDateFromYmd(ymd: string): Date {
-    const [y, m, d] = ymd.split('-').map((x) => Number.parseInt(x, 10));
-    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    try {
+      return ymdToBusinessNoon(ymd);
+    } catch {
       throw new BadRequestException('entryDate invalide');
     }
-    return new Date(y, m - 1, d, 12, 0, 0, 0);
   }
 
   private companyFinanceWhere(companyId: number): Prisma.FinanceEntryWhereInput {

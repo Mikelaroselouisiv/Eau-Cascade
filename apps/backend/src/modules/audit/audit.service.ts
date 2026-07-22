@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
+import { ymdToBusinessDayEnd, ymdToBusinessDayStart } from '../../common/utils/business-timezone';
+import { PrismaService } from '../../prisma/prisma.service';
 
 type AuditInput = {
   userId?: number;
@@ -69,17 +70,17 @@ export class AuditService {
 
     const createdAt: Prisma.DateTimeFilter = {};
     if (opts?.dateFrom?.trim()) {
-      const d = new Date(opts.dateFrom.trim());
-      if (Number.isFinite(d.getTime())) {
-        d.setHours(0, 0, 0, 0);
-        createdAt.gte = d;
+      try {
+        createdAt.gte = ymdToBusinessDayStart(opts.dateFrom.trim());
+      } catch {
+        /* ignore invalid dateFrom */
       }
     }
     if (opts?.dateTo?.trim()) {
-      const d = new Date(opts.dateTo.trim());
-      if (Number.isFinite(d.getTime())) {
-        d.setHours(23, 59, 59, 999);
-        createdAt.lte = d;
+      try {
+        createdAt.lte = ymdToBusinessDayEnd(opts.dateTo.trim());
+      } catch {
+        /* ignore invalid dateTo */
       }
     }
     if (createdAt.gte || createdAt.lte) {

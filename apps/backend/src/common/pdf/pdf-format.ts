@@ -1,8 +1,31 @@
 /** Formatage partagé pour les exports PDF (français, lisible). */
 
-const pad2 = (n: number) => String(n).padStart(2, '0');
+import { BUSINESS_TIME_ZONE } from '../utils/business-timezone';
 
-/** Date JJ/MM/AAAA (les chaînes AAAA-MM-JJ sont traitées en calendrier local). */
+function partsInBusinessTz(d: Date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(d);
+  const map: Record<string, string> = {};
+  for (const p of parts) {
+    if (p.type !== 'literal') map[p.type] = p.value;
+  }
+  return {
+    year: map.year,
+    month: map.month,
+    day: map.day,
+    hour: map.hour,
+    minute: map.minute,
+  };
+}
+
+/** Date JJ/MM/AAAA (les chaînes AAAA-MM-JJ sont traitées en calendrier métier Haïti). */
 export function formatDateFr(value: Date | string | number | null | undefined): string {
   if (value == null || value === '') return '—';
   if (typeof value === 'string') {
@@ -11,15 +34,17 @@ export function formatDateFr(value: Date | string | number | null | undefined): 
   }
   const d = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(d.getTime())) return '—';
-  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+  const p = partsInBusinessTz(d);
+  return `${p.day}/${p.month}/${p.year}`;
 }
 
-/** Date-heure JJ/MM/AAAA HH:mm */
+/** Date-heure JJ/MM/AAAA HH:mm (fuseau métier Haïti). */
 export function formatDateTimeFr(value: Date | string | number | null | undefined): string {
   if (value == null || value === '') return '—';
   const d = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(d.getTime())) return '—';
-  return `${formatDateFr(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const p = partsInBusinessTz(d);
+  return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}`;
 }
 
 /**
