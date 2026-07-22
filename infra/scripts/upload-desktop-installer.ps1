@@ -4,8 +4,8 @@
   Publie les artefacts desktop (exe, latest.yml, blockmap) vers GCS.
 
 .PARAMETER Edition
-  server → gs://pos-freres-basiles-assets/installers/server/
-  remote → gs://pos-freres-basiles-assets/installers/remote/
+  server → gs://pos-entrprise-israel-assets/installers/server/
+  remote → gs://pos-entrprise-israel-assets/installers/remote/
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File infra/scripts/upload-desktop-installer.ps1 -Edition remote
@@ -16,7 +16,7 @@ param(
   [string] $Edition,
 
   [string] $ReleaseDir = '',
-  [string] $Bucket = 'pos-freres-basiles-assets'
+  [string] $Bucket = 'pos-entrprise-israel-assets'
 )
 
 $ErrorActionPreference = 'Stop'

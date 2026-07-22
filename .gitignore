@@ -23,6 +23,7 @@ apps/desktop/server-stack/.env.server
 
 # SSH / keys
 *.pem
+secrets/
 
 # OS / IDE
 Thumbs.db

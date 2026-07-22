@@ -7,7 +7,7 @@ param(
   [string] $MonorepoRoot = '',
   [string] $VmName = 'pos-api',
   [string] $VmZone = 'northamerica-northeast1-a',
-  [string] $ProjectId = 'pos-freres-basiles',
+  [string] $ProjectId = 'pos-entrprise-israel',
   [string] $RemoteDir = '/opt/pos',
   [switch] $SkipDeploy
 )

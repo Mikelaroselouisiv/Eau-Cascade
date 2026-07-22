@@ -1,4 +1,4 @@
-# Déploiement entreprise — POS Frères Basiles
+# Déploiement entreprise — POS Entreprises Israel
 
 ## Deux types de postes (rien à faire à la main sur site)
 
@@ -52,7 +52,7 @@ Copier l’exe Server sur clé USB ou `installers/server/` sur GCS pour le magas
 ## Vérification (IT uniquement)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File infra/scripts/e2e-smoke.ps1 -ApiUrl http://34.118.154.220
+powershell -ExecutionPolicy Bypass -File infra/scripts/e2e-smoke.ps1 -ApiUrl http://35.203.0.140
 ```
 
 Sur la machine mère après install : ouvrir `http://localhost:3000/auth/setup-status` dans le navigateur.

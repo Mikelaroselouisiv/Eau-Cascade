@@ -1,0 +1,42 @@
+---
+description: Isolation stricte POS Entreprises Israel vs Frères Baziles (GCP, secrets, déploiements)
+alwaysApply: true
+---
+
+# Isolation tenant — Entreprises Israel
+
+Ce dépôt est **POS Entreprises Israel** uniquement. Le monorepo Frères Baziles est une **base de code d’inspiration**, jamais une cible d’ops.
+
+## Projet GCP autorisé (seul)
+
+- Compte Cloud SDK attendu : `israelnesly0@gmail.com` (config `pos-israel`)
+- Project ID : `pos-entrprise-israel`
+- Billing : compte lié à ce projet Israel seulement
+
+## Interdit absolument
+
+- Tout `gcloud` / `gsutil` / SSH / deploy vers `pos-freres-basiles` ou tout projet / bucket / VM / SA Frères Baziles
+- Modifier, lire en live, ou « réparer » l’infra Frères Baziles depuis ce workspace
+- Réutiliser les secrets CI Frères Baziles (`GCP_SA_KEY` d’un autre repo) sur Israel
+- Pointer Artifact Registry, GCS, IP publique ou sync vers des ressources Frères Baziles
+- Activer la config gcloud `default` (Frères) pour travailler ici — rester sur `pos-israel`
+
+## Avant chaque commande GCP
+
+1. `gcloud config get-value project` doit être `pos-entrprise-israel`
+2. Si ce n’est pas le cas : `gcloud config configurations activate pos-israel` puis `gcloud config set project pos-entrprise-israel`
+3. Refuser d’exécuter si le project ID contient `freres` / `bazile` / `baziles`
+
+## Remplacement de noms
+
+Quand tu copies un pattern depuis l’ancien code, remplace toujours :
+
+| Ancien (Frères — ne pas utiliser) | Israel |
+|-----------------------------------|--------|
+| `pos-freres-basiles` | `pos-entrprise-israel` |
+| `pos-freres-basiles-assets` | `pos-entrprise-israel-assets` |
+| IP / host Frères | IP / host de la VM Israel |
+
+## Script de garde
+
+Préférer `infra/scripts/assert-israel-gcp.ps1` avant tout provision / deploy GCP.

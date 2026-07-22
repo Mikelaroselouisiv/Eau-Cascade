@@ -1,8 +1,8 @@
 # Build desktop Remote, generate latest.yml, upload to GCS installers/remote/.
-# Optional: workflow_dispatch with edition=server uploads to installers/server/ (no auto-updater).
+# ISRAEL ONLY — never point this workflow at Frères Baziles.
 #
-# Secrets: GCP_SA_KEY, GCP_PROJECT_ID
-# Variables: GCP_REGION (for auth action consistency)
+# Secrets: GCP_PROJECT_ID, GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT
+# Variables: GCP_REGION
 
 name: Desktop - release to GCS
 
@@ -26,6 +26,7 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -54,10 +55,11 @@ jobs:
         working-directory: apps/desktop
         run: npm run dist:win:${{ steps.meta.outputs.edition }}
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud (WIF — Israel)
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Configure Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v2
@@ -66,4 +68,5 @@ jobs:
         shell: pwsh
         run: |
           $edition = '${{ steps.meta.outputs.edition }}'
+          if ('${{ secrets.GCP_PROJECT_ID }}' -match 'freres|bazile') { throw 'ABORT: Freres Baziles project forbidden' }
           & ./infra/scripts/upload-desktop-installer.ps1 -Edition $edition

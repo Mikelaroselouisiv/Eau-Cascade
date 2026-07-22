@@ -35,7 +35,7 @@
   ],
   "publish": {
     "provider": "generic",
-    "url": "https://storage.googleapis.com/pos-freres-basiles-assets/installers/server"
+    "url": "https://storage.googleapis.com/pos-entrprise-israel-assets/installers/server"
   },
   "win": {
     "icon": "build/icon.ico",

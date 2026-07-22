@@ -16,7 +16,7 @@ services:
       - postgres_data_prod:/var/lib/postgresql/data
 
   backend:
-    image: northamerica-northeast1-docker.pkg.dev/pos-freres-basiles/pos-backend/backend:latest
+    image: northamerica-northeast1-docker.pkg.dev/pos-entrprise-israel/pos-backend/backend:latest
     container_name: pos_backend_prod
     restart: unless-stopped
     env_file:

@@ -1,7 +1,9 @@
 # Build Docker backend and push it to Google Artifact Registry, then deploy to the GCP VM.
-# Required GitHub secrets: GCP_SA_KEY, GCP_PROJECT_ID.
-# Required GitHub variables: GCP_REGION, GCP_ARTIFACT_REPO.
-# Optional GitHub variables: GCP_VM_NAME (default pos-api), GCP_VM_ZONE (default northamerica-northeast1-a).
+# ISRAEL ONLY — never point this workflow at Frères Baziles.
+#
+# Secrets: GCP_PROJECT_ID, GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT
+# Variables: GCP_REGION, GCP_ARTIFACT_REPO
+# Optional variables: GCP_VM_NAME (default pos-api), GCP_VM_ZONE (default northamerica-northeast1-a)
 
 name: Backend - build and push to GCP
 
@@ -29,14 +31,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud (WIF — Israel)
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Configure Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v2
@@ -50,6 +54,9 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
+          case "${{ secrets.GCP_PROJECT_ID }}" in
+            *freres*|*bazile*) echo "ABORT: Freres Baziles project forbidden"; exit 1 ;;
+          esac
           REGISTRY="${GCP_REGION}-docker.pkg.dev"
           FULL_IMAGE="${REGISTRY}/${IMAGE_URI}"
           docker build -f infra/docker/Dockerfile \
@@ -64,14 +71,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud (WIF — Israel)
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Configure Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v2
@@ -80,4 +89,9 @@ jobs:
         env:
           GCP_VM_NAME: ${{ vars.GCP_VM_NAME != '' && vars.GCP_VM_NAME || 'pos-api' }}
           GCP_VM_ZONE: ${{ vars.GCP_VM_ZONE != '' && vars.GCP_VM_ZONE || 'northamerica-northeast1-a' }}
-        run: bash infra/scripts/gcp-deploy-remote.sh
+        run: |
+          set -euo pipefail
+          case "${{ secrets.GCP_PROJECT_ID }}" in
+            *freres*|*bazile*) echo "ABORT: Freres Baziles project forbidden"; exit 1 ;;
+          esac
+          bash infra/scripts/gcp-deploy-remote.sh
