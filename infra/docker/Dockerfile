@@ -15,9 +15,10 @@ RUN npx prisma generate
 RUN npm run build
 
 FROM node:20-alpine
-RUN apk add --no-cache openssl libc6-compat
+RUN apk add --no-cache openssl libc6-compat tzdata
 WORKDIR /app
 ENV NODE_ENV=production
+ENV TZ=America/Port-au-Prince
 COPY package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
 # Le client Prisma valide est généré dans `builder` (schéma présent) ; `deps` n’a que le stub post-install.

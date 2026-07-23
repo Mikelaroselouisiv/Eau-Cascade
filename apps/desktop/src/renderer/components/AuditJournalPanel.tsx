@@ -3,20 +3,7 @@ import { getDepartments, getUsers, listAuditLogs } from '../services/api';
 import type { AuditLogRow, Department, SessionUser } from '../types/api';
 import { auditActionLabel } from '../utils/auditActionLabel';
 import { formatUserLabel } from '../utils/userAttribution';
-
-function pad2(n: number) {
-  return String(n).padStart(2, '0');
-}
-
-function formatYmd(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-function defaultMonthStartYmd(): string {
-  const d = new Date();
-  d.setDate(1);
-  return formatYmd(d);
-}
+import { formatDateTime, formatYmd, defaultMonthStartYmd } from '../utils/datetime';
 
 type Props = {
   companyId: number;
@@ -177,7 +164,7 @@ export function AuditJournalPanel({ companyId }: Props) {
             ) : (
               items.map((row) => (
                 <tr key={row.id}>
-                  <td>{new Date(row.createdAt).toLocaleString()}</td>
+                  <td>{formatDateTime(row.createdAt)}</td>
                   <td>{formatUserLabel(row.user)}</td>
                   <td>
                     <small>{auditActionLabel(row.action)}</small>

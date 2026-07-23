@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InventorySessionKind, InventorySessionStatus, MovementType, Prisma } from '@prisma/client';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
+import { ymdToDateEnd, ymdToDateStart } from '../../common/time/timezone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { UpdateInventoryLineDto } from './dto/physical-inventory.dto';
@@ -11,6 +12,78 @@ export class InventoryService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
   ) {}
+
+  /**
+   * Interprète `asOf` : YYYY-MM-DD → fin de journée Port-au-Prince ;
+   * sinon ISO / datetime parseable → instant UTC.
+   */
+  parseAsOfInstant(asOfRaw: string): Date {
+    const raw = asOfRaw.trim();
+    if (!raw) {
+      throw new BadRequestException('asOf est requis.');
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      try {
+        return ymdToDateEnd(raw);
+      } catch {
+        throw new BadRequestException('asOf invalide (attendu YYYY-MM-DD).');
+      }
+    }
+    const d = new Date(raw);
+    if (!Number.isFinite(d.getTime())) {
+      throw new BadRequestException('asOf invalide (attendu YYYY-MM-DD ou ISO).');
+    }
+    return d;
+  }
+
+  /** Delta signé d’un mouvement (IN/ADJUSTMENT +, OUT −). */
+  private signedMovementDelta(type: MovementType, quantity: Prisma.Decimal | number): number {
+    const q = Number(quantity);
+    if (!Number.isFinite(q)) return 0;
+    return type === MovementType.OUT ? -q : q;
+  }
+
+  /**
+   * Somme des deltas de mouvements strictement après `asOf`, par produit.
+   * stock(T) = stock actuel − somme des deltas après T.
+   */
+  async sumSignedDeltasAfter(
+    asOf: Date,
+    productIds: number[],
+  ): Promise<Map<number, number>> {
+    const map = new Map<number, number>();
+    if (productIds.length === 0) return map;
+
+    const movements = await this.prisma.stockMovement.findMany({
+      where: {
+        productId: { in: productIds },
+        createdAt: { gt: asOf },
+        deletedAt: null,
+      },
+      select: { productId: true, type: true, quantity: true },
+    });
+
+    for (const m of movements) {
+      const delta = this.signedMovementDelta(m.type, m.quantity);
+      map.set(m.productId, (map.get(m.productId) ?? 0) + delta);
+    }
+    return map;
+  }
+
+  /** Remplace `stock` par le stock rétrospectif à `asOf` (lecture seule). */
+  async applyStockAsOf<T extends { id: number; stock: Prisma.Decimal | number | string }>(
+    products: T[],
+    asOfRaw: string,
+  ): Promise<Array<T & { stock: number }>> {
+    const asOf = this.parseAsOfInstant(asOfRaw);
+    const ids = products.map((p) => p.id);
+    const deltas = await this.sumSignedDeltasAfter(asOf, ids);
+    return products.map((p) => {
+      const current = Number(p.stock);
+      const after = deltas.get(p.id) ?? 0;
+      return { ...p, stock: current - after };
+    });
+  }
 
   async ensureStockAvailability(productId: number, quantity: number) {
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
@@ -144,19 +217,44 @@ export class InventoryService {
     companyId?: number;
     /** Tri par date : plus récent d'abord (défaut) ou plus ancien d'abord. */
     order?: 'asc' | 'desc';
+    /** Bornes inclusives YYYY-MM-DD (Port-au-Prince). */
+    dateFrom?: string;
+    dateTo?: string;
   }) {
     const skip = Math.max(0, Math.floor(opts?.skip ?? 0));
     const rawTake = opts?.take ?? 100;
     const take = Math.min(500, Math.max(1, Math.floor(rawTake)));
     const orderDir = opts?.order === 'asc' ? 'asc' : 'desc';
 
-    const where = opts?.companyId
-      ? {
-          product: {
-            companyId: opts.companyId,
-          },
-        }
-      : undefined;
+    const where: Prisma.StockMovementWhereInput = {
+      deletedAt: null,
+    };
+
+    if (opts?.companyId) {
+      where.product = { companyId: opts.companyId };
+    }
+
+    const createdAt: Prisma.DateTimeFilter = {};
+    if (opts?.dateFrom?.trim()) {
+      try {
+        createdAt.gte = ymdToDateStart(opts.dateFrom.trim());
+      } catch {
+        throw new BadRequestException('dateFrom invalide (attendu YYYY-MM-DD).');
+      }
+    }
+    if (opts?.dateTo?.trim()) {
+      try {
+        createdAt.lte = ymdToDateEnd(opts.dateTo.trim());
+      } catch {
+        throw new BadRequestException('dateTo invalide (attendu YYYY-MM-DD).');
+      }
+    }
+    if (createdAt.gte || createdAt.lte) {
+      if (createdAt.gte && createdAt.lte && createdAt.gte > createdAt.lte) {
+        throw new BadRequestException('dateFrom doit être antérieure ou égale à dateTo.');
+      }
+      where.createdAt = createdAt;
+    }
 
     const [items, total] = await Promise.all([
       this.prisma.stockMovement.findMany({
@@ -345,7 +443,7 @@ export class InventoryService {
     });
   }
 
-  async getCountSheetContext(departmentId: number) {
+  async getCountSheetContext(departmentId: number, asOfRaw?: string) {
     const department = await this.prisma.department.findUnique({
       where: { id: departmentId },
       include: { company: true },
@@ -368,20 +466,34 @@ export class InventoryService {
       },
       orderBy: { name: 'asc' },
     });
+
+    const asOf = asOfRaw?.trim() ? this.parseAsOfInstant(asOfRaw) : null;
+    const deltas = asOf
+      ? await this.sumSignedDeltasAfter(
+          asOf,
+          products.map((p) => p.id),
+        )
+      : null;
+
     return {
-      generatedAt: new Date().toISOString(),
+      generatedAt: asOf ? asOf.toISOString() : new Date().toISOString(),
+      asOf: asOf ? asOf.toISOString() : null,
       department: {
         id: department.id,
         name: department.name,
         company: department.company,
       },
-      products: products.map((p) => ({
-        id: p.id,
-        name: p.name,
-        sku: p.sku,
-        stock: Number(p.stock),
-        unitLabel: this.packagingLabelFromProduct(p),
-      })),
+      products: products.map((p) => {
+        const current = Number(p.stock);
+        const stock = deltas ? current - (deltas.get(p.id) ?? 0) : current;
+        return {
+          id: p.id,
+          name: p.name,
+          sku: p.sku,
+          stock,
+          unitLabel: this.packagingLabelFromProduct(p),
+        };
+      }),
     };
   }
 
@@ -653,7 +765,12 @@ export class InventoryService {
     return this.getInventorySession(sessionId);
   }
 
-  async getGlobalStockSnapshot(filters?: { companyIds?: number[]; departmentIds?: number[] }) {
+  async getGlobalStockSnapshot(filters?: {
+    companyIds?: number[];
+    departmentIds?: number[];
+    /** Stock rétrospectif à cette date (fin de journée PAP si YYYY-MM-DD). */
+    asOf?: string;
+  }) {
     const where: Prisma.ProductWhereInput = {
       trackStock: true,
       isService: false,
@@ -679,21 +796,35 @@ export class InventoryService {
       orderBy: [{ company: { name: 'asc' } }, { department: { name: 'asc' } }, { name: 'asc' }],
     });
 
+    const asOf = filters?.asOf?.trim() ? this.parseAsOfInstant(filters.asOf) : null;
+    const deltas = asOf
+      ? await this.sumSignedDeltasAfter(
+          asOf,
+          products.map((p) => p.id),
+        )
+      : null;
+
     return {
-      generatedAt: new Date().toISOString(),
-      items: products.map((p) => ({
-        id: p.id,
-        name: p.name,
-        sku: p.sku,
-        stock: Number(p.stock),
-        stockMin: Number(p.stockMin),
-        company: p.department?.company ?? null,
-        department: p.department
-          ? { id: p.department.id, name: p.department.name }
-          : null,
-        unitLabel: this.packagingLabelFromProduct(p),
-        lowStock: Number(p.stock) <= Number(p.stockMin),
-      })),
+      generatedAt: asOf ? asOf.toISOString() : new Date().toISOString(),
+      asOf: asOf ? asOf.toISOString() : null,
+      items: products.map((p) => {
+        const current = Number(p.stock);
+        const stock = deltas ? current - (deltas.get(p.id) ?? 0) : current;
+        const stockMin = Number(p.stockMin);
+        return {
+          id: p.id,
+          name: p.name,
+          sku: p.sku,
+          stock,
+          stockMin,
+          company: p.department?.company ?? null,
+          department: p.department
+            ? { id: p.department.id, name: p.department.name }
+            : null,
+          unitLabel: this.packagingLabelFromProduct(p),
+          lowStock: stock <= stockMin,
+        };
+      }),
     };
   }
 }

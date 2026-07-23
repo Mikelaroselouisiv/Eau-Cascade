@@ -1,3 +1,4 @@
+import { formatDateTime } from './datetime';
 /** Aperçu texte du ticket (même logique que thermal-printer.cjs, sans Electron). */
 
 import { formatMoneyCompact } from './currency';
@@ -33,7 +34,7 @@ export function buildTicketPreviewText(data: TicketPreviewInput): string {
   const width = data.paperWidth === 80 ? 80 : 58;
   const lineWidth = width === 80 ? 48 : 32;
   const separator = '-'.repeat(lineWidth);
-  const date = new Date().toLocaleString();
+  const date = formatDateTime(new Date());
   const lines: string[] = [];
 
   const headerRaw = (data.receiptHeaderText || '').trim();

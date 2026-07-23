@@ -2,6 +2,7 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { AppLayout } from './layout/AppLayout';
 import { ConfigPage } from './pages/ConfigPage';
+import { CreditPage } from './pages/CreditPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DefaultRedirect } from './pages/DefaultRedirect';
 import { DeliveryPage } from './pages/DeliveryPage';
@@ -31,6 +32,14 @@ export default function App() {
               element={
                 <RequireRole roles={['ADMIN', 'MANAGER']}>
                   <DashboardPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="credit"
+              element={
+                <RequireRole roles={['ADMIN', 'MANAGER']}>
+                  <CreditPage />
                 </RequireRole>
               }
             />

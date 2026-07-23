@@ -5,6 +5,10 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { ensureAppTimezone } from './common/time/timezone';
+
+/** Fuseau métier unique (Port-au-Prince) avant tout calcul de dates. */
+ensureAppTimezone();
 
 /** Base64 data URLs (logos, etc.) dépassent souvent la limite Express par défaut (~100 ko). */
 const JSON_BODY_LIMIT = '5mb';

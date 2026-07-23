@@ -35,15 +35,19 @@ export class ProductsController {
 
   @Get()
   @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
-  findAll(@Query('departmentId') departmentIdRaw?: string) {
+  findAll(
+    @Query('departmentId') departmentIdRaw?: string,
+    @Query('asOf') asOf?: string,
+  ) {
+    const asOfTrimmed = asOf?.trim() || undefined;
     if (departmentIdRaw === undefined || departmentIdRaw === '') {
-      return this.productsService.findAll();
+      return this.productsService.findAll(undefined, asOfTrimmed);
     }
     const id = parseInt(departmentIdRaw, 10);
     if (Number.isNaN(id)) {
       throw new BadRequestException('departmentId invalide');
     }
-    return this.productsService.findAll(id);
+    return this.productsService.findAll(id, asOfTrimmed);
   }
 
   @Patch(':id')

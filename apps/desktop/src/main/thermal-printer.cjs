@@ -1,10 +1,27 @@
 const { BrowserWindow, nativeImage } = require('electron');
 
+/** Fuseau métier unique — Port-au-Prince. */
+const APP_TIMEZONE = 'America/Port-au-Prince';
+
 /** Largeur utile approximative en points pour raster ESC/POS (58 / 80 mm). */
 const RASTER_DOTS_58 = 384;
 const RASTER_DOTS_80 = 576;
 
 const ESC_ALIGN_LEFT = Buffer.from([0x1b, 0x61, 0x00]);
+
+function formatDateTimePap(value) {
+  const d = value instanceof Date ? value : new Date(value ?? Date.now());
+  if (!Number.isFinite(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('fr-HT', {
+    timeZone: APP_TIMEZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
+}
 
 function formatMoney(value) {
   const n = Number(value);
@@ -23,9 +40,12 @@ function clipLine(text, lineWidth) {
  * @param {number} width
  */
 function buildTicketText(saleData, width = 58) {
+  if (saleData.documentType === 'DISBURSEMENT_ORDER') {
+    return buildDisbursementOrderText(saleData, width);
+  }
   const lineWidth = width === 80 ? 48 : 32;
   const separator = '-'.repeat(lineWidth);
-  const date = saleData.dateTime ?? new Date().toLocaleString();
+  const date = saleData.dateTime ?? formatDateTimePap(new Date());
   const lines = [];
 
   const headerRaw = (saleData.receiptHeaderText || '').trim();
@@ -98,6 +118,87 @@ function buildTicketText(saleData, width = 58) {
   } else if (!isTest) {
     lines.push(separator);
     lines.push('Merci pour votre visite');
+  }
+
+  lines.push('\n\n');
+  return lines.join('\n');
+}
+
+/**
+ * Ordre de décaissement (dépenses) — 3 zones de signature.
+ * @param {Record<string, unknown>} data
+ * @param {number} width
+ */
+function buildDisbursementOrderText(data, width = 58) {
+  const lineWidth = width === 80 ? 48 : 32;
+  const separator = '-'.repeat(lineWidth);
+  const lines = [];
+
+  const headerRaw = (data.receiptHeaderText || '').trim();
+  if (headerRaw) {
+    for (const line of headerRaw.split('\n')) {
+      const s = line.trim();
+      if (s) lines.push(clipLine(s, lineWidth));
+    }
+  } else {
+    lines.push(clipLine(data.companyName ?? 'Entreprise', lineWidth));
+  }
+
+  const addr = (data.address || '').trim();
+  if (addr) lines.push(clipLine(addr, lineWidth));
+
+  const phone = String(data.companyPhone ?? '').trim();
+  if (phone) lines.push(clipLine(`Tél: ${phone}`, lineWidth));
+
+  if (data.showLogoOnReceipt && data.receiptLogoUrl && !data.omitLogoPlaceholder) {
+    lines.push(clipLine('[Logo]', lineWidth));
+  }
+
+  lines.push(separator);
+  lines.push(clipLine('ORDRE DE DECAISSEMENT', lineWidth));
+  lines.push(separator);
+
+  const isTest = !!data.isTest;
+  const sampleBody = (data.previewSampleBody || '').trim();
+
+  if (isTest && sampleBody) {
+    for (const raw of sampleBody.split('\n')) {
+      const s = raw.trimEnd();
+      if (s) lines.push(clipLine(s, lineWidth));
+    }
+    lines.push(separator);
+  } else {
+    if (data.entryId != null) {
+      lines.push(clipLine(`N°: ${data.entryId}`, lineWidth));
+    }
+    const dateLabel = String(data.entryDate || data.dateTime || formatDateTimePap(new Date()));
+    lines.push(clipLine(`Date: ${dateLabel}`, lineWidth));
+    const prepared = String(data.preparedBy || data.cashier || '').trim();
+    if (prepared) lines.push(clipLine(`Préparé par: ${prepared}`, lineWidth));
+    lines.push(separator);
+    lines.push(clipLine(`Libellé: ${data.description ?? '—'}`, lineWidth));
+    lines.push(clipLine(`Montant: ${formatMoney(data.amount ?? data.total ?? 0)}`, lineWidth));
+    lines.push(separator);
+  }
+
+  lines.push(clipLine('Signatures', lineWidth));
+  lines.push('');
+  lines.push(clipLine('Ordonnateur:', lineWidth));
+  lines.push(clipLine('_'.repeat(Math.min(lineWidth, 28)), lineWidth));
+  lines.push('');
+  lines.push(clipLine('Exécutant:', lineWidth));
+  lines.push(clipLine('_'.repeat(Math.min(lineWidth, 28)), lineWidth));
+  lines.push('');
+  lines.push(clipLine('Bénéficiaire:', lineWidth));
+  lines.push(clipLine('_'.repeat(Math.min(lineWidth, 28)), lineWidth));
+
+  const footerRaw = (data.receiptFooterText || '').trim();
+  if (footerRaw) {
+    lines.push(separator);
+    for (const line of footerRaw.split('\n')) {
+      const s = line.trim();
+      if (s) lines.push(clipLine(s, lineWidth));
+    }
   }
 
   lines.push('\n\n');
@@ -202,13 +303,11 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;');
 }
 
-function receiptPageSizeMicrons(width) {
-  if (width === 80) return { width: 80000, height: 320000 };
-  return { width: 58000, height: 320000 };
-}
-
 /**
- * Même rendu que l’aperçu fallback d’impression (ticket monospace + logo optionnel).
+ * HTML pour fallback Windows GDI.
+ * Important : pas de @page size / pageSize Electron en microns — les pilotes
+ * thermiques Windows décalent alors le contenu (marge blanche + texte collé sur un bord).
+ * On laisse le format papier configuré dans Windows, et on remplit 100 % de la largeur.
  * @param {Record<string, unknown>} saleData
  */
 function buildReceiptHtml(saleData) {
@@ -217,63 +316,182 @@ function buildReceiptHtml(saleData) {
   const safeLogo =
     saleData.showLogoOnReceipt && logoUrl.startsWith('data:image') ? logoUrl : '';
   const textData = { ...saleData, omitLogoPlaceholder: !!safeLogo };
-  const fullText = buildTicketText(textData, width);
+  const fullText = buildTicketText(textData, width).replace(/\n{3,}$/g, '\n\n');
+  // ~32 car. à 58 mm / ~48 à 80 mm : police un peu plus petite pour tenir dans la largeur pilote.
+  const fontPt = width === 80 ? 10 : 9;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    @page { margin: 0; size: auto; }
-    html, body { margin: 0; padding: 0; }
-    body { font-family: 'Consolas','Courier New',monospace; font-size: 13px; padding: 2px 4px 8px 0; box-sizing: border-box; }
-    img.logo { max-width: ${width === 80 ? 280 : 200}px; max-height: 100px; display: block; margin: 0 0 6px 0; }
-    pre.ticket { margin: 0; font-family: inherit; font-size: inherit; white-space: pre-wrap; text-align: left; }
+    @page { margin: 0; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      background: #fff;
+    }
+    body {
+      font-family: "Consolas", "Courier New", monospace;
+      font-size: ${fontPt}pt;
+      line-height: 1.25;
+      padding: 0;
+      text-align: left;
+    }
+    img.logo {
+      max-width: 100%;
+      width: auto;
+      max-height: ${width === 80 ? 90 : 70}px;
+      display: block;
+      margin: 0 0 4px 0;
+    }
+    pre.ticket {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      font-family: inherit;
+      font-size: inherit;
+      line-height: inherit;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow-wrap: anywhere;
+      text-align: left;
+    }
   </style></head><body>${
     safeLogo ? `<img class="logo" src="${safeLogo}" alt="" />` : ''
   }<pre class="ticket">${escapeHtml(fullText)}</pre></body></html>`;
 }
 
+function printWithOptions(win, options) {
+  return new Promise((resolve) => {
+    try {
+      win.webContents.print(options, (success, failureReason) => {
+        resolve({
+          ok: !!success,
+          reason: failureReason || (!success ? 'Unknown print error' : undefined),
+        });
+      });
+    } catch (err) {
+      resolve({
+        ok: false,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+}
+
+/** Interfaces ESC/POS possibles sous Windows (raw). */
+function escPosInterfaces(printerName) {
+  const name = String(printerName || '').trim();
+  if (!name) return [''];
+  const list = [];
+  if (name.startsWith('printer:') || name.includes('COM') || name.startsWith('tcp://')) {
+    list.push(name);
+  } else {
+    list.push(`printer:${name}`);
+    list.push(name);
+  }
+  return list;
+}
+
+async function tryEscPosPrint(saleData, width) {
+  // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+  const { printer: ThermalPrinter, types } = require('node-thermal-printer');
+  const payload = buildEscPosPayload(saleData, width);
+  const doCut = saleData.autoCut !== false;
+  let lastErr = null;
+  for (const iface of escPosInterfaces(saleData.printerName)) {
+    try {
+      const printer = new ThermalPrinter({
+        type: types.EPSON,
+        interface: iface,
+        options: { timeout: 2500 },
+      });
+      const isConnected = await printer.isPrinterConnected();
+      if (!isConnected) continue;
+      await printer.raw(payload);
+      if (doCut) {
+        try {
+          await printer.cut();
+        } catch {
+          /* cut optionnelle */
+        }
+      }
+      return { ok: true, mode: 'escpos' };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  if (lastErr) throw lastErr;
+  throw new Error('Printer not available');
+}
+
 async function printReceipt(saleData) {
   const width = saleData.paperWidth === 80 ? 80 : 58;
-  const payload = buildEscPosPayload(saleData, width);
-  const fallbackWindow = new BrowserWindow({ show: false });
-  const html = buildReceiptHtml(saleData);
-  await fallbackWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
-  const doCut = saleData.autoCut !== false;
-
+  // 1) ESC/POS raw si l’imprimante l’accepte.
   try {
-    // eslint-disable-next-line global-require, import/no-extraneous-dependencies
-    const { printer: ThermalPrinter, types } = require('node-thermal-printer');
-    const printer = new ThermalPrinter({
-      type: types.EPSON,
-      interface: saleData.printerName ?? '',
-      options: { timeout: 3000 },
-    });
-    const isConnected = await printer.isPrinterConnected();
-    if (!isConnected) {
-      throw new Error('Printer not available');
-    }
-    await printer.raw(payload);
-    if (doCut) await printer.cut();
-    return { ok: true, mode: 'escpos' };
+    return await tryEscPosPrint(saleData, width);
   } catch {
-    return new Promise((resolve) => {
-      fallbackWindow.webContents.print(
-        {
-          silent: true,
-          deviceName: saleData.printerName ?? '',
-          printBackground: true,
-          margins: { marginType: 'none' },
-          pageSize: receiptPageSizeMicrons(width),
-        },
-        (success, failureReason) => {
-          resolve({
-            ok: success,
-            mode: 'fallback',
-            reason: failureReason || (!success ? 'Unknown print error' : undefined),
-            ticketText: buildTicketText(saleData, width),
-          });
-          fallbackWindow.close();
-        },
-      );
+    // Fall through — la plupart des imprimantes Windows POS passent par GDI.
+  }
+
+  // 2) Fallback Windows GDI (sans pageSize custom).
+  let fallbackWindow = null;
+  try {
+    fallbackWindow = new BrowserWindow({
+      show: false,
+      width: width === 80 ? 360 : 280,
+      height: 900,
+      webPreferences: { sandbox: true },
     });
+    const html = buildReceiptHtml(saleData);
+    await fallbackWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    await new Promise((r) => setTimeout(r, 250));
+
+    const deviceName = String(saleData.printerName || '').trim();
+    const base = {
+      silent: true,
+      printBackground: true,
+      margins: { marginType: 'none' },
+      landscape: false,
+    };
+    const attempts = [
+      { ...base, deviceName },
+      // Sans deviceName → imprimante par défaut Windows
+      { ...base },
+    ];
+
+    let lastReason = 'Unknown print error';
+    for (const opts of attempts) {
+      const result = await printWithOptions(fallbackWindow, opts);
+      if (result.ok) {
+        fallbackWindow.close();
+        return {
+          ok: true,
+          mode: 'fallback',
+          ticketText: buildTicketText(saleData, width),
+        };
+      }
+      lastReason = result.reason || lastReason;
+    }
+
+    fallbackWindow.close();
+    return {
+      ok: false,
+      mode: 'fallback',
+      reason: lastReason,
+      ticketText: buildTicketText(saleData, width),
+    };
+  } catch (err) {
+    try {
+      fallbackWindow?.close();
+    } catch {
+      /* ignore */
+    }
+    return {
+      ok: false,
+      mode: 'fallback',
+      reason: err instanceof Error ? err.message : String(err),
+      ticketText: buildTicketText(saleData, width),
+    };
   }
 }
 

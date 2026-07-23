@@ -6,6 +6,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductsRepository } from './products.repository';
@@ -16,6 +17,7 @@ export class ProductsService {
     private readonly productsRepository: ProductsRepository,
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly inventoryService: InventoryService,
   ) {}
 
   private async resolveCompanyId(explicit?: number) {
@@ -172,8 +174,10 @@ export class ProductsService {
     });
   }
 
-  findAll(departmentId?: number) {
-    return this.productsRepository.findAll(departmentId);
+  async findAll(departmentId?: number, asOf?: string) {
+    const products = await this.productsRepository.findAll(departmentId);
+    if (!asOf?.trim()) return products;
+    return this.inventoryService.applyStockAsOf(products, asOf.trim());
   }
 
   async update(id: number, updateProductDto: UpdateProductDto, userId?: number) {

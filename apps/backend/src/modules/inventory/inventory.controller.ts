@@ -67,12 +67,15 @@ export class InventoryController {
 
   @Get('count-sheet')
   @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'ACCOUNTANT', 'CASHIER')
-  getCountSheet(@Query('departmentId') departmentId?: string) {
+  getCountSheet(
+    @Query('departmentId') departmentId?: string,
+    @Query('asOf') asOf?: string,
+  ) {
     const deptId = InventoryController.parsePositiveInt(departmentId);
     if (!deptId) {
       throw new BadRequestException('departmentId est requis.');
     }
-    return this.inventoryService.getCountSheetContext(deptId);
+    return this.inventoryService.getCountSheetContext(deptId, asOf?.trim() || undefined);
   }
 
   @Get('count-sheet/export/pdf')
@@ -80,12 +83,16 @@ export class InventoryController {
   async exportCountSheetPdf(
     @Res() res: Response,
     @Query('departmentId') departmentId?: string,
+    @Query('asOf') asOf?: string,
   ) {
     const deptId = InventoryController.parsePositiveInt(departmentId);
     if (!deptId) {
       throw new BadRequestException('departmentId est requis.');
     }
-    const sheet = await this.inventoryService.getCountSheetContext(deptId);
+    const sheet = await this.inventoryService.getCountSheetContext(
+      deptId,
+      asOf?.trim() || undefined,
+    );
     const pdfBuffer = await InventoryController.buildCountSheetPdf(sheet);
     const filenameDate = formatDateFr(new Date()).replace(/\//g, '-');
     const safeName = `${sheet.department.company.name}_${sheet.department.name}`
@@ -123,7 +130,7 @@ export class InventoryController {
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user?: { id?: number },
   ) {
-    return this.inventoryService.completeInventorySession(id, user?.id);
+    return this.inventoryService.completeInventorySession(id, user?.id, true);
   }
 
   @Post('sessions/:id/cancel')
@@ -154,6 +161,8 @@ export class InventoryController {
     @Query('take') takeRaw?: string,
     @Query('companyId') companyIdRaw?: string,
     @Query('order') orderRaw?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
     const parseIntOr = (raw: string | undefined, fallback: number) => {
       if (raw === undefined || raw === '') return fallback;
@@ -166,6 +175,8 @@ export class InventoryController {
       take: parseIntOr(takeRaw, 100),
       companyId: companyIdRaw ? Number.parseInt(companyIdRaw, 10) : undefined,
       order,
+      dateFrom: dateFrom?.trim() || undefined,
+      dateTo: dateTo?.trim() || undefined,
     });
   }
 
@@ -174,6 +185,7 @@ export class InventoryController {
   globalSnapshot(
     @Query('companyIds') companyIdsRaw?: string,
     @Query('departmentIds') departmentIdsRaw?: string,
+    @Query('asOf') asOf?: string,
   ) {
     const parseIds = (raw?: string) =>
       raw
@@ -183,6 +195,7 @@ export class InventoryController {
     return this.inventoryService.getGlobalStockSnapshot({
       companyIds: parseIds(companyIdsRaw),
       departmentIds: parseIds(departmentIdsRaw),
+      asOf: asOf?.trim() || undefined,
     });
   }
 
@@ -192,6 +205,7 @@ export class InventoryController {
     @Res() res: Response,
     @Query('companyIds') companyIdsRaw?: string,
     @Query('departmentIds') departmentIdsRaw?: string,
+    @Query('asOf') asOf?: string,
   ) {
     const parseIds = (raw?: string) =>
       raw
@@ -201,6 +215,7 @@ export class InventoryController {
     const snapshot = await this.inventoryService.getGlobalStockSnapshot({
       companyIds: parseIds(companyIdsRaw),
       departmentIds: parseIds(departmentIdsRaw),
+      asOf: asOf?.trim() || undefined,
     });
 
     const companyNames = [
@@ -211,7 +226,11 @@ export class InventoryController {
       ),
     ];
     const brandName =
-      companyNames.length === 1 ? companyNames[0] : companyNames.join(', ') || 'POS Frères Baziles';
+      companyNames.length === 1 ? companyNames[0] : companyNames.join(', ') || 'POS Entreprise Israel';
+
+    const asOfLabel = snapshot.asOf
+      ? `Stock au ${formatDateTimeFr(snapshot.asOf)} (rétrospection)`
+      : `Stock actuel · ${formatDateTimeFr(snapshot.generatedAt)}`;
 
     const doc = createPdfDoc({ landscape: true });
     await drawReportHeader(doc, {
@@ -219,7 +238,8 @@ export class InventoryController {
       brand: { companyName: brandName },
       metaLines: [
         `Produits : ${snapshot.items.length}`,
-        generatedMetaLine(`réf. ${formatDateTimeFr(snapshot.generatedAt)}`),
+        asOfLabel,
+        generatedMetaLine(),
       ],
     });
 
@@ -316,7 +336,7 @@ export class InventoryController {
     const logoUrl =
       (sessions[0]?.department?.company as { logoUrl?: string | null } | undefined)?.logoUrl ??
       null;
-    const brandName = sessions[0]?.department?.company?.name ?? 'POS Frères Baziles';
+    const brandName = sessions[0]?.department?.company?.name ?? 'POS Entreprise Israel';
 
     const doc = createPdfDoc();
     await drawReportHeader(doc, {
@@ -437,6 +457,7 @@ export class InventoryController {
 
   private static async buildCountSheetPdf(sheet: {
     generatedAt: string;
+    asOf?: string | null;
     department: {
       name: string;
       company: { name: string; logoUrl?: string | null };
@@ -449,6 +470,9 @@ export class InventoryController {
     }>;
   }): Promise<Buffer> {
     const doc = createPdfDoc({ landscape: true });
+    const stockLabel = sheet.asOf
+      ? `Stock système rétrospectif au ${formatDateTimeFr(sheet.asOf)}`
+      : `Stock système au ${formatDateTimeFr(sheet.generatedAt)}`;
     await drawReportHeader(doc, {
       title: 'Feuille d’inventaire physique',
       brand: {
@@ -456,10 +480,7 @@ export class InventoryController {
         logoUrl: sheet.department.company.logoUrl,
         subtitle: sheet.department.name,
       },
-      metaLines: [
-        `Stock système au ${formatDateTimeFr(sheet.generatedAt)}`,
-        generatedMetaLine(),
-      ],
+      metaLines: [stockLabel, generatedMetaLine()],
     });
 
     if (sheet.products.length === 0) {

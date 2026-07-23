@@ -1,10 +1,10 @@
 {
   "name": "desktop",
-  "productName": "POS Frères Basiles",
+  "productName": "POS Entreprise Israel",
   "description": "Point de vente — application desktop",
-  "author": "Frères Basiles",
+  "author": "Entreprise Israel",
   "private": true,
-  "version": "3.0.1",
+  "version": "3.1.0",
   "type": "module",
   "main": "src/main/main.cjs",
   "scripts": {
@@ -56,8 +56,8 @@
   },
   "build": {
     "icon": "build/icon.ico",
-    "appId": "com.freresbasiles.pos.desktop",
-    "productName": "POS Frères Basiles",
+    "appId": "com.entrepriseisrael.pos.desktop",
+    "productName": "POS Entreprise Israel",
     "copyright": "Copyright © 2026",
     "directories": {
       "output": "release",

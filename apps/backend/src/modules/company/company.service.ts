@@ -186,6 +186,11 @@ export class CompanyService {
       receiptFooterText: null as string | null,
       receiptLogoUrl: null as string | null,
       previewSampleBody: null as string | null,
+      showLogoOnDisbursement: true,
+      disbursementHeaderText: null as string | null,
+      disbursementFooterText: null as string | null,
+      disbursementLogoUrl: null as string | null,
+      disbursementPreviewSampleBody: null as string | null,
     };
   }
 
@@ -237,6 +242,21 @@ export class CompanyService {
     if (dto.previewSampleBody !== undefined) {
       update.previewSampleBody = dto.previewSampleBody.trim() || null;
     }
+    if (dto.showLogoOnDisbursement !== undefined) {
+      update.showLogoOnDisbursement = dto.showLogoOnDisbursement;
+    }
+    if (dto.disbursementHeaderText !== undefined) {
+      update.disbursementHeaderText = dto.disbursementHeaderText.trim() || null;
+    }
+    if (dto.disbursementFooterText !== undefined) {
+      update.disbursementFooterText = dto.disbursementFooterText.trim() || null;
+    }
+    if (dto.disbursementLogoUrl !== undefined) {
+      update.disbursementLogoUrl = dto.disbursementLogoUrl.trim() || null;
+    }
+    if (dto.disbursementPreviewSampleBody !== undefined) {
+      update.disbursementPreviewSampleBody = dto.disbursementPreviewSampleBody.trim() || null;
+    }
     return this.prisma.departmentPrinterProfile.upsert({
       where: { departmentId: dto.departmentId },
       create: {
@@ -249,6 +269,11 @@ export class CompanyService {
         receiptFooterText: dto.receiptFooterText?.trim() || null,
         receiptLogoUrl: dto.receiptLogoUrl?.trim() || null,
         previewSampleBody: dto.previewSampleBody?.trim() || null,
+        showLogoOnDisbursement: dto.showLogoOnDisbursement ?? true,
+        disbursementHeaderText: dto.disbursementHeaderText?.trim() || null,
+        disbursementFooterText: dto.disbursementFooterText?.trim() || null,
+        disbursementLogoUrl: dto.disbursementLogoUrl?.trim() || null,
+        disbursementPreviewSampleBody: dto.disbursementPreviewSampleBody?.trim() || null,
       },
       update,
     });

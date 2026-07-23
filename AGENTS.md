@@ -12,9 +12,9 @@ Frères Baziles doit continuer à tourner **sans aucune intervention** depuis ce
 Voir aussi : `.cursor/rules/tenant-isolation-israel.mdc`  
 Garde runtime : `infra/scripts/assert-israel-gcp.ps1`
 
-## Provisionnement
+## Fuseau horaire (critique)
 
-```powershell
-gcloud config configurations activate pos-israel
-powershell -ExecutionPolicy Bypass -File infra/scripts/gcp-bootstrap-israel.ps1
-```
+Toute date métier / affichage / borne de journée = **`America/Port-au-Prince`** uniquement.  
+Ne pas utiliser le fuseau OS de la machine ni UTC pour l’UI ou les filtres « jour / mois ».
+
+Voir `apps/backend/src/common/time/timezone.ts` et `apps/desktop/src/renderer/utils/datetime.ts`.

@@ -1,7 +1,6 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { useColorScheme } from 'react-native';
 
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { onReconnect } from '@/services/net';
@@ -9,6 +8,19 @@ import { syncSalesQueue } from '@/services/offline-queue';
 import { emitPendingSalesChanged } from '@/utils/eventBus';
 
 SplashScreen.preventAutoHideAsync();
+
+const LightTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    primary: '#E67E00',
+    background: '#F7F4EF',
+    card: '#FFFFFF',
+    text: '#1C1917',
+    border: '#E6DDD2',
+    notification: '#FF8C00',
+  },
+};
 
 function RootNavigator() {
   const { loading } = useAuth();
@@ -38,9 +50,8 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={LightTheme}>
       <AuthProvider>
         <RootNavigator />
       </AuthProvider>

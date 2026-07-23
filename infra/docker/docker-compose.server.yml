@@ -37,6 +37,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/pos_db?schema=public
       PORT: "3000"
+      TZ: America/Port-au-Prince
       SYNC_API_KEY: ${SYNC_API_KEY}
     ports:
       - "127.0.0.1:3000:3000"

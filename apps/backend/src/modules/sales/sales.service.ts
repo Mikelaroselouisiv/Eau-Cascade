@@ -172,14 +172,21 @@ export class SalesService {
         })),
       });
 
-      // Journal financier : une ligne INCOME par vente (alignée caisse / mouvements pour l’admin).
-      if (firstCompanyId != null && total > 0) {
+      // Journal financier : INCOME seulement pour la part réellement encaissée.
+      // La part CREDIT est reportée (créances) et n’entre au journal qu’au remboursement.
+      const cashCollected = createSaleDto.payments
+        .filter((p) => p.method !== 'CREDIT')
+        .reduce((acc, p) => acc + p.amount, 0);
+      if (firstCompanyId != null && cashCollected > 0.009) {
         const categoryId = await this.findOrCreateVentesPosCategoryId(tx, firstCompanyId);
         await tx.financeEntry.create({
           data: {
             type: FinanceType.INCOME,
-            amount: total,
-            description: `Encaissement vente #${saleId}`,
+            amount: cashCollected,
+            description:
+              cashCollected + 0.01 < total
+                ? `Encaissement partiel vente #${saleId} (crédit)`
+                : `Encaissement vente #${saleId}`,
             userId: userId ?? null,
             categoryId,
             saleId,

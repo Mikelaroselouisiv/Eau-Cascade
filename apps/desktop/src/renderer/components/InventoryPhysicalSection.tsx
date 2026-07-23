@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import axios from 'axios';
 import {
   cancelInventorySession,
@@ -20,6 +21,7 @@ import type {
   InventorySessionListItem,
 } from '../types/api';
 import { formatQuantity } from '../utils/formatQuantity';
+import { formatDateTime, formatYmd } from '../utils/datetime';
 import { formatUserLabel } from '../utils/userAttribution';
 
 function formatApiError(err: unknown, fallback: string): string {
@@ -47,17 +49,6 @@ function kindLabel(k: InventorySessionKind | undefined): string {
       return 'Contrôle ponctuel';
     default:
       return 'Contrôle ponctuel';
-  }
-}
-
-function kindHint(k: InventorySessionKind): string {
-  switch (k) {
-    case 'OPENING':
-      return 'Comptage au début de la journée ou de la semaine, avant les ventes.';
-    case 'CLOSING':
-      return 'Comptage en fin de période pour clôturer la caisse et ajuster le stock.';
-    default:
-      return 'Inventaire hors ouverture/clôture (audit, contrôle surprise, etc.).';
   }
 }
 
@@ -93,14 +84,32 @@ type Props = {
   companies: CompanyListItem[];
   visible: boolean;
   onStockChanged: () => void;
+  /** Si fourni, l’historique des comptages est rendu dans ce nœud (en bas de l’onglet Stock). */
+  historyPortalTarget?: HTMLElement | null;
 };
 
-export function InventoryPhysicalSection({ companies, visible, onStockChanged }: Props) {
+type SheetProductRow = InventoryCountSheet['products'][number] & {
+  departmentId: number;
+  departmentName: string;
+};
+
+type CombinedSheet = {
+  generatedAt: string;
+  asOf: string | null;
+  products: SheetProductRow[];
+};
+
+export function InventoryPhysicalSection({
+  companies,
+  visible,
+  onStockChanged,
+  historyPortalTarget = null,
+}: Props) {
   const [companyId, setCompanyId] = useState<number | ''>('');
-  const [deptId, setDeptId] = useState<number | ''>('');
+  const [selectedDeptIds, setSelectedDeptIds] = useState<number[]>([]);
   const [departments, setDepartments] = useState<Awaited<ReturnType<typeof getDepartments>>>([]);
 
-  const [sheet, setSheet] = useState<InventoryCountSheet | null>(null);
+  const [sheet, setSheet] = useState<CombinedSheet | null>(null);
   const [sheetLoading, setSheetLoading] = useState(false);
 
   const [sessions, setSessions] = useState<InventorySessionListItem[]>([]);
@@ -112,48 +121,68 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
   const [exportingSheet, setExportingSheet] = useState(false);
   const [exportingHistory, setExportingHistory] = useState(false);
   const [sessionKind, setSessionKind] = useState<InventorySessionKind>('OPENING');
+  const [asOfDate, setAsOfDate] = useState('');
 
   useEffect(() => {
     if (companyId === '') {
       setDepartments([]);
-      setDeptId('');
+      setSelectedDeptIds([]);
       return;
     }
     void getDepartments(companyId).then((d) => {
       setDepartments(d);
-      setDeptId((prev) => (prev !== '' && d.some((x) => x.id === prev) ? prev : ''));
+      setSelectedDeptIds((prev) => prev.filter((id) => d.some((x) => x.id === id)));
     });
   }, [companyId]);
 
   const loadSheet = useCallback(async () => {
-    if (deptId === '') {
+    if (selectedDeptIds.length === 0) {
       setSheet(null);
       return;
     }
     setSheetLoading(true);
     setMsg('');
     try {
-      setSheet(await getInventoryCountSheet(deptId));
+      const asOf = asOfDate.trim() || undefined;
+      const sheets = await Promise.all(
+        selectedDeptIds.map((id) => getInventoryCountSheet(id, { asOf })),
+      );
+      const products: SheetProductRow[] = [];
+      let generatedAt = new Date().toISOString();
+      let asOfIso: string | null = null;
+      for (const s of sheets) {
+        generatedAt = s.generatedAt;
+        asOfIso = s.asOf ?? asOfIso;
+        const deptName = s.department.name;
+        const deptId = s.department.id;
+        for (const p of s.products) {
+          products.push({ ...p, departmentId: deptId, departmentName: deptName });
+        }
+      }
+      setSheet({ generatedAt, asOf: asOfIso, products });
     } catch (err) {
       setSheet(null);
       setMsg(formatApiError(err, 'Impossible de charger la feuille d’inventaire.'));
     } finally {
       setSheetLoading(false);
     }
-  }, [deptId]);
+  }, [selectedDeptIds, asOfDate]);
 
   const loadSessions = useCallback(async () => {
     setMsg('');
     try {
       const list = await listInventorySessions({
-        departmentId: deptId !== '' ? deptId : undefined,
-        companyId: deptId === '' && companyId !== '' ? companyId : undefined,
+        companyId: companyId !== '' ? companyId : undefined,
       });
-      setSessions(list);
+      const filtered =
+        selectedDeptIds.length > 0
+          ? list.filter((s) => selectedDeptIds.includes(s.departmentId))
+          : list;
+      setSessions(filtered);
     } catch (err) {
       setMsg(formatApiError(err, 'Chargement des sessions impossible.'));
     }
-  }, [companyId, deptId]);
+  }, [companyId, selectedDeptIds]);
 
   useEffect(() => {
     if (!visible) return;
@@ -173,6 +202,20 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
     return { done, total };
   }, [detail]);
 
+  function toggleDept(id: number) {
+    setSelectedDeptIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  function toggleAllDepts() {
+    if (selectedDeptIds.length === departments.length) {
+      setSelectedDeptIds([]);
+    } else {
+      setSelectedDeptIds(departments.map((d) => d.id));
+    }
+  }
+
   async function openSession(id: number) {
     setMsg('');
     setBusy(true);
@@ -187,26 +230,30 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
   }
 
   async function startCountSession() {
-    if (deptId === '') {
-      setMsg('Choisissez un département pour démarrer un comptage.');
-      return;
-    }
-    const existing = draftSessions.find((s) => s.departmentId === deptId);
-    if (existing) {
-      if (!confirm(`Un comptage est déjà ouvert pour ce département (#${existing.id}). L’ouvrir ?`)) {
-        return;
-      }
-      await openSession(existing.id);
+    if (selectedDeptIds.length === 0) {
+      setMsg('Choisissez au moins un département.');
       return;
     }
     setBusy(true);
     setMsg('');
     try {
-      const s = await createInventorySession({ departmentId: deptId, kind: sessionKind });
-      setDetail(s);
-      setView('detail');
+      const opened: InventorySessionDetail[] = [];
+      for (const deptId of selectedDeptIds) {
+        const existing = draftSessions.find((s) => s.departmentId === deptId);
+        if (existing) {
+          opened.push(await getInventorySession(existing.id));
+          continue;
+        }
+        opened.push(await createInventorySession({ departmentId: deptId, kind: sessionKind }));
+      }
       await loadSessions();
-      setMsg(`Session « ${kindLabel(sessionKind)} » ouverte. Saisissez les quantités comptées.`);
+      if (opened.length === 1) {
+        setDetail(opened[0]);
+        setView('detail');
+        setMsg(`Session « ${kindLabel(sessionKind)} » ouverte.`);
+      } else {
+        setMsg(`${opened.length} sessions ouvertes — reprenez-les dans l’historique.`);
+      }
     } catch (err) {
       setMsg(formatApiError(err, 'Impossible d’ouvrir une session.'));
     } finally {
@@ -215,19 +262,28 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
   }
 
   async function onExportSheet() {
-    if (deptId === '') {
-      setMsg('Choisissez un département pour exporter la feuille.');
+    if (selectedDeptIds.length === 0) {
+      setMsg('Choisissez au moins un département.');
       return;
     }
     setExportingSheet(true);
     setMsg('');
     try {
-      const blob = await exportInventoryCountSheetPdf(deptId);
       const co = companies.find((c) => c.id === companyId)?.name ?? 'entreprise';
-      const dept = departments.find((d) => d.id === deptId)?.name ?? 'dept';
-      const safe = `${co}_${dept}`.replace(/[^\w\- ]+/g, '').replace(/\s+/g, '_').slice(0, 50);
-      downloadBlob(blob, `feuille_inventaire_${safe}_${new Date().toISOString().slice(0, 10)}.pdf`);
-      setMsg('Feuille d’inventaire exportée (PDF).');
+      const asOfSuffix = asOfDate.trim() ? `_au_${asOfDate.trim()}` : `_${formatYmd(new Date())}`;
+      for (const deptId of selectedDeptIds) {
+        const blob = await exportInventoryCountSheetPdf(deptId, {
+          asOf: asOfDate.trim() || undefined,
+        });
+        const dept = departments.find((d) => d.id === deptId)?.name ?? 'dept';
+        const safe = `${co}_${dept}`.replace(/[^\w\- ]+/g, '').replace(/\s+/g, '_').slice(0, 50);
+        downloadBlob(blob, `feuille_inventaire_${safe}${asOfSuffix}.pdf`);
+      }
+      setMsg(
+        selectedDeptIds.length === 1
+          ? 'Feuille d’inventaire exportée (PDF).'
+          : `${selectedDeptIds.length} feuilles exportées (PDF).`,
+      );
     } catch (err) {
       setMsg(formatApiError(err, 'Export PDF impossible.'));
     } finally {
@@ -240,10 +296,10 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
     setMsg('');
     try {
       const blob = await exportInventorySessionsPdf({
-        departmentId: deptId !== '' ? deptId : undefined,
-        companyId: deptId === '' && companyId !== '' ? companyId : undefined,
+        companyId: companyId !== '' ? companyId : undefined,
+        departmentId: selectedDeptIds.length === 1 ? selectedDeptIds[0] : undefined,
       });
-      downloadBlob(blob, `historique_inventaires_${new Date().toISOString().slice(0, 10)}.pdf`);
+      downloadBlob(blob, `historique_inventaires_${formatYmd(new Date())}.pdf`);
       setMsg('Historique exporté (PDF).');
     } catch (err) {
       setMsg(formatApiError(err, 'Export historique impossible.'));
@@ -426,7 +482,7 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
           </div>
         ) : detail.completedAt ? (
           <p className="dept-hint" style={{ marginTop: '1rem' }}>
-            Clôturé le {new Date(detail.completedAt).toLocaleString('fr-FR')}
+            Clôturé le {formatDateTime(detail.completedAt)}
             {detail.completedBy ? ` · par ${formatUserLabel(detail.completedBy)}` : ''}
           </p>
         ) : null}
@@ -439,7 +495,7 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
       <section className="card">
         <h2>Inventaire physique</h2>
 
-        <div className="form-grid" style={{ maxWidth: '36rem', marginBottom: '1rem' }}>
+        <div className="form-grid" style={{ maxWidth: '42rem', marginBottom: '1rem' }}>
           <label>
             Entreprise
             <select
@@ -447,7 +503,7 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
               onChange={(e) => {
                 const v = e.target.value;
                 setCompanyId(v ? Number(v) : '');
-                setDeptId('');
+                setSelectedDeptIds([]);
               }}
             >
               <option value="">— Choisir</option>
@@ -459,32 +515,72 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
             </select>
           </label>
           <label>
-            Département
-            <select
-              value={deptId === '' ? '' : String(deptId)}
-              onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : '')}
-              disabled={companyId === ''}
-            >
-              <option value="">
-                {companyId === '' ? '— Choisir une entreprise d’abord —' : '— Choisir —'}
-              </option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+            Stock au
+            <input
+              type="date"
+              value={asOfDate}
+              max={formatYmd(new Date())}
+              onChange={(e) => setAsOfDate(e.target.value)}
+            />
           </label>
+          {asOfDate ? (
+            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAsOfDate('')}>
+                Stock actuel
+              </button>
+            </div>
+          ) : null}
         </div>
 
+        {companyId !== '' ? (
+          <div style={{ marginBottom: '1rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.75rem',
+                alignItems: 'center',
+                marginBottom: '0.35rem',
+              }}
+            >
+              <strong>Départements</strong>
+              {departments.length > 0 ? (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={toggleAllDepts}>
+                  {selectedDeptIds.length === departments.length ? 'Tout décocher' : 'Tout cocher'}
+                </button>
+              ) : null}
+            </div>
+            {departments.length === 0 ? (
+              <p className="info-text" style={{ margin: 0 }}>
+                Aucun département.
+              </p>
+            ) : (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexWrap: 'wrap', gap: '0.5rem 1.25rem' }}>
+                {departments.map((d) => (
+                  <li key={d.id}>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={selectedDeptIds.includes(d.id)}
+                        onChange={() => toggleDept(d.id)}
+                      />
+                      {d.name}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+
         {msg ? (
-          <p className={/validé|exporté|exportée|ouverte|mis à jour/i.test(msg) ? 'info-text' : 'error-text'}>
+          <p className={/validé|exporté|exportée|ouverte|mis à jour|sessions ouvertes/i.test(msg) ? 'info-text' : 'error-text'}>
             {msg}
           </p>
         ) : null}
 
-        {deptId === '' ? null : sheetLoading ? (
-          <p className="info-text">Chargement de la feuille…</p>
+        {selectedDeptIds.length === 0 ? null : sheetLoading ? (
+          <p className="info-text">Chargement…</p>
         ) : sheet ? (
           <>
             <fieldset
@@ -497,22 +593,17 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
               }}
             >
               <legend style={{ fontWeight: 600, padding: '0 0.25rem' }}>Type de comptage</legend>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
                 {(['OPENING', 'CLOSING', 'AD_HOC'] as const).map((k) => (
-                  <label key={k} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', cursor: 'pointer' }}>
+                  <label key={k} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', cursor: 'pointer' }}>
                     <input
                       type="radio"
                       name="sessionKind"
                       value={k}
                       checked={sessionKind === k}
                       onChange={() => setSessionKind(k)}
-                      style={{ marginTop: '0.2rem' }}
                     />
-                    <span>
-                      <strong>{kindLabel(k)}</strong>
-                      <br />
-                      <small className="dept-hint">{kindHint(k)}</small>
-                    </span>
+                    {kindLabel(k)}
                   </label>
                 ))}
               </div>
@@ -544,8 +635,8 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
                 Démarrer le comptage
               </button>
               <span className="dept-hint" style={{ margin: 0 }}>
-                {sheet.products.length} produit(s) · généré{' '}
-                {new Date(sheet.generatedAt).toLocaleString('fr-FR')}
+                {sheet.products.length} produit(s)
+                {sheet.asOf ? ` · ${formatDateTime(sheet.asOf)}` : ''}
               </span>
             </div>
 
@@ -554,23 +645,25 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
                 <thead>
                   <tr>
                     <th>#</th>
+                    {selectedDeptIds.length > 1 ? <th>Département</th> : null}
                     <th>Produit</th>
                     <th>SKU</th>
                     <th>Unité</th>
-                    <th>Stock système</th>
-                    <th>Compté (terrain)</th>
+                    <th>Stock</th>
+                    <th>Compté</th>
                     <th>Écart</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sheet.products.length === 0 ? (
                     <tr>
-                      <td colSpan={7}>Aucun produit avec stock suivi dans ce département.</td>
+                      <td colSpan={selectedDeptIds.length > 1 ? 8 : 7}>Aucun produit avec stock suivi.</td>
                     </tr>
                   ) : (
                     sheet.products.map((p, i) => (
-                      <tr key={p.id}>
+                      <tr key={`${p.departmentId}-${p.id}`}>
                         <td>{i + 1}</td>
+                        {selectedDeptIds.length > 1 ? <td>{p.departmentName}</td> : null}
                         <td>
                           <strong>{p.name}</strong>
                         </td>
@@ -595,6 +688,8 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
         ) : null}
       </section>
 
+      {(() => {
+        const historyCard: ReactNode = (
       <section className="card" style={{ marginTop: '1rem' }}>
         <div
           style={{
@@ -610,7 +705,7 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
           <button
             type="button"
             className="btn btn-secondary btn-sm"
-            disabled={exportingHistory || (companyId === '' && deptId === '')}
+            disabled={exportingHistory || companyId === ''}
             onClick={() => void onExportHistory()}
           >
             {exportingHistory ? 'Export…' : 'Exporter l’historique (PDF)'}
@@ -620,8 +715,7 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
         {draftSessions.length > 0 ? (
           <p className="info-text">
             {draftSessions.length} comptage(s) en cours
-            {deptId !== '' ? ' pour ce département' : ''}.
-            {draftSessions.slice(0, 3).map((s) => (
+            {draftSessions.slice(0, 5).map((s) => (
               <button
                 key={s.id}
                 type="button"
@@ -629,7 +723,7 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
                 style={{ marginLeft: '0.35rem' }}
                 onClick={() => void openSession(s.id)}
               >
-                Reprendre #{s.id}
+                #{s.id} {s.department.name}
               </button>
             ))}
           </p>
@@ -653,15 +747,15 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
               {sessions.length === 0 ? (
                 <tr>
                   <td colSpan={8}>
-                    {companyId === '' && deptId === ''
-                      ? 'Choisissez une entreprise ou un département pour voir l’historique.'
+                    {companyId === ''
+                      ? 'Choisissez une entreprise.'
                       : 'Aucune session pour ce filtre.'}
                   </td>
                 </tr>
               ) : (
                 sessions.map((s) => (
                   <tr key={s.id}>
-                    <td>{new Date(s.createdAt).toLocaleString('fr-FR')}</td>
+                    <td>{formatDateTime(s.createdAt)}</td>
                     <td>{kindLabel(s.kind)}</td>
                     <td>
                       {s.department.company.name} — {s.department.name}
@@ -686,6 +780,9 @@ export function InventoryPhysicalSection({ companies, visible, onStockChanged }:
           </table>
         </div>
       </section>
+        );
+        return historyPortalTarget ? createPortal(historyCard, historyPortalTarget) : historyCard;
+      })()}
     </>
   );
 }

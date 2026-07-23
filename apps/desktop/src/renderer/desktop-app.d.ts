@@ -7,6 +7,7 @@ declare global {
       printReceipt?: (saleData: {
         /** Pour nom de fichier PDF (réimpression / export). */
         saleId?: number;
+        documentType?: 'RECEIPT' | 'DISBURSEMENT_ORDER';
         companyName: string;
         companyPhone?: string | null;
         address: string;
@@ -25,6 +26,11 @@ declare global {
         autoCut?: boolean;
         isTest?: boolean;
         previewSampleBody?: string | null;
+        description?: string;
+        amount?: number;
+        entryDate?: string;
+        entryId?: number;
+        preparedBy?: string;
       }) => Promise<{ ok: boolean; mode: string; reason?: string; ticketText?: string }>;
       listPrinters?: () => Promise<Array<{ name: string }>>;
       /** SQLite local (file d’attente ventes + cache catalogue). */

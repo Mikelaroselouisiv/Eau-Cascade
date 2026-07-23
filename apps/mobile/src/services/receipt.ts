@@ -2,6 +2,7 @@ import { getCompany, getPrinterSettings } from './api';
 import { getDb } from './db';
 import type { CompanyProfile, DepartmentPrinterSettings } from '../types/api';
 import type { ReceiptItem, SaleReceiptData } from './escpos';
+import { formatDateTime } from '../utils/datetime';
 
 const PRINTER_CACHE_KEY = 'printer_settings_backend';
 const COMPANY_CACHE_KEY = 'company_profile';
@@ -61,7 +62,7 @@ export async function buildSaleReceiptData(params: {
   ]);
 
   return {
-    dateTime: new Date().toLocaleString(),
+    dateTime: formatDateTime(new Date()),
     receiptHeaderText: printer?.receiptHeaderText,
     companyName: company?.name ?? 'Entreprise',
     address: company?.address,

@@ -33,6 +33,22 @@ const ESC_INIT = [0x1b, 0x40];
 const ESC_ALIGN_LEFT = [0x1b, 0x61, 0x00];
 const GS_CUT = [0x1d, 0x56, 0x00];
 
+const APP_TIMEZONE = 'America/Port-au-Prince';
+
+function formatDateTimePap(value: Date | string | number = new Date()): string {
+  const d = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('fr-HT', {
+    timeZone: APP_TIMEZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
+}
+
 function formatMoney(value: number | undefined): string {
   return Number(value ?? 0).toFixed(2);
 }
@@ -45,7 +61,7 @@ function clipLine(text: unknown, lineWidth: number): string {
 export function buildTicketText(saleData: SaleReceiptData, width: 58 | 80 = 58): string {
   const lineWidth = width === 80 ? 48 : 32;
   const separator = '-'.repeat(lineWidth);
-  const date = saleData.dateTime ?? new Date().toLocaleString();
+  const date = saleData.dateTime ?? formatDateTimePap(new Date());
   const lines: string[] = [];
 
   const headerRaw = (saleData.receiptHeaderText || '').trim();

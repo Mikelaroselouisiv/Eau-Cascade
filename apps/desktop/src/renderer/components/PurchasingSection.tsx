@@ -19,6 +19,7 @@ import type {
 import { MoneyField } from './MoneyField';
 import { stockPackagingLabel } from '../utils/packagingDisplay';
 import { formatQuantity } from '../utils/formatQuantity';
+import { formatDateTime } from '../utils/datetime';
 import { formatUserLabel } from '../utils/userAttribution';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { useAuth } from '../context/AuthContext';
@@ -480,7 +481,7 @@ export function PurchasingSection({ visible, companyId, departments, products, o
                   o.status !== 'CLOSED';
                 return (
                   <tr key={o.id} className={activeOrderId === o.id ? 'row-active' : undefined}>
-                    <td>{new Date(o.createdAt).toLocaleString()}</td>
+                    <td>{formatDateTime(o.createdAt)}</td>
                     <td>{o.reference ?? '—'}</td>
                     <td>{o.supplierName ?? '—'}</td>
                     <td>{o.department.name}</td>
@@ -650,7 +651,7 @@ export function PurchasingSection({ visible, companyId, departments, products, o
                   {activeOrder.goodsReceipts.map((gr) => (
                     <li key={gr.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <span>
-                        {new Date(gr.receivedAt).toLocaleString()} — {formatUserLabel(gr.createdBy)} —{' '}
+                        {formatDateTime(gr.receivedAt)} — {formatUserLabel(gr.createdBy)} —{' '}
                         {gr.lines.length} ligne(s)
                       </span>
                       {isAdmin ? (

@@ -79,8 +79,8 @@ export function createPdfDoc(opts?: {
     margin: opts?.margin ?? 42,
     layout: opts?.landscape ? 'landscape' : 'portrait',
     info: {
-      Producer: 'POS Frères Baziles',
-      Creator: 'POS Frères Baziles',
+      Producer: 'POS Entreprise Israel',
+      Creator: 'POS Entreprise Israel',
     },
   });
 }
@@ -125,7 +125,7 @@ export async function drawReportHeader(
     }
   }
 
-  const company = opts.brand?.companyName?.trim() || 'POS Frères Baziles';
+  const company = opts.brand?.companyName?.trim() || 'POS Entreprise Israel';
   const headerTextW = contentW - (textLeft - margin);
   doc
     .fillColor(COLORS.accent)

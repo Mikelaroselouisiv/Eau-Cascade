@@ -31,6 +31,10 @@ export const PERMISSIONS = [
   { code: 'roles.manage', label: 'Gérer les rôles et autorisations' },
   { code: 'audit.view', label: 'Journal d’audit' },
   { code: 'payments.manage', label: 'Gestion des paiements' },
+  { code: 'credit.view', label: 'Consulter le crédit clients' },
+  { code: 'credit.manage', label: 'Gérer le crédit clients (ventes & remboursements)' },
+  { code: 'banks.view', label: 'Consulter les comptes bancaires' },
+  { code: 'banks.manage', label: 'Gérer banques, comptes et transactions' },
   { code: 'stores.manage', label: 'Gérer magasins et caisses' },
 ] as const;
 
@@ -72,6 +76,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'printer.manage',
     'recipes.manage',
     'users.view',
+    'credit.view',
+    'credit.manage',
+    'banks.view',
+    'banks.manage',
   ],
   CASHIER: [
     'pos.use',

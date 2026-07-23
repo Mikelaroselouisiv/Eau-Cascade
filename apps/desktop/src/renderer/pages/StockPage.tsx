@@ -26,6 +26,7 @@ import { MoneyField } from '../components/MoneyField';
 import { PurchasingSection } from '../components/PurchasingSection';
 import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
+import { formatYmd } from '../utils/datetime';
 import {
   stockPackagingLabel,
 } from '../utils/packagingDisplay';
@@ -71,15 +72,16 @@ function compareProductsByCompanyDept(a: Product, b: Product): number {
 
 type TierDraft = { minQty: string; unitPrice: string };
 
-const DEFAULT_PRODUCT_CARD_COLOR = '#0ea5e9';
+const DEFAULT_PRODUCT_CARD_COLOR = '#7a5230';
 const PRODUCT_CARD_COLOR_PRESETS = [
-  '#0ea5e9',
-  '#10b981',
-  '#f59e0b',
-  '#ec4899',
-  '#8b5cf6',
-  '#f97316',
-  '#ef4444',
+  '#7a5230',
+  '#a67c52',
+  '#8b6914',
+  '#6b4423',
+  '#c4a574',
+  '#5c4033',
+  '#9a7b4f',
+  '#b42318',
 ];
 
 function ProductCardColorPicker({
@@ -141,6 +143,10 @@ export function StockPage() {
   const [catalogFilterCompanyId, setCatalogFilterCompanyId] = useState<number | ''>('');
   const [catalogFilterDeptId, setCatalogFilterDeptId] = useState<number | ''>('');
   const [catalogFilterDepartments, setCatalogFilterDepartments] = useState<Department[]>([]);
+  const [catalogAsOf, setCatalogAsOf] = useState('');
+  const [catalogAsOfApplied, setCatalogAsOfApplied] = useState('');
+  const [catalogStockById, setCatalogStockById] = useState<Map<number, number> | null>(null);
+  const [catalogAsOfLoading, setCatalogAsOfLoading] = useState(false);
   const [addProductOpen, setAddProductOpen] = useState(false);
 
   const isAdmin = can(['ADMIN']);
@@ -184,7 +190,37 @@ export function StockPage() {
     setProducts(p);
     setCompanies(co);
     if (co.length && companyId === '') setCompanyId(co[0].id);
+    if (catalogAsOfApplied.trim()) {
+      const hist = await getProducts(undefined, { asOf: catalogAsOfApplied.trim() });
+      setCatalogStockById(new Map(hist.map((x) => [x.id, Number(x.stock)])));
+    }
   };
+
+  async function applyCatalogAsOf() {
+    const asOf = catalogAsOf.trim();
+    if (!asOf) {
+      setCatalogAsOfApplied('');
+      setCatalogStockById(null);
+      return;
+    }
+    setCatalogAsOfLoading(true);
+    setMsg('');
+    try {
+      const hist = await getProducts(undefined, { asOf });
+      setCatalogStockById(new Map(hist.map((x) => [x.id, Number(x.stock)])));
+      setCatalogAsOfApplied(asOf);
+    } catch (err) {
+      setMsg(formatApiError(err, 'Impossible de charger le stock rétrospectif.'), { persist: true });
+    } finally {
+      setCatalogAsOfLoading(false);
+    }
+  }
+
+  function clearCatalogAsOf() {
+    setCatalogAsOf('');
+    setCatalogAsOfApplied('');
+    setCatalogStockById(null);
+  }
 
   useEffect(() => {
     if (companyId === '') {
@@ -577,7 +613,7 @@ export function StockPage() {
             Produits ({catalogFilteredSorted.length}
             {catalogFilteredSorted.length !== products.length ? ` / ${products.length}` : ''})
           </h2>
-          <div className="form-grid" style={{ marginBottom: '1rem', maxWidth: '36rem' }}>
+          <div className="form-grid" style={{ marginBottom: '1rem', maxWidth: '42rem' }}>
             <label>
               Filtrer par entreprise
               <select
@@ -611,6 +647,30 @@ export function StockPage() {
                 ))}
               </select>
             </label>
+            <label>
+              Stock au
+              <input
+                type="date"
+                value={catalogAsOf}
+                max={formatYmd(new Date())}
+                onChange={(e) => setCatalogAsOf(e.target.value)}
+              />
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={catalogAsOfLoading || !catalogAsOf.trim()}
+                onClick={() => void applyCatalogAsOf()}
+              >
+                {catalogAsOfLoading ? '…' : 'Appliquer'}
+              </button>
+              {catalogAsOfApplied ? (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={clearCatalogAsOf}>
+                  Stock actuel
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="table-wrap">
             <table className="data-table">
@@ -640,6 +700,10 @@ export function StockPage() {
                 ) : (
                   catalogFilteredSorted.map((p) => {
                     const dp = defaultUnitPrice(p);
+                    const displayStock =
+                      catalogStockById != null && p.trackStock && !p.isService
+                        ? (catalogStockById.get(p.id) ?? Number(p.stock))
+                        : Number(p.stock);
                     return (
                       <tr key={p.id}>
                         <td>{p.company?.name ?? (p.companyId != null ? `#${p.companyId}` : '—')}</td>
@@ -653,7 +717,7 @@ export function StockPage() {
                         </td>
                         <td>{p.sku ?? '—'}</td>
                         <td className="journal-amt">{dp != null ? formatMoney(dp) : '—'}</td>
-                        <td>{formatQuantity(Number(p.stock))}</td>
+                        <td>{formatQuantity(displayStock)}</td>
                         <td className="table-actions catalog-table-actions">
                           <button
                             type="button"

@@ -1,7 +1,7 @@
 {
-  "appId": "com.freresbasiles.pos.desktop.remote",
-  "productName": "POS Freres Basiles Remote",
-  "artifactName": "POS-Freres-Basiles-Remote-${version}.${ext}",
+  "appId": "com.entrepriseisrael.pos.desktop.remote",
+  "productName": "POS Entreprise Israel Remote",
+  "artifactName": "POS-Entreprise-Israel-Remote-${version}.${ext}",
   "copyright": "Copyright © 2026",
   "icon": "build/icon.ico",
   "directories": {

@@ -30,10 +30,12 @@ import {
   updateUser,
 } from '../services/api';
 import { buildTicketPreviewText } from '../utils/ticketPreview';
+import { buildDisbursementOrderPreviewText } from '../utils/disbursementOrderPreview';
 import { formatRegisterCode } from '../utils/registerDisplay';
 import { formatRoleLabel } from '../utils/roleLabels';
 import { formatQuantity } from '../utils/formatQuantity';
 import { PasswordField } from '../components/PasswordField';
+import { BanksConfigSection } from '../components/BanksConfigSection';
 import { useAuth } from '../context/AuthContext';
 import {
   type AutoClearMessageOptions,
@@ -74,7 +76,8 @@ function formatApiError(err: unknown, fallback: string): string {
   return fallback;
 }
 
-type Tab = 'company' | 'printer' | 'packaging' | 'users' | 'roles';
+type Tab = 'company' | 'printer' | 'packaging' | 'banques' | 'users' | 'roles';
+type PrinterDocType = 'RECEIPT' | 'DISBURSEMENT_ORDER';
 
 export function ConfigPage() {
   const { can } = useAuth();
@@ -88,6 +91,7 @@ export function ConfigPage() {
 
   const [printerCompanyId, setPrinterCompanyId] = useState<number | ''>('');
   const [printerDepartmentId, setPrinterDepartmentId] = useState<number | ''>('');
+  const [printerDocType, setPrinterDocType] = useState<PrinterDocType>('RECEIPT');
   const [printerForm, setPrinterForm] = useState<DepartmentPrinterSettings | null>(null);
   const [printerLoading, setPrinterLoading] = useState(false);
   const [printersList, setPrintersList] = useState<Array<{ name: string }>>([]);
@@ -131,6 +135,7 @@ export function ConfigPage() {
           ...p,
           paperWidth: p.paperWidth === 80 ? 80 : 58,
           deviceName: p.deviceName ?? '',
+          showLogoOnDisbursement: p.showLogoOnDisbursement !== false,
         });
       })
       .catch((err: unknown) => {
@@ -178,6 +183,27 @@ export function ConfigPage() {
       .map((s) => (s || '').trim())
       .filter(Boolean)
       .join(', ');
+    if (printerDocType === 'DISBURSEMENT_ORDER') {
+      return buildDisbursementOrderPreviewText({
+        paperWidth: printerForm.paperWidth === 80 ? 80 : 58,
+        companyName: selectedPrinterCompany.name,
+        companyPhone: selectedPrinterCompany.phone ?? null,
+        address: addr,
+        headerText: printerForm.disbursementHeaderText,
+        footerText: printerForm.disbursementFooterText,
+        showLogo: printerForm.showLogoOnDisbursement !== false,
+        logoUrl: printerForm.disbursementLogoUrl,
+        isTest: true,
+        previewSampleBody:
+          (printerForm.disbursementPreviewSampleBody || '').trim() ||
+          'Fournitures bureau\nMontant exemple',
+        description: 'Dépense exemple',
+        amount: 1500,
+        entryDate: '2026-07-23',
+        entryId: 1,
+        preparedBy: 'Admin',
+      });
+    }
     return buildTicketPreviewText({
       paperWidth: printerForm.paperWidth === 80 ? 80 : 58,
       companyName: selectedPrinterCompany.name,
@@ -195,7 +221,7 @@ export function ConfigPage() {
       total: 1250.5,
       paymentMode: 'TEST',
     });
-  }, [printerForm, selectedPrinterCompany]);
+  }, [printerForm, selectedPrinterCompany, printerDocType]);
 
   async function savePrinter(e: FormEvent) {
     e.preventDefault();
@@ -212,11 +238,17 @@ export function ConfigPage() {
         receiptFooterText: printerForm.receiptFooterText ?? undefined,
         receiptLogoUrl: printerForm.receiptLogoUrl ?? '',
         previewSampleBody: printerForm.previewSampleBody ?? undefined,
+        showLogoOnDisbursement: printerForm.showLogoOnDisbursement !== false,
+        disbursementHeaderText: printerForm.disbursementHeaderText ?? undefined,
+        disbursementFooterText: printerForm.disbursementFooterText ?? undefined,
+        disbursementLogoUrl: printerForm.disbursementLogoUrl ?? '',
+        disbursementPreviewSampleBody: printerForm.disbursementPreviewSampleBody ?? undefined,
       });
       setPrinterForm({
         ...updated,
         paperWidth: updated.paperWidth === 80 ? 80 : 58,
         deviceName: updated.deviceName ?? '',
+        showLogoOnDisbursement: updated.showLogoOnDisbursement !== false,
       });
       setMsg('Profil imprimante enregistré pour ce département.');
     } catch {
@@ -240,10 +272,49 @@ export function ConfigPage() {
       .map((s) => (s || '').trim())
       .filter(Boolean)
       .join(', ');
-    const sample =
-      (printerForm.previewSampleBody || '').trim() ||
-      'Article exemple A  x2\nArticle exemple B  x1';
     try {
+      if (printerDocType === 'DISBURSEMENT_ORDER') {
+        const sample =
+          (printerForm.disbursementPreviewSampleBody || '').trim() ||
+          'Fournitures bureau\nMontant exemple';
+        const r = await window.desktopApp.printReceipt({
+          documentType: 'DISBURSEMENT_ORDER',
+          companyName: selectedPrinterCompany.name,
+          companyPhone: selectedPrinterCompany.phone ?? null,
+          address: addr,
+          cashier: 'Test',
+          items: [],
+          total: 1500,
+          paymentMode: 'Dépense',
+          paperWidth: printerForm.paperWidth === 80 ? 80 : 58,
+          printerName: printerForm.deviceName || undefined,
+          receiptHeaderText: printerForm.disbursementHeaderText ?? null,
+          receiptFooterText: printerForm.disbursementFooterText ?? null,
+          receiptLogoUrl: printerForm.disbursementLogoUrl ?? null,
+          showLogoOnReceipt: printerForm.showLogoOnDisbursement !== false,
+          autoCut: printerForm.autoCut,
+          isTest: true,
+          previewSampleBody: sample,
+          description: 'Dépense exemple',
+          amount: 1500,
+          entryDate: '2026-07-23',
+          entryId: 1,
+          preparedBy: 'Admin',
+        });
+        if (r.ok) {
+          setMsg(
+            r.mode === 'escpos'
+              ? 'Test ordre de décaissement envoyé à l’imprimante thermique.'
+              : 'Test ordre de décaissement envoyé via Windows.',
+          );
+        } else {
+          setMsg(r.reason || 'Échec impression test.', { persist: true });
+        }
+        return;
+      }
+      const sample =
+        (printerForm.previewSampleBody || '').trim() ||
+        'Article exemple A  x2\nArticle exemple B  x1';
       const r = await window.desktopApp.printReceipt({
         companyName: selectedPrinterCompany.name,
         companyPhone: selectedPrinterCompany.phone ?? null,
@@ -299,6 +370,7 @@ export function ConfigPage() {
             ['company', 'Entreprise'],
             ['printer', 'Imprimante'],
             ['packaging', 'Conditionnement'],
+            ['banques', 'Banques'],
             ...(isAdmin ? [['users', 'Utilisateurs'] as const, ['roles', 'Rôles & autorisations'] as const] : []),
           ] as const
         ).map(([id, label]) => (
@@ -324,7 +396,7 @@ export function ConfigPage() {
 
       {tab === 'printer' && (
         <div className="card form-grid">
-          <h2>Imprimante et ticket (par département)</h2>
+          <h2>Imprimante (par département)</h2>
           <label>
             Entreprise
             <select
@@ -359,6 +431,20 @@ export function ConfigPage() {
                   {d.name}
                 </option>
               ))}
+            </select>
+          </label>
+          <label>
+            Type de document
+            <select
+              value={printerDocType}
+              onChange={(e) =>
+                setPrinterDocType(
+                  e.target.value === 'DISBURSEMENT_ORDER' ? 'DISBURSEMENT_ORDER' : 'RECEIPT',
+                )
+              }
+            >
+              <option value="RECEIPT">Reçu de vente</option>
+              <option value="DISBURSEMENT_ORDER">Ordre de décaissement</option>
             </select>
           </label>
 
@@ -426,94 +512,199 @@ export function ConfigPage() {
                 />
                 Coupe automatique (ESC/POS)
               </label>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={printerForm.showLogoOnReceipt}
-                  onChange={(e) =>
-                    setPrinterForm({ ...printerForm, showLogoOnReceipt: e.target.checked })
-                  }
-                />
-                Afficher le logo sur le ticket
-              </label>
 
-              <h3 style={{ gridColumn: '1 / -1', margin: '1rem 0 0' }}>Mise en page du ticket</h3>
-              <label style={{ gridColumn: '1 / -1' }}>
-                En-tête (plusieurs lignes possibles)
-                <textarea
-                  rows={3}
-                  value={printerForm.receiptHeaderText ?? ''}
-                  onChange={(e) =>
-                    setPrinterForm({ ...printerForm, receiptHeaderText: e.target.value })
-                  }
-                  placeholder={`Sinon : nom de l’entreprise (${selectedPrinterCompany.name})`}
-                />
-              </label>
-              <label style={{ gridColumn: '1 / -1' }}>
-                Pied de page
-                <textarea
-                  rows={3}
-                  value={printerForm.receiptFooterText ?? ''}
-                  onChange={(e) =>
-                    setPrinterForm({ ...printerForm, receiptFooterText: e.target.value })
-                  }
-                  placeholder="Ex. Merci — TVA incluse — Site web…"
-                />
-              </label>
-              <label style={{ gridColumn: '1 / -1' }}>
-                Logo ticket (image)
-                <input
-                  type="file"
-                  className="input-file"
-                  accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    if (!file.type.startsWith('image/')) {
-                      setMsg('Choisissez une image (PNG, JPEG, WebP ou GIF).', { persist: true });
-                      e.target.value = '';
-                      return;
-                    }
-                    if (file.size > 900 * 1024) {
-                      setMsg('Image trop volumineuse (max. ~900 Ko).', { persist: true });
-                      e.target.value = '';
-                      return;
-                    }
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      if (typeof reader.result === 'string') {
-                        setPrinterForm((f) =>
-                          f ? { ...f, receiptLogoUrl: reader.result as string } : f,
-                        );
+              {printerDocType === 'RECEIPT' ? (
+                <>
+                  <h3 style={{ gridColumn: '1 / -1', margin: '1rem 0 0' }}>Mise en page — reçu de vente</h3>
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={printerForm.showLogoOnReceipt}
+                      onChange={(e) =>
+                        setPrinterForm({ ...printerForm, showLogoOnReceipt: e.target.checked })
                       }
-                    };
-                    reader.readAsDataURL(file);
-                  }}
-                />
-              </label>
-              {printerForm.receiptLogoUrl ? (
-                <div className="logo-preview-block" style={{ gridColumn: '1 / -1' }}>
-                  <img src={printerForm.receiptLogoUrl} alt="Aperçu logo ticket" />
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => setPrinterForm((f) => (f ? { ...f, receiptLogoUrl: null } : f))}
-                  >
-                    Retirer le logo
-                  </button>
-                </div>
-              ) : null}
-              <label style={{ gridColumn: '1 / -1' }}>
-                Texte de test / prévisualisation (corps fictif)
-                <textarea
-                  rows={4}
-                  value={printerForm.previewSampleBody ?? ''}
-                  onChange={(e) =>
-                    setPrinterForm({ ...printerForm, previewSampleBody: e.target.value })
-                  }
-                  placeholder="Lignes affichées à la place du détail de vente pour les essais…"
-                />
-              </label>
+                    />
+                    Afficher le logo
+                  </label>
+                  <label style={{ gridColumn: '1 / -1' }}>
+                    En-tête (plusieurs lignes possibles)
+                    <textarea
+                      rows={3}
+                      value={printerForm.receiptHeaderText ?? ''}
+                      onChange={(e) =>
+                        setPrinterForm({ ...printerForm, receiptHeaderText: e.target.value })
+                      }
+                      placeholder={`Sinon : nom de l’entreprise (${selectedPrinterCompany.name})`}
+                    />
+                  </label>
+                  <label style={{ gridColumn: '1 / -1' }}>
+                    Pied de page
+                    <textarea
+                      rows={3}
+                      value={printerForm.receiptFooterText ?? ''}
+                      onChange={(e) =>
+                        setPrinterForm({ ...printerForm, receiptFooterText: e.target.value })
+                      }
+                      placeholder="Ex. Merci — TVA incluse — Site web…"
+                    />
+                  </label>
+                  <label style={{ gridColumn: '1 / -1' }}>
+                    Logo ticket (image)
+                    <input
+                      type="file"
+                      className="input-file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (!file.type.startsWith('image/')) {
+                          setMsg('Choisissez une image (PNG, JPEG, WebP ou GIF).', { persist: true });
+                          e.target.value = '';
+                          return;
+                        }
+                        if (file.size > 900 * 1024) {
+                          setMsg('Image trop volumineuse (max. ~900 Ko).', { persist: true });
+                          e.target.value = '';
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          if (typeof reader.result === 'string') {
+                            setPrinterForm((f) =>
+                              f ? { ...f, receiptLogoUrl: reader.result as string } : f,
+                            );
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
+                  {printerForm.receiptLogoUrl ? (
+                    <div className="logo-preview-block" style={{ gridColumn: '1 / -1' }}>
+                      <img src={printerForm.receiptLogoUrl} alt="Aperçu logo ticket" />
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() =>
+                          setPrinterForm((f) => (f ? { ...f, receiptLogoUrl: null } : f))
+                        }
+                      >
+                        Retirer le logo
+                      </button>
+                    </div>
+                  ) : null}
+                  <label style={{ gridColumn: '1 / -1' }}>
+                    Texte de test / prévisualisation (corps fictif)
+                    <textarea
+                      rows={4}
+                      value={printerForm.previewSampleBody ?? ''}
+                      onChange={(e) =>
+                        setPrinterForm({ ...printerForm, previewSampleBody: e.target.value })
+                      }
+                      placeholder="Lignes affichées à la place du détail de vente pour les essais…"
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <h3 style={{ gridColumn: '1 / -1', margin: '1rem 0 0' }}>
+                    Mise en page — ordre de décaissement
+                  </h3>
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={printerForm.showLogoOnDisbursement !== false}
+                      onChange={(e) =>
+                        setPrinterForm({
+                          ...printerForm,
+                          showLogoOnDisbursement: e.target.checked,
+                        })
+                      }
+                    />
+                    Afficher le logo
+                  </label>
+                  <label style={{ gridColumn: '1 / -1' }}>
+                    En-tête (plusieurs lignes possibles)
+                    <textarea
+                      rows={3}
+                      value={printerForm.disbursementHeaderText ?? ''}
+                      onChange={(e) =>
+                        setPrinterForm({ ...printerForm, disbursementHeaderText: e.target.value })
+                      }
+                      placeholder={`Sinon : nom de l’entreprise (${selectedPrinterCompany.name})`}
+                    />
+                  </label>
+                  <label style={{ gridColumn: '1 / -1' }}>
+                    Pied de page
+                    <textarea
+                      rows={3}
+                      value={printerForm.disbursementFooterText ?? ''}
+                      onChange={(e) =>
+                        setPrinterForm({ ...printerForm, disbursementFooterText: e.target.value })
+                      }
+                    />
+                  </label>
+                  <label style={{ gridColumn: '1 / -1' }}>
+                    Logo (image)
+                    <input
+                      type="file"
+                      className="input-file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (!file.type.startsWith('image/')) {
+                          setMsg('Choisissez une image (PNG, JPEG, WebP ou GIF).', { persist: true });
+                          e.target.value = '';
+                          return;
+                        }
+                        if (file.size > 900 * 1024) {
+                          setMsg('Image trop volumineuse (max. ~900 Ko).', { persist: true });
+                          e.target.value = '';
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          if (typeof reader.result === 'string') {
+                            setPrinterForm((f) =>
+                              f ? { ...f, disbursementLogoUrl: reader.result as string } : f,
+                            );
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
+                  {printerForm.disbursementLogoUrl ? (
+                    <div className="logo-preview-block" style={{ gridColumn: '1 / -1' }}>
+                      <img src={printerForm.disbursementLogoUrl} alt="Aperçu logo ordre" />
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() =>
+                          setPrinterForm((f) => (f ? { ...f, disbursementLogoUrl: null } : f))
+                        }
+                      >
+                        Retirer le logo
+                      </button>
+                    </div>
+                  ) : null}
+                  <label style={{ gridColumn: '1 / -1' }}>
+                    Texte de test / prévisualisation (corps fictif)
+                    <textarea
+                      rows={4}
+                      value={printerForm.disbursementPreviewSampleBody ?? ''}
+                      onChange={(e) =>
+                        setPrinterForm({
+                          ...printerForm,
+                          disbursementPreviewSampleBody: e.target.value,
+                        })
+                      }
+                      placeholder="Lignes affichées pour les essais…"
+                    />
+                  </label>
+                </>
+              )}
 
               <div style={{ gridColumn: '1 / -1' }}>
                 <p className="dept-hint" style={{ marginBottom: '0.35rem' }}>
@@ -557,6 +748,10 @@ export function ConfigPage() {
       )}
 
       {tab === 'packaging' && <PackagingSection />}
+
+      {tab === 'banques' && (
+        <BanksConfigSection onMessage={(m, o) => setMsg(m, o)} />
+      )}
 
       {tab === 'users' && isAdmin && (
         <UsersSection

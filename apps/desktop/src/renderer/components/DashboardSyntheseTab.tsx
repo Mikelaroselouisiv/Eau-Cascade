@@ -52,40 +52,9 @@ import type {
 
 import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
+import { addDaysYmd, defaultMonthStartYmd, formatYmd } from '../utils/datetime';
 
-
-
-const PIE_COLORS = ['#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#64748b'];
-
-
-
-function pad2(n: number) {
-
-  return String(n).padStart(2, '0');
-
-}
-
-
-
-function formatYmd(d: Date): string {
-
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-
-}
-
-
-
-function defaultMonthStartYmd(): string {
-
-  const d = new Date();
-
-  d.setDate(1);
-
-  return formatYmd(d);
-
-}
-
-
+const PIE_COLORS = ['#7a5230', '#a67c52', '#8b6914', '#c4a574', '#5c4033', '#9a7b4f', '#6b4423', '#b08968'];
 
 type Props = {
   companies: CompanyListItem[];
@@ -261,13 +230,13 @@ export function DashboardSyntheseTab({ companies, onMessage }: Props) {
 
     return [
 
-      { name: 'Ventes', value: rangeSnap.sales, fill: '#10b981' },
+      { name: 'Ventes', value: rangeSnap.sales, fill: '#7a5230' },
 
-      { name: 'Achats', value: rangeSnap.purchases, fill: '#f59e0b' },
+      { name: 'Achats', value: rangeSnap.purchases, fill: '#a67c52' },
 
-      { name: 'Dépenses', value: rangeSnap.manualExpenses, fill: '#f43f5e' },
+      { name: 'Dépenses', value: rangeSnap.manualExpenses, fill: '#8b6914' },
 
-      { name: 'Résultat', value: rangeSnap.balance, fill: rangeSnap.balance >= 0 ? '#0ea5e9' : '#dc2626' },
+      { name: 'Résultat', value: rangeSnap.balance, fill: rangeSnap.balance >= 0 ? '#3f6b3a' : '#b42318' },
 
     ];
 
@@ -420,53 +389,31 @@ export function DashboardSyntheseTab({ companies, onMessage }: Props) {
     const today = formatYmd(new Date());
     if (dateFrom === today && dateTo === today) return 'today';
 
-    const now = new Date();
-    const weekFrom = new Date(now);
-    weekFrom.setDate(now.getDate() - 6);
-    if (dateFrom === formatYmd(weekFrom) && dateTo === today) return 'week';
+    const weekFrom = addDaysYmd(today, -6);
+    if (dateFrom === weekFrom && dateTo === today) return 'week';
 
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    if (dateFrom === formatYmd(monthStart) && dateTo === today) return 'month';
+    if (dateFrom === defaultMonthStartYmd() && dateTo === today) return 'month';
 
     return null;
   }, [dateFrom, dateTo]);
 
   function applyDatePreset(preset: 'today' | 'week' | 'month') {
-
-    const now = new Date();
-
-    const to = formatYmd(now);
+    const to = formatYmd(new Date());
 
     if (preset === 'today') {
-
       setDateFrom(to);
-
       setDateTo(to);
-
       return;
-
     }
 
     if (preset === 'week') {
-
-      const from = new Date(now);
-
-      from.setDate(now.getDate() - 6);
-
-      setDateFrom(formatYmd(from));
-
+      setDateFrom(addDaysYmd(to, -6));
       setDateTo(to);
-
       return;
-
     }
 
-    const from = new Date(now.getFullYear(), now.getMonth(), 1);
-
-    setDateFrom(formatYmd(from));
-
+    setDateFrom(defaultMonthStartYmd());
     setDateTo(to);
-
   }
 
 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+﻿const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { printReceipt } = require('./thermal-printer.cjs');
@@ -43,8 +43,9 @@ function createWindow() {
     height: 800,
     minWidth: 1024,
     minHeight: 680,
-    title: 'POS Frères Basiles',
+    title: 'POS Entreprise Israel',
     icon: resolveWindowIcon(),
+    backgroundColor: '#f7f4ef',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -67,15 +68,15 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  app.setName('POS Frères Basiles');
+  app.setName('POS Entreprise Israel');
   if (process.platform === 'win32') {
     const edition = getAppEdition();
     app.setAppUserModelId(
       edition === 'server'
-        ? 'com.freresbasiles.pos.desktop.server'
+        ? 'com.entrepriseisrael.pos.desktop.server'
         : edition === 'remote'
-          ? 'com.freresbasiles.pos.desktop.remote'
-          : 'com.freresbasiles.pos.desktop',
+          ? 'com.entrepriseisrael.pos.desktop.remote'
+          : 'com.entrepriseisrael.pos.desktop',
     );
   }
 

@@ -53,4 +53,28 @@ export class UpdatePrinterDto {
   @IsString()
   @MaxLength(4000)
   previewSampleBody?: string;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  showLogoOnDisbursement?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  disbursementHeaderText?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  disbursementFooterText?: string;
+
+  @IsOptional()
+  @IsString()
+  disbursementLogoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  disbursementPreviewSampleBody?: string;
 }

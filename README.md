@@ -1,43 +1,32 @@
-# POS-Freres-Baziles Monorepo
+# POS Entreprise Israel
 
-Structure monorepo cible pour l'ecosysteme POS Freres Baziles.
+Monorepo point de vente dédié à **Entreprise Israel**.
 
-## Arborescence
+## Apps
 
-- `apps/backend` : API NestJS + Prisma + PostgreSQL
-- `apps/mobile` : application mobile (placeholder)
-- `apps/desktop` : application desktop (placeholder)
-- `packages/ui` : composants UI partages
-- `packages/types` : types TypeScript partages
-- `packages/utils` : utilitaires partages
-- `assets/logos`, `assets/icons`, `assets/images`, `assets/fonts`
-- `infra/docker`, `infra/aws`
-- `docs`
+- `apps/backend` — API NestJS + Prisma + PostgreSQL
+- `apps/desktop` — application Electron
+- `apps/mobile` — application Expo
+- `apps/sync-agent` — synchronisation magasin ↔ cloud
 
-## Dépôt GitHub
+## Dev local (base séparée de Frères Baziles)
 
-Dépôt distant : [github.com/Mikelaroselouisiv/Parallele-POS-Systeme](https://github.com/Mikelaroselouisiv/Parallele-POS-Systeme).
+```powershell
+# Postgres Israel uniquement (port 5433, DB pos_israel)
+docker compose -f infra/docker/docker-compose.local-postgres.yml up -d
 
-### Première publication (machine locale)
+cd apps/backend
+# .env pointe déjà vers 127.0.0.1:5433/pos_israel
+npx prisma migrate deploy
+npm run start:dev
 
-1. Installez [Git pour Windows](https://git-scm.com/download/win) si besoin, puis ouvrez un terminal dans la racine du monorepo (`POS-Freres-Baziles`).
-2. Exécutez le script (PowerShell) :
+cd ../desktop
+npm run icons
+npm run dev
+```
 
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\scripts\push-to-github.ps1
-   ```
+Logo source unique : `assets/icons/icon.png`
 
-   Ou manuellement :
+## GCP
 
-   ```bash
-   git init
-   git branch -M main
-   git add -A
-   git commit -m "Initial commit: monorepo POS (backend, desktop, infra)"
-   git remote add origin https://github.com/Mikelaroselouisiv/Parallele-POS-Systeme.git
-   git push -u origin main
-   ```
-
-   Si `origin` existe déjà : `git remote set-url origin https://github.com/Mikelaroselouisiv/Parallele-POS-Systeme.git`
-
-3. À l’invite, connectez-vous à GitHub (HTTPS : token personnel ; ou configurez [SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)).
+Projet : `pos-entrprise-israel` — voir `docs/GCP_ISRAEL.md` et `AGENTS.md`.

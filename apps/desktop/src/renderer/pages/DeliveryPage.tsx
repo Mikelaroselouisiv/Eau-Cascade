@@ -15,6 +15,7 @@ import { formatQuantity } from '../utils/formatQuantity';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { buildReceiptPayloadFromSale } from '../utils/receiptPayload';
 import { buildSaleDetailPrintHtml, openBrowserPrintWindow } from '../utils/saleReceiptBrowserHtml';
+import { formatDateTimeShort } from '../utils/datetime';
 
 const PAGE_SIZE = 100;
 
@@ -31,16 +32,7 @@ function statusClass(status: Delivery['status']) {
 }
 
 function formatWhen(iso: string) {
-  try {
-    return new Date(iso).toLocaleString('fr-FR', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
+  return formatDateTimeShort(iso);
 }
 
 export function DeliveryPage() {

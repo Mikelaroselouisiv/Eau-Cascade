@@ -7,6 +7,7 @@ describe('SalesService', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     expect(service).toBeDefined();
   });

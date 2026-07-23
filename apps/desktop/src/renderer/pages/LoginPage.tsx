@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { getAuthSetupStatus, getToken } from '../services/api';
 import { BrandLogo } from '../components/BrandLogo';
 import { PasswordField } from '../components/PasswordField';
+import { BRAND_NAME } from '../config/brand';
 
 function setupStatusErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
@@ -113,10 +114,10 @@ export function LoginPage() {
       <main className="login-page">
         <div className="auth-card card">
           <div className="login-brand">
-            <BrandLogo size={72} />
+            <BrandLogo size={56} wide />
           </div>
-          <h1 className="login-title">Configuration initiale</h1>
-          <p className="login-sub">Créez le compte administrateur.</p>
+          <h1 className="login-title">{BRAND_NAME}</h1>
+          <p className="login-sub">Configuration initiale — créez le compte administrateur.</p>
           <form className="form-grid" onSubmit={(e) => void onBootstrap(e)}>
             <label>
               Numéro de téléphone
@@ -176,9 +177,10 @@ export function LoginPage() {
     <main className="login-page">
       <div className="auth-card card">
         <div className="login-brand">
-          <BrandLogo size={72} />
+          <BrandLogo size={56} wide />
         </div>
-        <h1 className="login-title">Connexion</h1>
+        <h1 className="login-title">{BRAND_NAME}</h1>
+        <p className="login-sub">Connexion au point de vente</p>
         {setupFetchError ? <p className="error-text">{setupFetchError}</p> : null}
         <form className="form-grid" onSubmit={(e) => void onLogin(e)}>
           <label>

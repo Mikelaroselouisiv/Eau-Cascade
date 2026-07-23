@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Bootstrap machine mère (édition Server) : Docker, secrets, pull image GCP, stack locale, tâche Windows.
@@ -34,7 +34,7 @@ $EnvExample = Join-Path $DockerDir '.env.server.example'
 $EnvFile = Join-Path $DockerDir '.env.server'
 $StartScript = Join-Path $ScriptDir 'server-stack-start.ps1'
 $GcpRegistry = 'northamerica-northeast1-docker.pkg.dev'
-$TaskName = 'POS-Freres-Basiles-Server-Stack'
+$TaskName = 'POS-Entreprise-Israel-Server-Stack'
 
 function Write-Step {
   param([string] $Message)

@@ -40,6 +40,8 @@ import { formatQuantity } from '../utils/formatQuantity';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { useAuth } from '../context/AuthContext';
 import { AuditJournalPanel } from '../components/AuditJournalPanel';
+import { DashboardBanksTab } from '../components/DashboardBanksTab';
+import { DashboardBeneficesTab } from '../components/DashboardBeneficesTab';
 import { DashboardSyntheseTab } from '../components/DashboardSyntheseTab';
 import { RegisterSessionModal } from '../components/RegisterSessionModal';
 import { RegisterSessionsPanel } from '../components/RegisterSessionsPanel';
@@ -48,38 +50,13 @@ import { SaleDetailModal } from '../components/SaleDetailModal';
 import { VentesDepartmentModal } from '../components/VentesDepartmentModal';
 import { StockLowAlertsPanel } from '../components/StockLowAlertsPanel';
 import { StockMovementsPanel } from '../components/StockMovementsPanel';
+import { InventoryPhysicalSection } from '../components/InventoryPhysicalSection';
 import { formatMoney } from '../utils/currency';
-
-function pad2(n: number) {
-  return String(n).padStart(2, '0');
-}
-
-function formatYmd(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-function defaultMonthStartYmd(): string {
-  const d = new Date();
-  d.setDate(1);
-  return formatYmd(d);
-}
-
-function ymdStartIso(ymd: string): string | undefined {
-  if (!ymd.trim()) return undefined;
-  const [y, m, d] = ymd.split('-').map((x) => Number.parseInt(x, 10));
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return undefined;
-  return new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
-}
-
-function ymdEndIso(ymd: string): string | undefined {
-  if (!ymd.trim()) return undefined;
-  const [y, m, d] = ymd.split('-').map((x) => Number.parseInt(x, 10));
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return undefined;
-  return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
-}
+import { formatDateTime, formatYmd, defaultMonthStartYmd, ymdStartIso, ymdEndIso } from '../utils/datetime';
+import { buildDisbursementOrderPayload } from '../utils/disbursementOrderPayload';
 
 export function DashboardPage() {
-  type TabId = 'synthese' | 'ventes' | 'achats' | 'stock';
+  type TabId = 'synthese' | 'ventes' | 'achats' | 'stock' | 'banque' | 'benefices';
 
   const { can, canPerm } = useAuth();
   const isAdmin = can(['ADMIN']);
@@ -89,6 +66,7 @@ export function DashboardPage() {
   const canCancelOrRefund = isAdmin || canPerm('sales.cancel');
 
   const [tab, setTab] = useState<TabId>(isAdmin ? 'synthese' : 'ventes');
+  const [inventoryHistorySlot, setInventoryHistorySlot] = useState<HTMLDivElement | null>(null);
   const [ledgerPdfLoading, setLedgerPdfLoading] = useState(false);
   const [saleActionBusy, setSaleActionBusy] = useState(false);
 
@@ -98,6 +76,8 @@ export function DashboardPage() {
   const [expenseDesc, setExpenseDesc] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseEntryDate, setExpenseEntryDate] = useState(() => formatYmd(new Date()));
+  const [expensePrintOrder, setExpensePrintOrder] = useState(false);
+  const [expenseDeptId, setExpenseDeptId] = useState<number | ''>('');
 
   const [achatsTotalsDateFrom, setAchatsTotalsDateFrom] = useState(defaultMonthStartYmd);
   const [achatsTotalsDateTo, setAchatsTotalsDateTo] = useState(() => formatYmd(new Date()));
@@ -129,10 +109,14 @@ export function DashboardPage() {
   /** Tri serveur par date de mouvement. */
   const [movementDateOrder, setMovementDateOrder] = useState<'asc' | 'desc'>('desc');
   const [stockProductId, setStockProductId] = useState<number | ''>('');
+  const [movementsDateFrom, setMovementsDateFrom] = useState('');
+  const [movementsDateTo, setMovementsDateTo] = useState('');
   const [registerSessionModal, setRegisterSessionModal] = useState<RegisterSessionDetail | null>(null);
   const [globalCompanyIds, setGlobalCompanyIds] = useState<number[]>([]);
   const [globalDeptIds, setGlobalDeptIds] = useState<number[]>([]);
   const [globalItems, setGlobalItems] = useState<GlobalStockSnapshotItem[]>([]);
+  const [globalAsOf, setGlobalAsOf] = useState('');
+  const [globalAsOfApplied, setGlobalAsOfApplied] = useState<string | null>(null);
   const [globalLoading, setGlobalLoading] = useState(false);
   const [globalExporting, setGlobalExporting] = useState(false);
 
@@ -214,11 +198,21 @@ export function DashboardPage() {
   useEffect(() => {
     if (!canAccessDashboard || companyId === '') {
       setDepartments([]);
+      setExpenseDeptId('');
       return;
     }
     void getDepartments(Number(companyId))
-      .then(setDepartments)
-      .catch(() => setDepartments([]));
+      .then((d) => {
+        setDepartments(d);
+        setExpenseDeptId((prev) => {
+          if (prev !== '' && d.some((x) => x.id === prev)) return prev;
+          return d[0]?.id ?? '';
+        });
+      })
+      .catch(() => {
+        setDepartments([]);
+        setExpenseDeptId('');
+      });
   }, [companyId, canAccessDashboard]);
 
   useEffect(() => {
@@ -283,16 +277,21 @@ export function DashboardPage() {
     setGlobalCompanyIds([cid]);
     setGlobalDeptIds([]);
     setGlobalItems([]);
+    setGlobalAsOf('');
+    setGlobalAsOfApplied(null);
   }, [companyId, tab, isAdmin]);
 
   async function loadGlobalSnapshot() {
     setGlobalLoading(true);
     try {
+      const asOf = globalAsOf.trim() || undefined;
       const snap = await getGlobalStockSnapshot({
         companyIds: globalCompanyIds.length ? globalCompanyIds : undefined,
         departmentIds: globalDeptIds.length ? globalDeptIds : undefined,
+        asOf,
       });
       setGlobalItems(snap.items);
+      setGlobalAsOfApplied(snap.asOf ?? (asOf ? snap.generatedAt : null));
     } catch {
       setMsg('Chargement inventaire impossible.', { persist: true });
     } finally {
@@ -303,14 +302,18 @@ export function DashboardPage() {
   async function onExportGlobalPdf() {
     setGlobalExporting(true);
     try {
+      const asOf = globalAsOf.trim() || undefined;
       const blob = await exportGlobalStockSnapshotPdf({
         companyIds: globalCompanyIds.length ? globalCompanyIds : undefined,
         departmentIds: globalDeptIds.length ? globalDeptIds : undefined,
+        asOf,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `inventaire_global_${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.download = asOf
+        ? `inventaire_global_au_${asOf}.pdf`
+        : `inventaire_global_${formatYmd(new Date())}.pdf`;
       a.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
     } catch {
@@ -434,19 +437,53 @@ export function DashboardPage() {
     setMsg('');
     const amount = Number(expenseAmount);
     if (!expenseDesc.trim() || !Number.isFinite(amount) || amount <= 0) return;
+    if (expensePrintOrder && expenseDeptId === '') {
+      setMsg('Choisissez un département pour imprimer l’ordre.', { persist: true });
+      return;
+    }
 
     try {
-      await createFinanceEntry({
+      const entry = await createFinanceEntry({
         type: 'EXPENSE',
         amount,
         description: expenseDesc.trim(),
         companyId: Number(companyId),
         entryDate: expenseEntryDate.trim() || undefined,
       });
+
+      let printNote = '';
+      if (expensePrintOrder && expenseDeptId !== '' && window.desktopApp?.printReceipt) {
+        try {
+          const [company, printer] = await Promise.all([
+            getCompanyById(Number(companyId)),
+            getPrinterSettings(expenseDeptId),
+          ]);
+          const payload = buildDisbursementOrderPayload({
+            entry,
+            company,
+            printer,
+            entryDateYmd: expenseEntryDate.trim() || undefined,
+          });
+          const r = await window.desktopApp.printReceipt({
+            ...payload,
+            cashier: payload.preparedBy ?? 'N/A',
+            items: [],
+            total: payload.amount,
+            paymentMode: 'Dépense',
+          });
+          printNote = r.ok ? ' Ordre de décaissement imprimé.' : ' Impression de l’ordre échouée.';
+        } catch {
+          printNote = ' Impression de l’ordre échouée.';
+        }
+      } else if (expensePrintOrder && !window.desktopApp?.printReceipt) {
+        printNote = ' Impression disponible uniquement dans l’application bureau.';
+      }
+
       setExpenseDesc('');
       setExpenseAmount('');
       setExpenseEntryDate(formatYmd(new Date()));
-      setMsg('Dépense enregistrée.');
+      setExpensePrintOrder(false);
+      setMsg(`Dépense enregistrée.${printNote}`);
 
       await refreshAchatsLedger();
     } catch {
@@ -506,16 +543,25 @@ export function DashboardPage() {
     }
   }
 
-  async function refetchMovementsFromStart(opts: { order: 'asc' | 'desc'; take: 5 | 10 }) {
+  async function refetchMovementsFromStart(opts: {
+    order: 'asc' | 'desc';
+    take: 5 | 10;
+    dateFrom?: string;
+    dateTo?: string;
+  }) {
     if (companyId === '') return;
     setMovementsLoading(true);
     try {
       const cid = Number(companyId);
+      const dateFrom = (opts.dateFrom ?? movementsDateFrom).trim() || undefined;
+      const dateTo = (opts.dateTo ?? movementsDateTo).trim() || undefined;
       const mov = await getInventoryMovements({
         companyId: cid,
         skip: 0,
         take: opts.take,
         order: opts.order,
+        dateFrom,
+        dateTo,
       });
       setMovements(mov.items);
       setMovementsTotal(mov.total);
@@ -531,7 +577,9 @@ export function DashboardPage() {
     setMovementDateOrder('desc');
     setMovementsPageSize(5);
     setStockProductId('');
-    await refetchMovementsFromStart({ order: 'desc', take: 5 });
+    setMovementsDateFrom('');
+    setMovementsDateTo('');
+    await refetchMovementsFromStart({ order: 'desc', take: 5, dateFrom: '', dateTo: '' });
   }
 
   async function loadMoreMovements() {
@@ -546,6 +594,8 @@ export function DashboardPage() {
         skip: nextSkip,
         take: movementsPageSize,
         order: movementDateOrder,
+        dateFrom: movementsDateFrom.trim() || undefined,
+        dateTo: movementsDateTo.trim() || undefined,
       });
       setMovements((prev) => [...prev, ...mov.items]);
       setMovementsSkip(nextSkip);
@@ -778,10 +828,14 @@ export function DashboardPage() {
           ['ventes', 'Ventes'],
           ['stock', 'Stock & Mouvements'],
           ['achats', 'Achats & Dépenses'],
+          ['banque', 'Banque'],
+          ['benefices', 'Analyse des bénéfices'],
         ] as const)
       : ([
           ['ventes', 'Ventes'],
           ['achats', 'Achats & Dépenses'],
+          ['banque', 'Banque'],
+          ['benefices', 'Analyse des bénéfices'],
         ] as const)
   );
 
@@ -810,7 +864,11 @@ export function DashboardPage() {
           gridTemplateColumns:
             tab === 'synthese'
               ? 'none'
-              : tab === 'achats' || tab === 'stock' || tab === 'ventes'
+              : tab === 'achats' ||
+                  tab === 'stock' ||
+                  tab === 'ventes' ||
+                  tab === 'banque' ||
+                  tab === 'benefices'
                 ? 'minmax(240px, 1fr)'
                 : 'minmax(240px, 1fr) minmax(240px, 1fr)',
           gap: '0.9rem',
@@ -1035,7 +1093,7 @@ export function DashboardPage() {
                             style={{ cursor: 'pointer' }}
                           >
                             <td>{s.id}</td>
-                            <td>{new Date(s.createdAt).toLocaleString()}</td>
+                            <td>{formatDateTime(s.createdAt)}</td>
                             <td>{(s.clientName && s.clientName.trim()) || '—'}</td>
                             <td className="journal-amt">{formatMoney(s.total)}</td>
                             <td>
@@ -1142,6 +1200,31 @@ export function DashboardPage() {
                         onChange={(e) => setExpenseEntryDate(e.target.value)}
                         required
                       />
+                    </label>
+                    <label>
+                      Département (impression)
+                      <select
+                        value={expenseDeptId === '' ? '' : String(expenseDeptId)}
+                        onChange={(e) =>
+                          setExpenseDeptId(e.target.value ? Number(e.target.value) : '')
+                        }
+                        disabled={departments.length === 0}
+                      >
+                        <option value="">— Choisir —</option>
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={expensePrintOrder}
+                        onChange={(e) => setExpensePrintOrder(e.target.checked)}
+                      />
+                      Imprimer l’ordre de décaissement
                     </label>
                     <button type="submit" className="btn btn-primary">
                       Enregistrer
@@ -1299,7 +1382,7 @@ export function DashboardPage() {
                         <span>
                           <span>{row.description}</span>
                           <span className="dept-hint" style={{ display: 'block', marginTop: '0.2rem' }}>
-                            {new Date(row.occurredAt).toLocaleString()} ·{' '}
+                            {formatDateTime(row.occurredAt)} ·{' '}
                             {row.user?.fullName?.trim() || row.user?.phone || '—'}
                           </span>
                         </span>
@@ -1346,6 +1429,19 @@ export function DashboardPage() {
                 onLoadMore={() => void loadMoreAlerts()}
               />
 
+              <InventoryPhysicalSection
+                companies={companies}
+                visible={tab === 'stock'}
+                historyPortalTarget={inventoryHistorySlot}
+                onStockChanged={() => {
+                  void loadGlobalSnapshot();
+                  void refetchMovementsFromStart({
+                    order: movementDateOrder,
+                    take: movementsPageSize,
+                  });
+                }}
+              />
+
               <section className="card" style={{ marginTop: '1rem' }}>
                 <h2>Inventaire global</h2>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', marginBottom: '0.75rem' }}>
@@ -1383,6 +1479,30 @@ export function DashboardPage() {
                       ))}
                     </ul>
                   </div>
+                  <label>
+                    Stock au
+                    <input
+                      type="date"
+                      value={globalAsOf}
+                      max={formatYmd(new Date())}
+                      onChange={(e) => setGlobalAsOf(e.target.value)}
+                    />
+                  </label>
+                  {globalAsOf || globalAsOfApplied ? (
+                    <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          setGlobalAsOf('');
+                          setGlobalAsOfApplied(null);
+                          setGlobalItems([]);
+                        }}
+                      >
+                        Stock actuel
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="table-actions" style={{ marginBottom: '0.75rem' }}>
                   <button
@@ -1443,10 +1563,20 @@ export function DashboardPage() {
                 movementsSkip={movementsSkip}
                 movementsPageSize={movementsPageSize}
                 movementDateOrder={movementDateOrder}
+                dateFrom={movementsDateFrom}
+                dateTo={movementsDateTo}
                 productOptions={movementProductOptions}
                 selectedProductId={stockProductId}
                 loading={movementsLoading}
                 onProductChange={setStockProductId}
+                onDateFromChange={setMovementsDateFrom}
+                onDateToChange={setMovementsDateTo}
+                onApplyDateFilter={() =>
+                  void refetchMovementsFromStart({
+                    order: movementDateOrder,
+                    take: movementsPageSize,
+                  })
+                }
                 onOrderChange={(order) => {
                   setMovementDateOrder(order);
                   void refetchMovementsFromStart({ order, take: movementsPageSize });
@@ -1458,10 +1588,36 @@ export function DashboardPage() {
                 onReset={() => void resetMovementsToInitial()}
                 onLoadMore={() => void loadMoreMovements()}
               />
+
+              <div
+                ref={setInventoryHistorySlot}
+                style={{ marginTop: '0.25rem' }}
+                aria-label="Historique des comptages"
+              />
             </>
           ) : null}
         </>
       )}
+
+      {tab === 'banque' ? (
+        typeof companyId === 'number' ? (
+          <DashboardBanksTab companyId={companyId} />
+        ) : (
+          <p className="info-text" style={{ marginTop: '0.9rem' }}>
+            Choisissez une entreprise pour voir les comptes bancaires.
+          </p>
+        )
+      ) : null}
+
+      {tab === 'benefices' ? (
+        typeof companyId === 'number' ? (
+          <DashboardBeneficesTab companyId={companyId} />
+        ) : (
+          <p className="info-text" style={{ marginTop: '0.9rem' }}>
+            Choisissez une entreprise pour analyser les bénéfices.
+          </p>
+        )
+      ) : null}
 
       <RegisterSessionModal
         session={registerSessionModal}

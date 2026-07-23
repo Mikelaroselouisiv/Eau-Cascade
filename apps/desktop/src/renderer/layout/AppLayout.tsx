@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { BrandLogo } from '../components/BrandLogo';
+import { BRAND_NAME } from '../config/brand';
 import { useAuth } from '../context/AuthContext';
 import { pendingSalesCount, syncSalesQueue } from '../services/offline-queue';
 import { formatRoleLabel } from '../utils/roleLabels';
@@ -9,12 +10,13 @@ const nav: Array<{ to: string; label: string; permission: string }> = [
   { to: '/app/pos', label: 'Caisse (POS)', permission: 'pos.use' },
   { to: '/app/livraisons', label: 'Livraisons', permission: 'deliveries.view' },
   { to: '/app/dashboard', label: 'Tableau de bord', permission: 'dashboard.view' },
+  { to: '/app/credit', label: 'Crédit', permission: 'credit.view' },
   { to: '/app/stock', label: 'Stocks', permission: 'stock.view' },
   { to: '/app/config', label: 'Configuration', permission: 'config.view' },
 ];
 
 export function AppLayout() {
-  const { user, logout, canPerm } = useAuth();
+  const { user, logout, can, canPerm } = useAuth();
   const navigate = useNavigate();
   const [pendingSales, setPendingSales] = useState(0);
   const syncRunning = useRef(false);
@@ -63,14 +65,19 @@ export function AppLayout() {
     };
   }, [syncPendingSales]);
 
-  const visible = nav.filter((item) => canPerm(item.permission));
+  const visible = nav.filter((item) => {
+    if (item.permission === 'credit.view') {
+      return can(['ADMIN', 'MANAGER']) || canPerm('credit.view');
+    }
+    return canPerm(item.permission);
+  });
 
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
         <div className="app-brand">
-          <BrandLogo size={40} />
-          <span className="app-brand-text">Frères Basiles</span>
+          <BrandLogo size={36} wide />
+          <span className="app-brand-text">{BRAND_NAME}</span>
           {pendingSales > 0 ? (
             <span className="app-offline-badge" title="Ventes en attente de synchronisation">
               {pendingSales} hors ligne

@@ -1,4 +1,4 @@
-# POS Freres Basiles - Architecture
+﻿# POS Entreprise Israel - Architecture
 
 ## Backend NestJS (domain modules)
 

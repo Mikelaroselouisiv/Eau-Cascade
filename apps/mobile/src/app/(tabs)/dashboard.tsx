@@ -9,6 +9,7 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { getDashboardSummary, getInventoryAlerts, listSales } from '@/services/api';
 import type { DashboardSummaryReport, Product, Sale } from '@/types/api';
+import { formatDateTime } from '@/utils/datetime';
 
 function isForbidden(e: unknown): boolean {
   return (
@@ -99,7 +100,7 @@ export default function DashboardScreen() {
                   <ThemedView key={sale.id} type="backgroundElement" style={styles.row}>
                     <ThemedText>#{sale.id}</ThemedText>
                     <ThemedText themeColor="textSecondary" type="small">
-                      {new Date(sale.createdAt).toLocaleString()}
+                      {formatDateTime(sale.createdAt)}
                     </ThemedText>
                     <ThemedText type="smallBold">{Number(sale.total).toFixed(2)}</ThemedText>
                   </ThemedView>

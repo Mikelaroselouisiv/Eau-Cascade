@@ -1,7 +1,7 @@
 {
-  "appId": "com.freresbasiles.pos.desktop.server",
-  "productName": "POS Freres Basiles Server",
-  "artifactName": "POS-Freres-Basiles-Server-${version}.${ext}",
+  "appId": "com.entrepriseisrael.pos.desktop.server",
+  "productName": "POS Entreprise Israel Server",
+  "artifactName": "POS-Entreprise-Israel-Server-${version}.${ext}",
   "copyright": "Copyright © 2026",
   "icon": "build/icon.ico",
   "directories": {

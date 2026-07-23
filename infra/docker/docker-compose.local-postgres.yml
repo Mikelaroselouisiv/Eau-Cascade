@@ -1,20 +1,37 @@
-# Option : Postgres uniquement sur la machine de dev (sans EC2). Ancien comportement.
-# Usage : docker compose -f docker-compose.local-postgres.yml up -d
-# Puis dans apps/backend/.env : DATABASE_URL=postgresql://postgres:postgres@localhost:5432/pos_db?schema=public
+# Postgres de développement — POS Entreprise Israel UNIQUEMENT.
+# Projet Compose explicite pour NE PAS écraser Frères Baziles
+# (même dossier relatif infra/docker → sinon Docker réutilise le projet "docker").
+#
+# Usage :
+#   docker compose -f infra/docker/docker-compose.local-postgres.yml up -d
+#   apps/backend/.env → DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5433/pos_israel?schema=public
+#
+# Frères Baziles reste sur :
+#   conteneur pos_postgres, port 5432, DB pos_db, volume docker_postgres_data_local
+
+name: pos-israel
 
 services:
   postgres:
     image: postgres:16
-    container_name: pos_postgres
+    container_name: pos_israel_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: pos_db
+      POSTGRES_DB: pos_israel
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
-      - postgres_data_local:/var/lib/postgresql/data
+      - postgres_data_israel:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pos_israel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
-  postgres_data_local:
+  postgres_data_israel:
+    # Volume déjà créé pour Israel — ne pas le rattacher au projet Compose "docker" (Frères).
+    name: docker_postgres_data_israel
+    external: true

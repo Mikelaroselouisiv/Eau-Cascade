@@ -1,3 +1,4 @@
+import { formatDateTime } from './datetime';
 import type { CompanyProfile, DepartmentPrinterSettings, Sale } from '../types/api';
 
 export function paymentModeFromSale(sale: Sale): string {
@@ -36,7 +37,7 @@ export function buildReceiptPayloadFromSale(
     companyPhone: company?.phone ?? null,
     address: [company?.address, company?.city].filter(Boolean).join(', ') || '',
     cashier: cashierLabelFromSale(sale),
-    dateTime: new Date(sale.createdAt).toLocaleString(),
+    dateTime: formatDateTime(sale.createdAt),
     receiptClientName: sale.clientName && sale.clientName.trim() ? sale.clientName.trim() : null,
     items,
     total,

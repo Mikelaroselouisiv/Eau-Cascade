@@ -129,6 +129,8 @@ export interface InventoryCountSheetRow {
 
 export interface InventoryCountSheet {
   generatedAt: string;
+  /** Instant rétrospectif (ISO) si filtré par date ; sinon null/absent = stock actuel. */
+  asOf?: string | null;
   department: { id: number; name: string; company: { id: number; name: string } };
   products: InventoryCountSheetRow[];
 }
@@ -182,6 +184,8 @@ export interface GlobalStockSnapshotItem {
 
 export interface GlobalStockSnapshot {
   generatedAt: string;
+  /** Instant rétrospectif (ISO) si filtré ; sinon null = stock actuel. */
+  asOf?: string | null;
   items: GlobalStockSnapshotItem[];
 }
 
@@ -327,7 +331,7 @@ export interface SaleItemPayload {
 }
 
 export interface PaymentPayload {
-  method: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT';
+  method: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT' | 'CREDIT';
   amount: number;
   reference?: string;
 }
@@ -343,7 +347,7 @@ export interface CreateSalePayload {
 export interface SalePaymentRow {
   id?: number;
   amount: string | number;
-  method: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT';
+  method: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT' | 'CREDIT';
   reference?: string | null;
   createdAt?: string;
 }
@@ -517,6 +521,11 @@ export interface DepartmentPrinterSettings {
   receiptFooterText?: string | null;
   receiptLogoUrl?: string | null;
   previewSampleBody?: string | null;
+  showLogoOnDisbursement?: boolean;
+  disbursementHeaderText?: string | null;
+  disbursementFooterText?: string | null;
+  disbursementLogoUrl?: string | null;
+  disbursementPreviewSampleBody?: string | null;
 }
 
 /** Département : mini-périmètre au sein de l’entreprise (produits, stocks rattachés). */
@@ -545,4 +554,148 @@ export interface FinanceLedgerRow {
   amount: number;
   description: string;
   user: { id: number; fullName: string | null; phone: string } | null;
+}
+
+export type CreditCustomerStatus = 'CLEAR' | 'PARTIAL' | 'OVERDUE' | 'AT_LIMIT' | 'BLOCKED';
+
+export interface CreditCustomerListItem {
+  id: number;
+  uuid: string;
+  companyId: number;
+  departmentId: number | null;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  note: string | null;
+  creditLimit: number;
+  isActive: boolean;
+  balance: number;
+  openSalesCount: number;
+  oldestUnpaidAt: string | null;
+  status: CreditCustomerStatus;
+  department?: { id: number; name: string } | null;
+  company?: { id: number; name: string } | null;
+  createdAt?: string;
+}
+
+export interface CreditCustomerDetail extends CreditCustomerListItem {
+  availableCredit: number;
+  sales: Array<{
+    id: number;
+    total: number;
+    amountPaid: number;
+    balanceDue: number;
+    createdAt: string;
+    clientName?: string | null;
+    items: Array<{
+      id: number;
+      quantity: number;
+      unitPrice: number;
+      subtotal: number;
+      lineLabel?: string | null;
+      product?: { id: number; name: string; sku?: string | null } | null;
+    }>;
+    delivery?: { id: number; status: string } | null;
+  }>;
+  repayments: Array<{
+    id: number;
+    amount: number;
+    method: string;
+    reference?: string | null;
+    note?: string | null;
+    saleId?: number | null;
+    createdAt: string;
+    user?: UserAttribution | null;
+  }>;
+  timeline: Array<{
+    kind: 'SALE' | 'PAYMENT';
+    at: string;
+    label: string;
+    amount: number;
+    meta?: Record<string, unknown>;
+  }>;
+}
+
+export interface CreditSummary {
+  customersTotal: number;
+  withDebt: number;
+  clear: number;
+  overdue: number;
+  totalReceivable: number;
+  topDebtors: CreditCustomerListItem[];
+}
+
+export interface MarginAnalysisProductRow {
+  productId: number;
+  name: string;
+  sku: string | null;
+  departmentName: string | null;
+  quantity: number;
+  revenue: number;
+  cost: number;
+  margin: number;
+  marginPct: number | null;
+}
+
+export interface MarginAnalysisReport {
+  dateFrom: string;
+  dateTo: string;
+  revenue: number;
+  cost: number;
+  margin: number;
+  marginPct: number | null;
+  productsCount: number;
+  products: MarginAnalysisProductRow[];
+}
+
+export type BankTransactionType = 'DEPOSIT' | 'WITHDRAWAL';
+
+export interface BankAccountRow {
+  id: number;
+  uuid?: string;
+  bankId: number;
+  companyId: number;
+  name: string;
+  accountNumber: string | null;
+  openingBalance: number;
+  balance: number;
+  isActive: boolean;
+  note: string | null;
+  bankName?: string;
+}
+
+export interface BankRow {
+  id: number;
+  uuid: string;
+  companyId: number;
+  name: string;
+  note: string | null;
+  isActive: boolean;
+  createdAt?: string;
+  accounts: BankAccountRow[];
+}
+
+export interface BankSummary {
+  banksCount: number;
+  accountsCount: number;
+  totalCapital: number;
+  accounts: BankAccountRow[];
+  byBank: Array<{ id: number; name: string; accountsCount: number; balance: number }>;
+}
+
+export interface BankTransactionRow {
+  id: number;
+  type: BankTransactionType;
+  amount: number;
+  description: string;
+  reference: string | null;
+  occurredAt: string;
+  createdAt?: string;
+  user?: UserAttribution | null;
+  bankAccount: {
+    id: number;
+    name: string;
+    accountNumber?: string | null;
+    bank: { id: number; name: string };
+  };
 }

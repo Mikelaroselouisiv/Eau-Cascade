@@ -9,18 +9,19 @@ import { Platform } from 'react-native';
 
 export const Colors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    text: '#1C1917',
+    background: '#F7F4EF',
+    backgroundElement: '#FFFFFF',
+    backgroundSelected: '#FFF4E5',
+    textSecondary: '#78716C',
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    // Même palette claire : le POS Israel n'utilise pas le mode sombre.
+    text: '#1C1917',
+    background: '#F7F4EF',
+    backgroundElement: '#FFFFFF',
+    backgroundSelected: '#FFF4E5',
+    textSecondary: '#78716C',
   },
 } as const;
 

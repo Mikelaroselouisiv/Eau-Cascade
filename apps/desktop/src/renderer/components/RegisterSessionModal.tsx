@@ -1,8 +1,9 @@
 import type { RegisterSessionDetail } from '../types/api';
+import { formatDateTime } from '../utils/datetime';
+import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { formatRegisterCode } from '../utils/registerDisplay';
 import { formatUserLabel } from '../utils/userAttribution';
-import { formatMoney } from '../utils/currency';
 
 type Props = {
   session: RegisterSessionDetail | null;
@@ -51,12 +52,12 @@ export function RegisterSessionModal({ session, onClose }: Props) {
           <dd style={{ margin: 0 }}>{session.department.name}</dd>
           <dt>Ouverture</dt>
           <dd style={{ margin: 0 }}>
-            {new Date(session.openedAt).toLocaleString()} — {formatUserLabel(session.openedBy)}
+            {formatDateTime(session.openedAt)} — {formatUserLabel(session.openedBy)}
           </dd>
           <dt>Fermeture</dt>
           <dd style={{ margin: 0 }}>
             {session.closedAt
-              ? `${new Date(session.closedAt).toLocaleString()} — ${formatUserLabel(session.closedBy)}`
+              ? `${formatDateTime(session.closedAt)} — ${formatUserLabel(session.closedBy)}`
               : '—'}
           </dd>
           <dt>Fond ouverture</dt>

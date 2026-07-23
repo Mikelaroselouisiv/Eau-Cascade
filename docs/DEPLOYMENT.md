@@ -1,17 +1,17 @@
-# Déploiement entreprise — POS Entreprises Israel
+﻿# Déploiement entreprise — POS Entreprises Israel
 
 ## Deux types de postes (rien à faire à la main sur site)
 
 | Poste | Installateur | Ce qui se passe tout seul |
 |-------|--------------|---------------------------|
-| **Machine mère (Server)** | `POS-Freres-Basiles-Server-*.exe` | Docker, Postgres, API `:3000`, sync-agent, tâche au démarrage Windows |
-| **Postes distants (Remote)** | `POS-Freres-Basiles-Remote-*.exe` | Connexion GCP, mises à jour auto |
+| **Machine mère (Server)** | `POS-Entreprise-Israel-Server-*.exe` | Docker, Postgres, API `:3000`, sync-agent, tâche au démarrage Windows |
+| **Postes distants (Remote)** | `POS-Entreprise-Israel-Remote-*.exe` | Connexion GCP, mises à jour auto |
 
 ## Machine mère — machine vierge (magasin)
 
 **Sur site, l’utilisateur fait seulement :**
 
-1. Double-clic sur `POS-Freres-Basiles-Server-Setup.exe`
+1. Double-clic sur `POS-Entreprise-Israel-Server-Setup.exe`
 2. Suivre l’assistant (droits admin demandés une fois)
 3. Lancer l’application
 
@@ -26,7 +26,7 @@ Aucun PowerShell, aucun `bootstrap-server.ps1`, aucun fichier à copier.
 
 ## Postes distants (caisse, bureau)
 
-1. Installer `POS-Freres-Basiles-Remote-Setup.exe`
+1. Installer `POS-Entreprise-Israel-Remote-Setup.exe`
 2. L’app se connecte au serveur GCP (ou au local si détecté)
 
 ## Côté IT / développement (une seule fois)

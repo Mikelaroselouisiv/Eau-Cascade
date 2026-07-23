@@ -3,6 +3,13 @@ import type {
   CompanyListItem,
   CompanyProfile,
   CreateSalePayload,
+  CreditCustomerDetail,
+  CreditCustomerListItem,
+  CreditSummary,
+  BankRow,
+  BankSummary,
+  BankTransactionRow,
+  MarginAnalysisReport,
   Delivery,
   DashboardBalanceSnapshot,
   DashboardSalesByProductRow,
@@ -142,9 +149,15 @@ export async function getMe(): Promise<SessionUser> {
   return data;
 }
 
-export async function getProducts(departmentId?: number): Promise<Product[]> {
+export async function getProducts(
+  departmentId?: number,
+  opts?: { asOf?: string },
+): Promise<Product[]> {
   const { data } = await api.get<Product[]>('/products', {
-    params: departmentId !== undefined ? { departmentId } : undefined,
+    params: {
+      ...(departmentId !== undefined ? { departmentId } : {}),
+      ...(opts?.asOf?.trim() ? { asOf: opts.asOf.trim() } : {}),
+    },
   });
   return data;
 }
@@ -555,6 +568,8 @@ export async function getInventoryMovements(params?: {
   companyId?: number;
   /** Tri par date côté serveur : plus récent d'abord (desc) ou plus ancien d'abord (asc). */
   order?: 'asc' | 'desc';
+  dateFrom?: string;
+  dateTo?: string;
 }): Promise<{ items: StockMovementRow[]; total: number }> {
   const { data } = await api.get<{ items: StockMovementRow[]; total: number }>('/inventory/movements', {
     params: {
@@ -562,6 +577,8 @@ export async function getInventoryMovements(params?: {
       take: params?.take ?? 100,
       companyId: params?.companyId ?? undefined,
       order: params?.order ?? 'desc',
+      dateFrom: params?.dateFrom?.trim() || undefined,
+      dateTo: params?.dateTo?.trim() || undefined,
     },
   });
   return data;
@@ -604,16 +621,28 @@ export async function listInventorySessions(params?: {
   return data;
 }
 
-export async function getInventoryCountSheet(departmentId: number): Promise<InventoryCountSheet> {
+export async function getInventoryCountSheet(
+  departmentId: number,
+  opts?: { asOf?: string },
+): Promise<InventoryCountSheet> {
   const { data } = await api.get<InventoryCountSheet>('/inventory/count-sheet', {
-    params: { departmentId },
+    params: {
+      departmentId,
+      ...(opts?.asOf?.trim() ? { asOf: opts.asOf.trim() } : {}),
+    },
   });
   return data;
 }
 
-export async function exportInventoryCountSheetPdf(departmentId: number): Promise<Blob> {
+export async function exportInventoryCountSheetPdf(
+  departmentId: number,
+  opts?: { asOf?: string },
+): Promise<Blob> {
   const { data } = await api.get<Blob>('/inventory/count-sheet/export/pdf', {
-    params: { departmentId },
+    params: {
+      departmentId,
+      ...(opts?.asOf?.trim() ? { asOf: opts.asOf.trim() } : {}),
+    },
     responseType: 'blob',
   });
   return data;
@@ -750,11 +779,13 @@ export async function closeRegisterSession(
 export async function getGlobalStockSnapshot(params?: {
   companyIds?: number[];
   departmentIds?: number[];
+  asOf?: string;
 }): Promise<GlobalStockSnapshot> {
   const { data } = await api.get<GlobalStockSnapshot>('/inventory/global-snapshot', {
     params: {
       companyIds: params?.companyIds?.length ? params.companyIds.join(',') : undefined,
       departmentIds: params?.departmentIds?.length ? params.departmentIds.join(',') : undefined,
+      asOf: params?.asOf?.trim() || undefined,
     },
   });
   return data;
@@ -763,11 +794,13 @@ export async function getGlobalStockSnapshot(params?: {
 export async function exportGlobalStockSnapshotPdf(params?: {
   companyIds?: number[];
   departmentIds?: number[];
+  asOf?: string;
 }): Promise<Blob> {
   const { data } = await api.get<Blob>('/inventory/global-snapshot/export/pdf', {
     params: {
       companyIds: params?.companyIds?.length ? params.companyIds.join(',') : undefined,
       departmentIds: params?.departmentIds?.length ? params.departmentIds.join(',') : undefined,
+      asOf: params?.asOf?.trim() || undefined,
     },
     responseType: 'blob',
   });
@@ -861,6 +894,25 @@ export async function getRevenueReport() {
   return data;
 }
 
+export async function getMarginAnalysis(params: {
+  companyId?: number;
+  companyIds?: number[];
+  dateFrom: string;
+  dateTo: string;
+  departmentId?: number;
+}) {
+  const { data } = await api.get<MarginAnalysisReport>('/reports/margin', {
+    params: {
+      companyId: params.companyIds?.length ? undefined : params.companyId,
+      companyIds: params.companyIds?.length ? params.companyIds.join(',') : undefined,
+      dateFrom: params.dateFrom,
+      dateTo: params.dateTo,
+      departmentId: params.departmentId,
+    },
+  });
+  return data;
+}
+
 export async function getFinanceJournal(params?: {
   companyId?: number;
   skip?: number;
@@ -931,8 +983,8 @@ export async function createFinanceEntry(payload: {
   companyId?: number;
   /** YYYY-MM-DD — date comptable (sinon horodatage serveur). */
   entryDate?: string;
-}) {
-  const { data } = await api.post('/finance/entries', payload);
+}): Promise<FinanceEntry> {
+  const { data } = await api.post<FinanceEntry>('/finance/entries', payload);
   return data;
 }
 
@@ -1031,6 +1083,178 @@ export async function exportFinancialSynthesisPdf(params: {
     responseType: 'blob',
   });
   return data;
+}
+
+export async function getCreditSummary(companyId: number) {
+  const { data } = await api.get<CreditSummary>('/credit/summary', {
+    params: { companyId },
+  });
+  return data;
+}
+
+export async function listCreditCustomers(params: {
+  companyId: number;
+  q?: string;
+  includeInactive?: boolean;
+}) {
+  const { data } = await api.get<CreditCustomerListItem[]>('/credit/customers', {
+    params: {
+      companyId: params.companyId,
+      q: params.q || undefined,
+      includeInactive: params.includeInactive ? '1' : undefined,
+    },
+  });
+  return data;
+}
+
+export async function getCreditCustomer(id: number) {
+  const { data } = await api.get<CreditCustomerDetail>(`/credit/customers/${id}`);
+  return data;
+}
+
+export async function createCreditCustomer(payload: {
+  companyId: number;
+  departmentId?: number;
+  name: string;
+  phone?: string;
+  address?: string;
+  note?: string;
+  creditLimit?: number;
+}) {
+  const { data } = await api.post('/credit/customers', payload);
+  return data;
+}
+
+export async function updateCreditCustomer(
+  id: number,
+  payload: {
+    name?: string;
+    phone?: string | null;
+    address?: string | null;
+    note?: string | null;
+    creditLimit?: number;
+    isActive?: boolean;
+    departmentId?: number | null;
+  },
+) {
+  const { data } = await api.patch(`/credit/customers/${id}`, payload);
+  return data;
+}
+
+export async function createCreditSale(payload: {
+  creditCustomerId: number;
+  items: Array<{ productSaleUnitId: number; quantity: number }>;
+  downPayment?: number;
+  downPaymentMethod?: 'CASH' | 'CARD' | 'MOBILE_MONEY';
+  note?: string;
+}) {
+  const { data } = await api.post<{
+    saleId: number;
+    total: number;
+    amountPaid: number;
+    balanceDue: number;
+    deliveryId: number;
+  }>('/credit/sales', payload);
+  return data;
+}
+
+export async function recordCreditPayment(payload: {
+  creditCustomerId: number;
+  amount: number;
+  saleId?: number;
+  method?: 'CASH' | 'CARD' | 'MOBILE_MONEY';
+  reference?: string;
+  note?: string;
+}) {
+  const { data } = await api.post('/credit/payments', payload);
+  return data;
+}
+
+export async function listBanks(params: { companyId: number; includeInactive?: boolean }) {
+  const { data } = await api.get<BankRow[]>('/banks', {
+    params: {
+      companyId: params.companyId,
+      includeInactive: params.includeInactive ? '1' : undefined,
+    },
+  });
+  return data;
+}
+
+export async function getBankSummary(companyId: number) {
+  const { data } = await api.get<BankSummary>('/banks/summary', { params: { companyId } });
+  return data;
+}
+
+export async function createBank(payload: { companyId: number; name: string; note?: string }) {
+  const { data } = await api.post('/banks', payload);
+  return data;
+}
+
+export async function updateBank(
+  id: number,
+  payload: { name?: string; note?: string | null; isActive?: boolean },
+) {
+  const { data } = await api.patch(`/banks/${id}`, payload);
+  return data;
+}
+
+export async function createBankAccount(payload: {
+  bankId: number;
+  name: string;
+  accountNumber?: string;
+  openingBalance?: number;
+  note?: string;
+}) {
+  const { data } = await api.post('/banks/accounts', payload);
+  return data;
+}
+
+export async function updateBankAccount(
+  id: number,
+  payload: {
+    name?: string;
+    accountNumber?: string | null;
+    openingBalance?: number;
+    note?: string | null;
+    isActive?: boolean;
+  },
+) {
+  const { data } = await api.patch(`/banks/accounts/${id}`, payload);
+  return data;
+}
+
+export async function listBankTransactions(params: {
+  companyId: number;
+  bankAccountId?: number;
+  skip?: number;
+  take?: number;
+}) {
+  const { data } = await api.get<{
+    total: number;
+    skip: number;
+    take: number;
+    items: BankTransactionRow[];
+  }>('/banks/transactions', { params });
+  return data;
+}
+
+export async function createBankTransaction(payload: {
+  bankAccountId: number;
+  type: 'DEPOSIT' | 'WITHDRAWAL';
+  amount: number;
+  description: string;
+  reference?: string;
+  occurredOn?: string;
+}) {
+  const { data } = await api.post<{
+    transaction: BankTransactionRow;
+    accountBalance: number;
+  }>('/banks/transactions', payload);
+  return data;
+}
+
+export async function deleteBankTransaction(id: number, companyId: number) {
+  await api.delete(`/banks/transactions/${id}`, { params: { companyId } });
 }
 
 export async function refreshSession() {

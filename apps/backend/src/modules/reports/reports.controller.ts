@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { formatFilenameDate } from '../../common/pdf/pdf-format';
 import { ReportsService } from './reports.service';
 
 @Controller('reports')
@@ -30,7 +31,25 @@ export class ReportsController {
 
   @Get('margin')
   @Roles('ADMIN', 'MANAGER', 'ACCOUNTANT')
-  margin() {
+  margin(
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('companyId') companyIdRaw?: string,
+    @Query('companyIds') companyIdsRaw?: string,
+    @Query('departmentId') departmentIdRaw?: string,
+  ) {
+    if (dateFrom?.trim() && dateTo?.trim()) {
+      const companyIds = this.reportsService.parseCompanyIdsQuery(companyIdsRaw, companyIdRaw);
+      const departmentIdN = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : NaN;
+      const departmentId =
+        Number.isFinite(departmentIdN) && departmentIdN > 0 ? departmentIdN : undefined;
+      return this.reportsService.marginAnalysis({
+        dateFrom: dateFrom.trim(),
+        dateTo: dateTo.trim(),
+        companyIds,
+        departmentId,
+      });
+    }
     return this.reportsService.margin();
   }
 
@@ -92,7 +111,7 @@ export class ReportsController {
         ? { dateFrom: dateFrom.trim(), dateTo: dateTo.trim(), ...(departmentId != null ? { departmentId } : {}) }
         : { period, ...(departmentId != null ? { departmentId } : {}) };
     const buffer = await this.reportsService.buildSalesByProductPdf(companyId, opts);
-    const filenameDate = new Date().toISOString().slice(0, 10);
+    const filenameDate = formatFilenameDate();
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
@@ -124,7 +143,7 @@ export class ReportsController {
       companyIds,
       departmentId,
     );
-    const filenameDate = new Date().toISOString().slice(0, 10);
+    const filenameDate = formatFilenameDate();
     const scope = companyIds?.length === 1 ? String(companyIds[0]) : companyIds?.length ? 'multi' : 'all';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(

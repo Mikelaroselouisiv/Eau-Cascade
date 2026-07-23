@@ -2,10 +2,12 @@ import axios from 'axios';
 import { useState } from 'react';
 import type { CompanyProfile, DepartmentPrinterSettings, Sale } from '../types/api';
 import { exportSalePdf } from '../services/api';
-import { buildReceiptPayloadFromSale } from '../utils/receiptPayload';
+import { formatDateTime } from '../utils/datetime';
 import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { buildSaleDetailPrintHtml, openBrowserPrintWindow } from '../utils/saleReceiptBrowserHtml';
+import { buildReceiptPayloadFromSale } from '../utils/receiptPayload';
+import { formatUserLabel } from '../utils/userAttribution';
 
 function formatApiError(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -145,7 +147,7 @@ export function SaleDetailModal({
         <div className="modal-heading">
           <h2 id="sale-detail-title">Vente #{sale.id}</h2>
           <p className="dept-hint" style={{ margin: 0 }}>
-            {new Date(sale.createdAt).toLocaleString()}
+            {formatDateTime(sale.createdAt)}
             {companyName ? ` · ${companyName}` : ''}
           </p>
         </div>

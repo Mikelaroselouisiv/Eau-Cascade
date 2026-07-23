@@ -37,6 +37,10 @@ Quand tu copies un pattern depuis l’ancien code, remplace toujours :
 | `pos-freres-basiles-assets` | `pos-entrprise-israel-assets` |
 | IP / host Frères | IP / host de la VM Israel |
 
+## Fuseau horaire
+
+Toujours **`America/Port-au-Prince`** pour affichage, tickets, PDF et bornes de journée (jamais le TZ OS local).
+
 ## Script de garde
 
 Préférer `infra/scripts/assert-israel-gcp.ps1` avant tout provision / deploy GCP.

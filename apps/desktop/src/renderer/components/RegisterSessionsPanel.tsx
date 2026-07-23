@@ -2,22 +2,9 @@ import { useEffect, useState } from 'react';
 import { getDepartments, getUsers, listRegisterSessions } from '../services/api';
 import type { Department, RegisterSessionDetail, SessionUser } from '../types/api';
 import { formatMoney } from '../utils/currency';
+import { formatDateTime, formatYmd, defaultMonthStartYmd } from '../utils/datetime';
 import { formatRegisterCode } from '../utils/registerDisplay';
 import { formatUserLabel } from '../utils/userAttribution';
-
-function pad2(n: number) {
-  return String(n).padStart(2, '0');
-}
-
-function formatYmd(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-function defaultMonthStartYmd(): string {
-  const d = new Date();
-  d.setDate(1);
-  return formatYmd(d);
-}
 
 type Props = {
   companyId: number;
@@ -185,8 +172,8 @@ export function RegisterSessionsPanel({ companyId, onSelect }: Props) {
                   <td>{formatRegisterCode(s.register.code)}</td>
                   <td>{s.department.name}</td>
                   <td>{formatUserLabel(s.openedBy)}</td>
-                  <td>{new Date(s.openedAt).toLocaleString()}</td>
-                  <td>{s.closedAt ? new Date(s.closedAt).toLocaleString() : '—'}</td>
+                  <td>{formatDateTime(s.openedAt)}</td>
+                  <td>{s.closedAt ? formatDateTime(s.closedAt) : '—'}</td>
                   <td>{s.status === 'OPEN' ? 'Ouverte' : 'Fermée'}</td>
                   <td className="journal-amt">
                     {s.cashVariance != null ? formatMoney(Number(s.cashVariance)) : '—'}

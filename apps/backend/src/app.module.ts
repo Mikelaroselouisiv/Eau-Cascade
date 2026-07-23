@@ -4,7 +4,9 @@ import appConfig from './config/app.config';
 import jwtConfig from './config/jwt.config';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { BanksModule } from './modules/banks/banks.module';
 import { CompanyModule } from './modules/company/company.module';
+import { CreditModule } from './modules/credit/credit.module';
 import { DeliveriesModule } from './modules/deliveries/deliveries.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
 import { PackagingModule } from './modules/packaging/packaging.module';
@@ -38,6 +40,8 @@ import { PrismaModule } from './prisma/prisma.module';
     PackagingModule,
     ProductsModule,
     SalesModule,
+    CreditModule,
+    BanksModule,
     DeliveriesModule,
     InventoryModule,
     PaymentsModule,

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Édition Server : bootstrap automatique au 1er lancement (machine vierge).
  * Copie server-stack vers ProgramData, installe Docker, démarre la stack locale.
  */
@@ -20,7 +20,7 @@ function getBundledStackDir() {
 
 function getInstalledStackDir() {
   const programData = process.env.ProgramData || 'C:\\ProgramData';
-  return path.join(programData, 'POS Freres Basiles', 'server-stack');
+  return path.join(programData, 'POS Entreprise Israel', 'server-stack');
 }
 
 function copyDirRecursive(src, dest) {

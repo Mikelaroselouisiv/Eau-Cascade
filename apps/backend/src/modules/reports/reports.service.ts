@@ -1,12 +1,15 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
-  businessPeriodBounds,
-  nowBusinessYmd,
-  shiftBusinessYmd,
-  ymdToBusinessDayStart,
-  ymdToBusinessDayEnd,
-} from '../../common/utils/business-timezone';
+  addCalendarDaysYmd,
+  daysAgoStartInAppTz,
+  formatYmdInAppTz,
+  startOfMonthInAppTz,
+  startOfPreviousMonthInAppTz,
+  startOfTodayInAppTz,
+  ymdToDateEnd as papYmdToDateEnd,
+  ymdToDateStart as papYmdToDateStart,
+} from '../../common/time/timezone';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -26,6 +29,8 @@ export class ReportsService {
       .map((s) => Number.parseInt(s.trim(), 10))
       .filter((n) => Number.isFinite(n) && n > 0);
     if (fromList?.length) return [...new Set(fromList)];
+    const fromCompanyId = companyIdRaw ? Number.parseInt(companyIdRaw, 10) : NaN;
+    if (Number.isFinite(fromCompanyId) && fromCompanyId > 0) return [fromCompanyId];
     const single = companyIdsRaw ? Number.parseInt(companyIdsRaw, 10) : NaN;
     if (Number.isFinite(single) && single > 0) return [single];
     return undefined;
@@ -33,9 +38,9 @@ export class ReportsService {
 
   async revenue() {
     const now = new Date();
-    const { from: dayStart } = businessPeriodBounds('day', now);
-    const { from: weekStart } = businessPeriodBounds('week', now);
-    const { from: monthStart } = businessPeriodBounds('month', now);
+    const dayStart = startOfTodayInAppTz(now);
+    const weekStart = daysAgoStartInAppTz(7, now);
+    const monthStart = startOfMonthInAppTz(now);
 
     const [day, week, month] = await Promise.all([
       this.sumByDate(dayStart),
@@ -88,6 +93,127 @@ export class ReportsService {
       0,
     );
     return { revenue, cost, margin: revenue - cost };
+  }
+
+  /**
+   * Analyse des bénéfices (CA − coût des marchandises) sur une période.
+   * Coût = Product.cost × baseQuantity des lignes de vente COMPLETED.
+   */
+  async marginAnalysis(opts: {
+    dateFrom: string;
+    dateTo: string;
+    companyIds?: number[];
+    departmentId?: number;
+  }) {
+    const from = this.ymdToDateStart(opts.dateFrom);
+    const to = this.ymdToDateEnd(opts.dateTo);
+    if (from.getTime() > to.getTime()) {
+      throw new BadRequestException('dateFrom doit être antérieure ou égale à dateTo');
+    }
+
+    const ids = this.normalizeCompanyIds(opts.companyIds);
+    const departmentId =
+      opts.departmentId != null && opts.departmentId > 0 ? opts.departmentId : undefined;
+
+    const items = await this.prisma.saleItem.findMany({
+      where: {
+        sale: {
+          status: 'COMPLETED',
+          deletedAt: null,
+          createdAt: { gte: from, lte: to },
+        },
+        product: {
+          deletedAt: null,
+          ...(ids != null ? { companyId: { in: ids } } : {}),
+          ...(departmentId != null ? { departmentId } : {}),
+        },
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            cost: true,
+            companyId: true,
+            departmentId: true,
+            department: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    type Agg = {
+      productId: number;
+      name: string;
+      sku: string | null;
+      departmentName: string | null;
+      quantity: number;
+      revenue: number;
+      cost: number;
+    };
+    const byProduct = new Map<number, Agg>();
+    let revenue = 0;
+    let cost = 0;
+
+    for (const it of items) {
+      const lineRev = Number(it.subtotal);
+      const lineCost = Number(it.product.cost) * Number(it.baseQuantity);
+      revenue += lineRev;
+      cost += lineCost;
+      const prev = byProduct.get(it.product.id);
+      if (prev) {
+        prev.quantity += Number(it.baseQuantity);
+        prev.revenue += lineRev;
+        prev.cost += lineCost;
+      } else {
+        byProduct.set(it.product.id, {
+          productId: it.product.id,
+          name: it.product.name,
+          sku: it.product.sku,
+          departmentName: it.product.department?.name ?? null,
+          quantity: Number(it.baseQuantity),
+          revenue: lineRev,
+          cost: lineCost,
+        });
+      }
+    }
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    revenue = round2(revenue);
+    cost = round2(cost);
+    const margin = round2(revenue - cost);
+    const marginPct = revenue > 0.009 ? round2((margin / revenue) * 100) : null;
+
+    const products = [...byProduct.values()]
+      .map((p) => {
+        const pRev = round2(p.revenue);
+        const pCost = round2(p.cost);
+        const pMargin = round2(pRev - pCost);
+        return {
+          productId: p.productId,
+          name: p.name,
+          sku: p.sku,
+          departmentName: p.departmentName,
+          quantity: round2(p.quantity),
+          revenue: pRev,
+          cost: pCost,
+          margin: pMargin,
+          marginPct: pRev > 0.009 ? round2((pMargin / pRev) * 100) : null,
+        };
+      })
+      .sort((a, b) => b.margin - a.margin);
+
+    return {
+      dateFrom: opts.dateFrom,
+      dateTo: opts.dateTo,
+      revenue,
+      cost,
+      margin,
+      marginPct,
+      productsCount: products.length,
+      products,
+    };
   }
 
   private async sumByDate(fromDate: Date) {
@@ -272,19 +398,14 @@ export class ReportsService {
 
   async dashboardSummary(companyIds?: number[]) {
     const now = new Date();
-    const { from: dayStart } = businessPeriodBounds('day', now);
-    const { from: weekStart } = businessPeriodBounds('week', now);
-    const { from: monthStart } = businessPeriodBounds('month', now);
+    const todayYmd = formatYmdInAppTz(now);
+    const dayStart = startOfTodayInAppTz(now);
+    const weekStart = daysAgoStartInAppTz(7, now);
+    const monthStart = startOfMonthInAppTz(now);
 
-    const todayYmd = nowBusinessYmd(now);
-    const prevDayStart = ymdToBusinessDayStart(shiftBusinessYmd(todayYmd, -1));
-    const prevWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const [yy, mm] = todayYmd.split('-').map(Number);
-    const prevMonth = mm === 1 ? 12 : mm - 1;
-    const prevYear = mm === 1 ? yy - 1 : yy;
-    const prevMonthStart = ymdToBusinessDayStart(
-      `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`,
-    );
+    const prevDayStart = papYmdToDateStart(addCalendarDaysYmd(todayYmd, -1));
+    const prevWeekStart = papYmdToDateStart(addCalendarDaysYmd(todayYmd, -14));
+    const prevMonthStart = startOfPreviousMonthInAppTz(now);
 
     const [day, week, month] = await Promise.all([
       (async () => {
@@ -530,14 +651,25 @@ export class ReportsService {
     return Number(res?.[0]?.total ?? 0);
   }
 
-  /** Bornes de date alignées sur le tableau de bord (jour / 7 jours / mois en cours, Haïti). */
+  /** Bornes de date alignées sur le tableau de bord (jour / 7 jours / mois en cours) — Port-au-Prince. */
   private dashboardPeriodBounds(period: 'day' | 'week' | 'month'): { from: Date; to: Date } {
-    return businessPeriodBounds(period);
+    const now = new Date();
+    const dayStart = startOfTodayInAppTz(now);
+    const weekStart = daysAgoStartInAppTz(7, now);
+    const monthStart = startOfMonthInAppTz(now);
+    switch (period) {
+      case 'day':
+        return { from: dayStart, to: now };
+      case 'week':
+        return { from: weekStart, to: now };
+      case 'month':
+        return { from: monthStart, to: now };
+    }
   }
 
   private ymdToDateStart(ymd: string): Date {
     try {
-      return ymdToBusinessDayStart(ymd);
+      return papYmdToDateStart(ymd);
     } catch {
       throw new BadRequestException('dateFrom/dateTo attendues au format YYYY-MM-DD');
     }
@@ -545,7 +677,7 @@ export class ReportsService {
 
   private ymdToDateEnd(ymd: string): Date {
     try {
-      return ymdToBusinessDayEnd(ymd);
+      return papYmdToDateEnd(ymd);
     } catch {
       throw new BadRequestException('dateFrom/dateTo attendues au format YYYY-MM-DD');
     }
@@ -862,7 +994,7 @@ export class ReportsService {
         ? companies[0].name
         : companies.length > 1
           ? companies.map((c) => c.name).join(', ')
-          : 'POS Frères Baziles';
+          : 'POS Entreprise Israel';
     const logoUrl = companies.length === 1 ? companies[0].logoUrl : null;
     const deptLine =
       departmentId != null && departmentId > 0
