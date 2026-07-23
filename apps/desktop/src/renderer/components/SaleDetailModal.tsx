@@ -7,7 +7,6 @@ import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { buildSaleDetailPrintHtml, openBrowserPrintWindow } from '../utils/saleReceiptBrowserHtml';
 import { buildReceiptPayloadFromSale } from '../utils/receiptPayload';
-import { formatUserLabel } from '../utils/userAttribution';
 
 function formatApiError(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
