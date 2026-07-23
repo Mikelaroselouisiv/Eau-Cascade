@@ -45,12 +45,12 @@ Write-Host "Upload $ResolvedReleaseDir → $dest"
 foreach ($pattern in $patterns) {
   $files = Get-ChildItem -LiteralPath $ResolvedReleaseDir -Filter $pattern -File -ErrorAction SilentlyContinue
   foreach ($file in $files) {
-    Write-Host "  → $($file.Name)"
+    Write-Host "  -> $($file.Name)"
     & gsutil cp $file.FullName $dest
     if ($LASTEXITCODE -ne 0) {
-      throw "gsutil cp a échoué pour $($file.Name)"
+      throw "gsutil cp a echoue pour $($file.Name)"
     }
   }
 }
 
-Write-Host "Terminé. URL publique (Remote updater) : https://storage.googleapis.com/$Bucket/installers/$Edition/"
+Write-Host "Termine. URL publique (Remote updater) : https://storage.googleapis.com/$Bucket/installers/$Edition/"

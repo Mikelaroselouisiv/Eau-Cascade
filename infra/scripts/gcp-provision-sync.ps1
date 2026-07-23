@@ -77,6 +77,8 @@ Write-Host 'SYNC_API_KEY alignée sur la VM GCP'
 if ($SkipDeploy) { exit 0 }
 
 Write-Host '==> Déploiement GCP' -ForegroundColor Cyan
+# Avoid leftover root-owned /tmp files blocking pscp overwrite
+gcloud compute ssh $VmName --zone=$VmZone --project=$ProjectId --command="sudo rm -f /tmp/docker-compose.gcp.yml /tmp/pos-deploy.sh"
 $remoteCompose = '/tmp/docker-compose.gcp.yml'
 gcloud compute scp $ComposeGcp "${VmName}:${remoteCompose}" --zone=$VmZone --project=$ProjectId
 
@@ -87,21 +89,27 @@ REMOTE_DIR='__REMOTE_DIR__'
 sudo cp /tmp/docker-compose.gcp.yml "$REMOTE_DIR/docker-compose.gcp.yml"
 cd "$REMOTE_DIR"
 if command -v gcloud >/dev/null 2>&1; then
-  sudo gcloud auth configure-docker northamerica-northeast1-docker.pkg.dev --quiet || true
+  gcloud auth configure-docker northamerica-northeast1-docker.pkg.dev --quiet || true
 fi
-COMPOSE_CMD="docker-compose"
-if ! command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE_CMD="docker compose"
+# Prefer Compose V2 — legacy docker-compose 1.29 hits ContainerConfig KeyError
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE=(docker-compose)
+else
+  echo "No docker compose found" >&2
+  exit 1
 fi
-sudo $COMPOSE_CMD -f docker-compose.gcp.yml --env-file .env.prod pull
-sudo $COMPOSE_CMD -f docker-compose.gcp.yml --env-file .env.prod up -d --force-recreate backend
-sudo $COMPOSE_CMD -f docker-compose.gcp.yml ps
+"${COMPOSE[@]}" -f docker-compose.gcp.yml --env-file .env.prod pull backend
+"${COMPOSE[@]}" -f docker-compose.gcp.yml --env-file .env.prod up -d --no-deps --force-recreate backend
+"${COMPOSE[@]}" -f docker-compose.gcp.yml ps
+rm -f /tmp/docker-compose.gcp.yml
 '@ -replace '__REMOTE_DIR__', $RemoteDir
 
 $deploySh = Join-Path $env:TEMP "pos-deploy-$([guid]::NewGuid().ToString('n')).sh"
 [System.IO.File]::WriteAllText($deploySh, ($deployCmd -replace "`r`n", "`n"))
 gcloud compute scp $deploySh "${VmName}:/tmp/pos-deploy.sh" --zone=$VmZone --project=$ProjectId
-gcloud compute ssh $VmName --zone=$VmZone --project=$ProjectId --command="bash /tmp/pos-deploy.sh && rm -f /tmp/pos-deploy.sh"
+gcloud compute ssh $VmName --zone=$VmZone --project=$ProjectId --command="sudo bash /tmp/pos-deploy.sh && sudo rm -f /tmp/pos-deploy.sh"
 Remove-Item -LiteralPath $deploySh -Force -ErrorAction SilentlyContinue
 
 Write-Host '==> Terminé' -ForegroundColor Green
