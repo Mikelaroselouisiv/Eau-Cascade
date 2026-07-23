@@ -74,3 +74,14 @@ export function formatMoneyHtg(value: unknown): string {
   const m = formatMoney(value);
   return m === '—' ? m : `${m} HTG`;
 }
+
+/** Date AAAA-MM-JJ (fuseau métier) pour noms de fichiers PDF. */
+export function formatFilenameDate(value: Date | string | number = new Date()): string {
+  const d = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(d.getTime())) {
+    const now = partsInBusinessTz(new Date());
+    return `${now.year}-${now.month}-${now.day}`;
+  }
+  const p = partsInBusinessTz(d);
+  return `${p.year}-${p.month}-${p.day}`;
+}
