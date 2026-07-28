@@ -69,10 +69,12 @@ export class GoodsReceiptLineDto {
   @Min(0.0001)
   quantity: number;
 
+  /** Optionnel : si absent, le coût produit / prix estimé commande est utilisé. */
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  unitCost: number;
+  unitCost?: number;
 }
 
 export class CreateGoodsReceiptDto {

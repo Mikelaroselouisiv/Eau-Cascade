@@ -30,6 +30,10 @@ export function buildReceiptPayloadFromSale(
     price: Number(it.unitPrice),
   }));
   const total = Number(sale.total);
+  const amountPaid = Number(sale.amountPaid ?? 0);
+  const amountReceived = Number(sale.amountReceived ?? 0);
+  const changeDue = Number(sale.changeDue ?? 0);
+  const balanceDue = Math.max(0, Math.round((total - amountPaid) * 100) / 100);
   const paperWidth: 58 | 80 = printer?.paperWidth === 80 ? 80 : 58;
   return {
     saleId: sale.id,
@@ -41,6 +45,9 @@ export function buildReceiptPayloadFromSale(
     receiptClientName: sale.clientName && sale.clientName.trim() ? sale.clientName.trim() : null,
     items,
     total,
+    amountReceived: amountReceived > 0.009 ? amountReceived : undefined,
+    changeDue: changeDue > 0.009 ? changeDue : undefined,
+    balanceDue: balanceDue > 0.009 ? balanceDue : undefined,
     paymentMode: paymentModeFromSale(sale),
     paperWidth,
     printerName: printer?.deviceName ?? '',

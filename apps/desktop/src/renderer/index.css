@@ -1262,6 +1262,71 @@ select {
   font-size: 1.1rem;
 }
 
+.pos-tender-block {
+  margin: 0 0 0.65rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.pos-tender-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.pos-tender-change {
+  color: #b45309;
+}
+
+.pos-tender-balance {
+  color: #b91c1c;
+}
+
+.pos-tender-ok {
+  color: #15803d;
+}
+
+.pos-cash-gaps {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.75rem;
+  border-top: 1px dashed var(--ei-border);
+  padding-top: 0.75rem;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.pos-cash-gap-list h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ei-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.pos-cash-gap-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.pos-cash-gap-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--ei-border);
+  border-radius: 8px;
+  background: var(--ei-surface-2);
+  font-size: 0.85rem;
+}
+
 .table-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1554,6 +1619,110 @@ button.password-field__toggle:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.po-amount-monitor {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid #c7d2fe;
+  background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 55%, #fff 100%);
+}
+
+.po-amount-monitor-head {
+  margin-bottom: 0.65rem;
+}
+
+.po-amount-monitor-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #312e81;
+}
+
+.po-amount-monitor-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #64748b;
+}
+
+.po-amount-monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+  gap: 0.55rem;
+}
+
+.po-amount-stat {
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #e2e8f0;
+}
+
+.po-amount-stat--global {
+  border-color: #a5b4fc;
+  background: #fff;
+}
+
+.po-amount-stat-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+
+.po-amount-stat-value {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+}
+
+.po-amount-stat-meta {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.po-amount-monitor-warn,
+.po-amount-monitor-filter {
+  margin: 0.55rem 0 0;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.po-amount-monitor-warn {
+  color: #b45309;
+}
+
+.po-draft-total {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.po-modal-amounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.po-amount-incomplete {
+  margin-left: 0.15rem;
+  color: #b45309;
+  font-weight: 800;
 }
 
 .purchasing-toolbar {
@@ -2370,6 +2539,106 @@ button.password-field__toggle:focus-visible {
 
 .stock-alert-actions {
   margin-top: 0.85rem;
+}
+
+/* Stock zéro — liste compacte (moins encombrante que les alertes faibles) */
+.stock-zero-panel {
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.9rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.stock-zero-panel--critical {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.stock-zero-panel--ok {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.stock-zero-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.stock-zero-panel-copy {
+  flex: 1;
+  min-width: min(100%, 12rem);
+}
+
+.stock-zero-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 750;
+  color: #334155;
+  letter-spacing: -0.01em;
+}
+
+.stock-zero-lead {
+  margin: 0.15rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+.stock-zero-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.65rem;
+  height: 1.65rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: #475569;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.stock-zero-list {
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.25rem 0.65rem;
+  max-height: 9.5rem;
+  overflow: auto;
+}
+
+.stock-zero-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.4rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.stock-zero-item-name {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.stock-zero-item-dept {
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stock-zero-actions {
+  margin-top: 0.45rem;
 }
 
 .stock-movements-panel {

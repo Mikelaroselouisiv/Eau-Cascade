@@ -122,6 +122,7 @@ export function InventoryPhysicalSection({
   const [exportingHistory, setExportingHistory] = useState(false);
   const [sessionKind, setSessionKind] = useState<InventorySessionKind>('OPENING');
   const [asOfDate, setAsOfDate] = useState('');
+  const [onlyPositiveStock, setOnlyPositiveStock] = useState(true);
 
   useEffect(() => {
     if (companyId === '') {
@@ -145,7 +146,9 @@ export function InventoryPhysicalSection({
     try {
       const asOf = asOfDate.trim() || undefined;
       const sheets = await Promise.all(
-        selectedDeptIds.map((id) => getInventoryCountSheet(id, { asOf })),
+        selectedDeptIds.map((id) =>
+          getInventoryCountSheet(id, { asOf, onlyPositiveStock }),
+        ),
       );
       const products: SheetProductRow[] = [];
       let generatedAt = new Date().toISOString();
@@ -166,7 +169,7 @@ export function InventoryPhysicalSection({
     } finally {
       setSheetLoading(false);
     }
-  }, [selectedDeptIds, asOfDate]);
+  }, [selectedDeptIds, asOfDate, onlyPositiveStock]);
 
   const loadSessions = useCallback(async () => {
     setMsg('');
@@ -244,7 +247,13 @@ export function InventoryPhysicalSection({
           opened.push(await getInventorySession(existing.id));
           continue;
         }
-        opened.push(await createInventorySession({ departmentId: deptId, kind: sessionKind }));
+        opened.push(
+          await createInventorySession({
+            departmentId: deptId,
+            kind: sessionKind,
+            onlyPositiveStock,
+          }),
+        );
       }
       await loadSessions();
       if (opened.length === 1) {
@@ -274,6 +283,7 @@ export function InventoryPhysicalSection({
       for (const deptId of selectedDeptIds) {
         const blob = await exportInventoryCountSheetPdf(deptId, {
           asOf: asOfDate.trim() || undefined,
+          onlyPositiveStock,
         });
         const dept = departments.find((d) => d.id === deptId)?.name ?? 'dept';
         const safe = `${co}_${dept}`.replace(/[^\w\- ]+/g, '').replace(/\s+/g, '_').slice(0, 50);
@@ -609,6 +619,15 @@ export function InventoryPhysicalSection({
               </div>
             </fieldset>
 
+            <label className="checkbox-row" style={{ marginBottom: '0.75rem' }}>
+              <input
+                type="checkbox"
+                checked={onlyPositiveStock}
+                onChange={(e) => setOnlyPositiveStock(e.target.checked)}
+              />
+              Inventaire des stocks disponibles (&gt;&nbsp;0) uniquement
+            </label>
+
             <div
               style={{
                 display: 'flex',
@@ -636,6 +655,7 @@ export function InventoryPhysicalSection({
               </button>
               <span className="dept-hint" style={{ margin: 0 }}>
                 {sheet.products.length} produit(s)
+                {onlyPositiveStock ? ' · stock > 0' : ''}
                 {sheet.asOf ? ` · ${formatDateTime(sheet.asOf)}` : ''}
               </span>
             </div>

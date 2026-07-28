@@ -15,6 +15,7 @@ import {
   getGlobalStockSnapshot,
   getInventoryAlerts,
   getInventoryMovements,
+  getZeroStockAlerts,
   getPrinterSettings,
   cancelSale,
   deleteSalePermanently,
@@ -49,10 +50,15 @@ import { MoneyField } from '../components/MoneyField';
 import { SaleDetailModal } from '../components/SaleDetailModal';
 import { VentesDepartmentModal } from '../components/VentesDepartmentModal';
 import { StockLowAlertsPanel } from '../components/StockLowAlertsPanel';
+import { StockZeroAlertsPanel } from '../components/StockZeroAlertsPanel';
 import { StockMovementsPanel } from '../components/StockMovementsPanel';
 import { InventoryPhysicalSection } from '../components/InventoryPhysicalSection';
 import { formatMoney } from '../utils/currency';
 import { formatDateTime, formatYmd, defaultMonthStartYmd, ymdStartIso, ymdEndIso } from '../utils/datetime';
+import {
+  EXPENSE_LABEL_OPTIONS,
+  EXPENSE_LABEL_OTHER,
+} from '../utils/expenseLabels';
 import { buildDisbursementOrderPayload } from '../utils/disbursementOrderPayload';
 
 export function DashboardPage() {
@@ -64,6 +70,7 @@ export function DashboardPage() {
   const canAccessDashboard = isAdmin || isManager;
   const canManageFinance = isAdmin || isManager;
   const canCancelOrRefund = isAdmin || canPerm('sales.cancel');
+  const canSeePurchases = isAdmin;
 
   const [tab, setTab] = useState<TabId>(isAdmin ? 'synthese' : 'ventes');
   const [inventoryHistorySlot, setInventoryHistorySlot] = useState<HTMLDivElement | null>(null);
@@ -73,7 +80,8 @@ export function DashboardPage() {
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [companyId, setCompanyId] = useState<number | ''>('');
 
-  const [expenseDesc, setExpenseDesc] = useState('');
+  const [expenseLabelChoice, setExpenseLabelChoice] = useState<string>('');
+  const [expenseDescOther, setExpenseDescOther] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseEntryDate, setExpenseEntryDate] = useState(() => formatYmd(new Date()));
   const [expensePrintOrder, setExpensePrintOrder] = useState(false);
@@ -86,7 +94,28 @@ export function DashboardPage() {
 
   const [ledgerDateFrom, setLedgerDateFrom] = useState(defaultMonthStartYmd);
   const [ledgerDateTo, setLedgerDateTo] = useState(() => formatYmd(new Date()));
-  const [ledgerNature, setLedgerNature] = useState<'all' | 'purchase' | 'sale' | 'expense'>('all');
+  const [ledgerNature, setLedgerNature] = useState<'all' | 'purchase' | 'sale' | 'expense'>(
+    isAdmin ? 'all' : 'expense',
+  );
+
+  /** Nature journal : les managers ne voient pas les lignes d’achat. */
+  const effectiveLedgerNature = useMemo((): 'all' | 'purchase' | 'sale' | 'expense' => {
+    if (canSeePurchases) return ledgerNature;
+    if (ledgerNature === 'purchase') return 'expense';
+    return ledgerNature;
+  }, [canSeePurchases, ledgerNature]);
+
+  useEffect(() => {
+    if (!canSeePurchases && ledgerNature === 'purchase') {
+      setLedgerNature('expense');
+    }
+  }, [canSeePurchases, ledgerNature]);
+
+  function sanitizeLedgerItems(items: FinanceLedgerRow[]) {
+    if (canSeePurchases) return items;
+    return items.filter((row) => row.kind !== 'PURCHASE');
+  }
+
   const [ledgerItems, setLedgerItems] = useState<FinanceLedgerRow[]>([]);
   const [ledgerTotal, setLedgerTotal] = useState(0);
   const [ledgerSkip, setLedgerSkip] = useState(0);
@@ -99,6 +128,11 @@ export function DashboardPage() {
   const [alertsSkip, setAlertsSkip] = useState(0);
   const alertsTake = 10;
   const [alertsLoading, setAlertsLoading] = useState(false);
+  const [zeroAlerts, setZeroAlerts] = useState<Product[]>([]);
+  const [zeroAlertsTotal, setZeroAlertsTotal] = useState(0);
+  const [zeroAlertsSkip, setZeroAlertsSkip] = useState(0);
+  const zeroAlertsTake = 8;
+  const [zeroAlertsLoading, setZeroAlertsLoading] = useState(false);
 
   const [movementsLoading, setMovementsLoading] = useState(false);
   const [movements, setMovements] = useState<StockMovementRow[]>([]);
@@ -259,12 +293,16 @@ export function DashboardPage() {
 
     void Promise.all([
       getInventoryAlerts({ threshold: 5, companyId: cid, skip: 0, take: alertsTake }),
+      getZeroStockAlerts({ companyId: cid, skip: 0, take: zeroAlertsTake }),
       getInventoryMovements({ companyId: cid, skip: 0, take: 5, order: 'desc' }),
     ])
-      .then(([a, mov]) => {
+      .then(([a, z, mov]) => {
         setAlerts(a.items);
         setAlertsTotal(a.total);
         setAlertsSkip(0);
+        setZeroAlerts(z.items);
+        setZeroAlertsTotal(z.total);
+        setZeroAlertsSkip(0);
         setMovements(mov.items);
         setMovementsTotal(mov.total);
       })
@@ -394,18 +432,19 @@ export function DashboardPage() {
       companyId: Number(companyId),
       dateFrom: ledgerDateFrom,
       dateTo: ledgerDateTo,
-      nature: ledgerNature,
+      nature: effectiveLedgerNature,
       skip: 0,
       take: ledgerTake,
     })
       .then((res) => {
-        setLedgerItems(res.items);
-        setLedgerTotal(res.total);
+        const items = sanitizeLedgerItems(res.items);
+        setLedgerItems(items);
+        setLedgerTotal(canSeePurchases ? res.total : items.length);
         setLedgerSkip(0);
       })
       .catch(() => setMsg('Impossible de charger le journal unifié.', { persist: true }))
       .finally(() => setLedgerLoading(false));
-  }, [tab, companyId, ledgerDateFrom, ledgerDateTo, ledgerNature, canManageFinance, setMsg]);
+  }, [tab, companyId, ledgerDateFrom, ledgerDateTo, effectiveLedgerNature, canManageFinance, canSeePurchases, setMsg]);
 
   async function refreshAchatsLedger() {
     if (companyId === '') return;
@@ -420,14 +459,15 @@ export function DashboardPage() {
         companyId: cid,
         dateFrom: ledgerDateFrom,
         dateTo: ledgerDateTo,
-        nature: ledgerNature,
+        nature: effectiveLedgerNature,
         skip: 0,
         take: ledgerTake,
       }),
     ]);
     setAchatsTotalsSnapshot(range);
-    setLedgerItems(ledgerRes.items);
-    setLedgerTotal(ledgerRes.total);
+    const items = sanitizeLedgerItems(ledgerRes.items);
+    setLedgerItems(items);
+    setLedgerTotal(canSeePurchases ? ledgerRes.total : items.length);
     setLedgerSkip(0);
   }
 
@@ -436,7 +476,11 @@ export function DashboardPage() {
     if (companyId === '') return;
     setMsg('');
     const amount = Number(expenseAmount);
-    if (!expenseDesc.trim() || !Number.isFinite(amount) || amount <= 0) return;
+    const description =
+      expenseLabelChoice === EXPENSE_LABEL_OTHER
+        ? expenseDescOther.trim()
+        : expenseLabelChoice.trim();
+    if (!description || !Number.isFinite(amount) || amount <= 0) return;
     if (expensePrintOrder && expenseDeptId === '') {
       setMsg('Choisissez un département pour imprimer l’ordre.', { persist: true });
       return;
@@ -446,7 +490,7 @@ export function DashboardPage() {
       const entry = await createFinanceEntry({
         type: 'EXPENSE',
         amount,
-        description: expenseDesc.trim(),
+        description,
         companyId: Number(companyId),
         entryDate: expenseEntryDate.trim() || undefined,
       });
@@ -479,7 +523,8 @@ export function DashboardPage() {
         printNote = ' Impression disponible uniquement dans l’application bureau.';
       }
 
-      setExpenseDesc('');
+      setExpenseLabelChoice('');
+      setExpenseDescOther('');
       setExpenseAmount('');
       setExpenseEntryDate(formatYmd(new Date()));
       setExpensePrintOrder(false);
@@ -529,13 +574,14 @@ export function DashboardPage() {
         companyId: cid,
         dateFrom: ledgerDateFrom,
         dateTo: ledgerDateTo,
-        nature: ledgerNature,
+        nature: effectiveLedgerNature,
         skip: nextSkip,
         take: ledgerTake,
       });
-      setLedgerItems((prev) => [...prev, ...res.items]);
+      const extra = sanitizeLedgerItems(res.items);
+      setLedgerItems((prev) => [...prev, ...extra]);
       setLedgerSkip(nextSkip);
-      setLedgerTotal(res.total);
+      setLedgerTotal(canSeePurchases ? res.total : nextSkip + extra.length);
     } catch {
       setMsg('Impossible de charger plus de lignes du journal.', { persist: true });
     } finally {
@@ -794,6 +840,28 @@ export function DashboardPage() {
     }
   }
 
+  async function loadMoreZeroAlerts() {
+    if (zeroAlertsLoading || companyId === '') return;
+    if (zeroAlertsSkip + zeroAlertsTake >= zeroAlertsTotal) return;
+    setZeroAlertsLoading(true);
+    try {
+      const cid = Number(companyId);
+      const nextSkip = zeroAlertsSkip + zeroAlertsTake;
+      const z = await getZeroStockAlerts({
+        companyId: cid,
+        skip: nextSkip,
+        take: zeroAlertsTake,
+      });
+      setZeroAlerts((prev) => [...prev, ...z.items]);
+      setZeroAlertsSkip(nextSkip);
+      setZeroAlertsTotal(z.total);
+    } catch {
+      setMsg("Impossible de charger plus de ruptures.", { persist: true });
+    } finally {
+      setZeroAlertsLoading(false);
+    }
+  }
+
   const movementProductOptions = useMemo(() => {
     const map = new Map<number, string>();
     for (const m of movements) {
@@ -833,7 +901,7 @@ export function DashboardPage() {
         ] as const)
       : ([
           ['ventes', 'Ventes'],
-          ['achats', 'Achats & Dépenses'],
+          ['achats', 'Dépenses'],
           ['banque', 'Banque'],
           ['benefices', 'Analyse des bénéfices'],
         ] as const)
@@ -1182,8 +1250,33 @@ export function DashboardPage() {
                   <form className="form-grid" onSubmit={(e) => void submitExpense(e)}>
                     <label>
                       Libellé
-                      <input value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} required />
+                      <select
+                        value={expenseLabelChoice}
+                        onChange={(e) => {
+                          setExpenseLabelChoice(e.target.value);
+                          if (e.target.value !== EXPENSE_LABEL_OTHER) setExpenseDescOther('');
+                        }}
+                        required
+                      >
+                        <option value="">— Choisir —</option>
+                        {EXPENSE_LABEL_OPTIONS.map((label) => (
+                          <option key={label} value={label}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
+                    {expenseLabelChoice === EXPENSE_LABEL_OTHER ? (
+                      <label>
+                        Préciser
+                        <input
+                          value={expenseDescOther}
+                          onChange={(e) => setExpenseDescOther(e.target.value)}
+                          required
+                          placeholder="Libellé libre…"
+                        />
+                      </label>
+                    ) : null}
                     <MoneyField
                       label="Montant"
                       min={0.01}
@@ -1233,7 +1326,7 @@ export function DashboardPage() {
                 </div>
 
                 <div className="card">
-                  <h2>Totaux (achats & dépenses manuelles)</h2>
+                  <h2>{canSeePurchases ? 'Totaux (achats & dépenses manuelles)' : 'Totaux (dépenses manuelles)'}</h2>
                   <div
                     className="form-grid inline"
                     style={{
@@ -1268,10 +1361,12 @@ export function DashboardPage() {
                     </p>
                   ) : (
                     <section className="grid kpis" style={{ marginBottom: 0 }}>
-                      <div className="card kpi">
-                        <div className="kpi-label">Achats reçus</div>
-                        <div className="kpi-value">{formatMoney(achatsTotalsSnapshot.purchases)}</div>
-                      </div>
+                      {canSeePurchases ? (
+                        <div className="card kpi">
+                          <div className="kpi-label">Achats reçus</div>
+                          <div className="kpi-value">{formatMoney(achatsTotalsSnapshot.purchases)}</div>
+                        </div>
+                      ) : null}
                       <div className="card kpi">
                         <div className="kpi-label">Dépenses manuelles</div>
                         <div className="kpi-value">{formatMoney(achatsTotalsSnapshot.manualExpenses)}</div>
@@ -1282,7 +1377,7 @@ export function DashboardPage() {
               </section>
 
               <section className="card" style={{ marginTop: '1rem' }}>
-                <h2>Journal (achats, ventes caisse, dépenses)</h2>
+                <h2>{canSeePurchases ? 'Journal (achats, ventes caisse, dépenses)' : 'Journal (ventes caisse, dépenses)'}</h2>
                 <div
                   className="form-grid inline"
                   style={{
@@ -1300,7 +1395,7 @@ export function DashboardPage() {
                       }
                     >
                       <option value="all">Toutes</option>
-                      <option value="purchase">Achats</option>
+                      {canSeePurchases ? <option value="purchase">Achats</option> : null}
                       <option value="sale">Ventes (caisse)</option>
                       <option value="expense">Dépenses</option>
                     </select>
@@ -1331,7 +1426,7 @@ export function DashboardPage() {
                         companyId: Number(companyId),
                         dateFrom: ledgerDateFrom,
                         dateTo: ledgerDateTo,
-                        nature: ledgerNature,
+                        nature: effectiveLedgerNature === 'all' && !canSeePurchases ? 'expense' : effectiveLedgerNature,
                       })
                         .then((blob) => {
                           const url = URL.createObjectURL(blob);
@@ -1429,6 +1524,14 @@ export function DashboardPage() {
                 onLoadMore={() => void loadMoreAlerts()}
               />
 
+              <StockZeroAlertsPanel
+                alerts={zeroAlerts}
+                total={zeroAlertsTotal}
+                loading={zeroAlertsLoading}
+                canLoadMore={zeroAlertsSkip + zeroAlertsTake < zeroAlertsTotal}
+                onLoadMore={() => void loadMoreZeroAlerts()}
+              />
+
               <InventoryPhysicalSection
                 companies={companies}
                 visible={tab === 'stock'}
@@ -1439,6 +1542,28 @@ export function DashboardPage() {
                     order: movementDateOrder,
                     take: movementsPageSize,
                   });
+                  if (companyId !== '') {
+                    const cid = Number(companyId);
+                    void getInventoryAlerts({
+                      threshold: 5,
+                      companyId: cid,
+                      skip: 0,
+                      take: alertsTake,
+                    }).then((a) => {
+                      setAlerts(a.items);
+                      setAlertsTotal(a.total);
+                      setAlertsSkip(0);
+                    });
+                    void getZeroStockAlerts({
+                      companyId: cid,
+                      skip: 0,
+                      take: zeroAlertsTake,
+                    }).then((z) => {
+                      setZeroAlerts(z.items);
+                      setZeroAlertsTotal(z.total);
+                      setZeroAlertsSkip(0);
+                    });
+                  }
                 }}
               />
 

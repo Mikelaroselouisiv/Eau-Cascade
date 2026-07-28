@@ -6,6 +6,7 @@ import {
   deleteGoodsReceipt,
   deletePurchaseOrder,
   getPurchaseOrder,
+  getPurchaseOrdersAmountSummary,
   listPurchaseOrders,
   receivePurchaseOrder,
 } from '../services/api';
@@ -14,6 +15,7 @@ import type {
   Product,
   PurchaseOrderDetail,
   PurchaseOrderListItem,
+  PurchaseOrdersAmountSummary,
   ReceptionStatus,
 } from '../types/api';
 import { MoneyField } from './MoneyField';
@@ -21,6 +23,7 @@ import { stockPackagingLabel } from '../utils/packagingDisplay';
 import { formatQuantity } from '../utils/formatQuantity';
 import { formatDateTime } from '../utils/datetime';
 import { formatUserLabel } from '../utils/userAttribution';
+import { formatMoney } from '../utils/currency';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { useAuth } from '../context/AuthContext';
 
@@ -79,6 +82,7 @@ export function PurchasingSection({ visible, companyId, departments, products, o
   const { can } = useAuth();
   const isAdmin = can(['ADMIN']);
   const [orders, setOrders] = useState<PurchaseOrderListItem[]>([]);
+  const [amountSummary, setAmountSummary] = useState<PurchaseOrdersAmountSummary | null>(null);
   const [loadErr, setLoadErr] = useState('');
   const [msg, setMsg] = useAutoClearMessage();
   const [busy, setBusy] = useState(false);
@@ -103,11 +107,21 @@ export function PurchasingSection({ visible, companyId, departments, products, o
     if (typeof companyId !== 'number') return;
     setLoadErr('');
     try {
-      setOrders(await listPurchaseOrders(companyId));
+      const list = await listPurchaseOrders(companyId);
+      setOrders(list);
+      if (isAdmin) {
+        try {
+          setAmountSummary(await getPurchaseOrdersAmountSummary(companyId));
+        } catch {
+          setAmountSummary(null);
+        }
+      } else {
+        setAmountSummary(null);
+      }
     } catch (err) {
       setLoadErr(formatApiError(err, 'Chargement impossible.'));
     }
-  }, [companyId]);
+  }, [companyId, isAdmin]);
 
   useEffect(() => {
     if (!visible) return;
@@ -136,6 +150,38 @@ export function PurchasingSection({ visible, companyId, departments, products, o
       return ref.includes(q) || supplier.includes(q);
     });
   }, [orders, filterDeptId, filterReception, search]);
+
+  const filteredAmountTotals = useMemo(() => {
+    if (!isAdmin) return null;
+    let amountOrderedEst = 0;
+    let amountReceived = 0;
+    let amountPendingEst = 0;
+    for (const o of ordersFiltered) {
+      if (o.status === 'CANCELLED') continue;
+      amountOrderedEst += Number(o.amountOrderedEst ?? 0);
+      amountReceived += Number(o.amountReceived ?? 0);
+      amountPendingEst += Number(o.amountPendingEst ?? 0);
+    }
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    return {
+      count: ordersFiltered.filter((o) => o.status !== 'CANCELLED').length,
+      amountOrderedEst: round2(amountOrderedEst),
+      amountReceived: round2(amountReceived),
+      amountPendingEst: round2(amountPendingEst),
+    };
+  }, [isAdmin, ordersFiltered]);
+
+  const draftOrderTotal = useMemo(() => {
+    if (!isAdmin) return 0;
+    let total = 0;
+    for (const l of poLines) {
+      const qty = Number(l.qty.replace(',', '.'));
+      const price = Number(l.unitCost.replace(',', '.'));
+      if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price < 0) continue;
+      total += qty * price;
+    }
+    return Math.round(total * 100) / 100;
+  }, [isAdmin, poLines]);
 
   async function openReception(orderId: number) {
     setMsg('');
@@ -215,18 +261,23 @@ export function PurchasingSection({ visible, companyId, departments, products, o
     const lines = activeOrder.lines
       .map((line) => {
         const rawQty = (receiveQty[line.productId] ?? '').trim().replace(',', '.');
-        const rawCost = (receiveCost[line.productId] ?? '').trim().replace(',', '.');
         if (!rawQty) return null;
         const quantity = Number(rawQty);
-        const unitCost = Number(rawCost);
         if (!Number.isFinite(quantity) || quantity <= 0) return null;
-        if (!Number.isFinite(unitCost) || unitCost < 0) return null;
-        return { productId: line.productId, quantity, unitCost };
+        if (isAdmin) {
+          const rawCost = (receiveCost[line.productId] ?? '').trim().replace(',', '.');
+          const unitCost = Number(rawCost);
+          if (!Number.isFinite(unitCost) || unitCost < 0) return null;
+          return { productId: line.productId, quantity, unitCost };
+        }
+        return { productId: line.productId, quantity };
       })
-      .filter((l): l is { productId: number; quantity: number; unitCost: number } => l != null);
+      .filter(
+        (l): l is { productId: number; quantity: number; unitCost?: number } => l != null,
+      );
 
     if (lines.length === 0) {
-      setMsg('Quantité requise.', { persist: true });
+      setMsg(isAdmin ? 'Quantité et prix requis.' : 'Quantité requise.', { persist: true });
       return;
     }
 
@@ -332,17 +383,19 @@ export function PurchasingSection({ visible, companyId, departments, products, o
                 }}
               />
             </label>
-            <MoneyField
-              label="Prix / u."
-              type="text"
-              inputMode="decimal"
-              value={row.unitCost}
-              onChange={(e) => {
-                const next = [...lines];
-                next[idx] = { ...next[idx], unitCost: e.target.value };
-                setLines(next);
-              }}
-            />
+            {isAdmin ? (
+              <MoneyField
+                label="Prix / u."
+                type="text"
+                inputMode="decimal"
+                value={row.unitCost}
+                onChange={(e) => {
+                  const next = [...lines];
+                  next[idx] = { ...next[idx], unitCost: e.target.value };
+                  setLines(next);
+                }}
+              />
+            ) : null}
             <button
               type="button"
               className="btn btn-ghost btn-sm purchasing-line-remove"
@@ -375,6 +428,48 @@ export function PurchasingSection({ visible, companyId, departments, products, o
     <section className="card purchasing-page">
       {loadErr ? <p className="error-text">{loadErr}</p> : null}
       {msg ? <p className={/créée|enregistrée|complète|supprimée/i.test(msg) ? 'info-text' : 'error-text'}>{msg}</p> : null}
+
+      {isAdmin && amountSummary ? (
+        <div className="po-amount-monitor" aria-label="Suivi des montants de commandes">
+          <div className="po-amount-monitor-head">
+            <h3 className="po-amount-monitor-title">Suivi montants commandes</h3>
+          </div>
+          <div className="po-amount-monitor-grid">
+            <div className="po-amount-stat po-amount-stat--global">
+              <span className="po-amount-stat-label">Total commandé (estimé)</span>
+              <strong className="po-amount-stat-value">{formatMoney(amountSummary.amountOrderedEst)}</strong>
+              <span className="po-amount-stat-meta">{amountSummary.orderCount} commande(s)</span>
+            </div>
+            <div className="po-amount-stat">
+              <span className="po-amount-stat-label">Déjà reçu</span>
+              <strong className="po-amount-stat-value">{formatMoney(amountSummary.amountReceived)}</strong>
+              <span className="po-amount-stat-meta">{amountSummary.completeCount} complète(s)</span>
+            </div>
+            <div className="po-amount-stat">
+              <span className="po-amount-stat-label">Reste estimé</span>
+              <strong className="po-amount-stat-value">{formatMoney(amountSummary.amountPendingEst)}</strong>
+              <span className="po-amount-stat-meta">
+                {amountSummary.pendingCount} en attente · {amountSummary.partialCount} partielle(s)
+              </span>
+            </div>
+          </div>
+          {amountSummary.ordersMissingPrice > 0 ? (
+            <p className="po-amount-monitor-warn">
+              {amountSummary.ordersMissingPrice} commande(s) avec ligne(s) sans prix unitaire —
+              les totaux peuvent être incomplets.
+            </p>
+          ) : null}
+          {filteredAmountTotals &&
+          (filterDeptId !== '' || filterReception !== '' || search.trim() !== '') ? (
+            <p className="po-amount-monitor-filter">
+              Filtre actuel ({filteredAmountTotals.count}) : commandé{' '}
+              <strong>{formatMoney(filteredAmountTotals.amountOrderedEst)}</strong>
+              {' · '}reçu <strong>{formatMoney(filteredAmountTotals.amountReceived)}</strong>
+              {' · '}reste <strong>{formatMoney(filteredAmountTotals.amountPendingEst)}</strong>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="purchasing-toolbar">
         <label>
@@ -412,16 +507,18 @@ export function PurchasingSection({ visible, companyId, departments, products, o
       </div>
 
       <div className="purchasing-panel-head">
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={() => setShowOrderForm((o) => !o)}
-        >
-          {showOrderForm ? 'Fermer' : '+ Commande'}
-        </button>
+        {isAdmin ? (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setShowOrderForm((o) => !o)}
+          >
+            {showOrderForm ? 'Fermer' : '+ Commande'}
+          </button>
+        ) : null}
       </div>
 
-      {showOrderForm ? (
+      {showOrderForm && isAdmin ? (
         <form className="purchasing-form card" onSubmit={(e) => void onCreatePO(e)}>
           <div className="purchasing-form-head">
             <label>
@@ -447,6 +544,11 @@ export function PurchasingSection({ visible, companyId, departments, products, o
             </label>
           </div>
           {renderOrderLineGrid(poLines, setPoLines, poDeptId)}
+          {isAdmin && draftOrderTotal > 0 ? (
+            <p className="po-draft-total">
+              Total estimé de cette commande : <strong>{formatMoney(draftOrderTotal)}</strong>
+            </p>
+          ) : null}
           <div className="purchasing-form-submit">
             <button type="submit" className="btn btn-primary" disabled={busy || typeof companyId !== 'number'}>
               Créer
@@ -465,13 +567,20 @@ export function PurchasingSection({ visible, companyId, departments, products, o
               <th>Département</th>
               <th>Réception</th>
               <th>Statut</th>
+              {isAdmin ? (
+                <>
+                  <th>Montant cmdé</th>
+                  <th>Reçu</th>
+                  <th>Reste</th>
+                </>
+              ) : null}
               <th />
             </tr>
           </thead>
           <tbody>
             {ordersFiltered.length === 0 ? (
               <tr>
-                <td colSpan={7}>—</td>
+                <td colSpan={isAdmin ? 10 : 7}>—</td>
               </tr>
             ) : (
               ordersFiltered.map((o) => {
@@ -487,6 +596,20 @@ export function PurchasingSection({ visible, companyId, departments, products, o
                     <td>{o.department.name}</td>
                     <td>{receptionLabel(o.receptionStatus)}</td>
                     <td>{poStatusLabel(o.status)}</td>
+                    {isAdmin ? (
+                      <>
+                        <td className="journal-amt">
+                          {formatMoney(Number(o.amountOrderedEst ?? 0))}
+                          {(o.orderedLinesMissingPrice ?? 0) > 0 ? (
+                            <span className="po-amount-incomplete" title="Prix manquant sur une ou plusieurs lignes">
+                              *
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="journal-amt">{formatMoney(Number(o.amountReceived ?? 0))}</td>
+                        <td className="journal-amt">{formatMoney(Number(o.amountPendingEst ?? 0))}</td>
+                      </>
+                    ) : null}
                     <td className="purchasing-col-action">
                       <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                         {canReceive ? (
@@ -549,6 +672,20 @@ export function PurchasingSection({ visible, companyId, departments, products, o
               </button>
             </div>
 
+            {isAdmin ? (
+              <div className="po-modal-amounts">
+                <span>
+                  Commandé : <strong>{formatMoney(Number(activeOrder.amountOrderedEst ?? 0))}</strong>
+                </span>
+                <span>
+                  Reçu : <strong>{formatMoney(Number(activeOrder.amountReceived ?? 0))}</strong>
+                </span>
+                <span>
+                  Reste : <strong>{formatMoney(Number(activeOrder.amountPendingEst ?? 0))}</strong>
+                </span>
+              </div>
+            ) : null}
+
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
@@ -557,10 +694,11 @@ export function PurchasingSection({ visible, companyId, departments, products, o
                     <th>Commandé</th>
                     <th>Reçu</th>
                     <th>Reste</th>
+                    {isAdmin ? <th>Montant ligne</th> : null}
                     {!receptionReadOnly ? (
                       <>
                         <th>Qté</th>
-                        <th>Prix / u.</th>
+                        {isAdmin ? <th>Prix / u.</th> : null}
                       </>
                     ) : null}
                   </tr>
@@ -568,12 +706,21 @@ export function PurchasingSection({ visible, companyId, departments, products, o
                 <tbody>
                   {activeOrder.lines.map((line) => {
                     const editable = !receptionReadOnly && line.quantityRemaining > 0;
+                    const lineAmount =
+                      line.unitPriceEst != null
+                        ? Number(line.quantityOrdered) * Number(line.unitPriceEst)
+                        : null;
                     return (
                       <tr key={line.id}>
                         <td>{line.product.name}</td>
                         <td className="journal-amt">{formatQuantity(line.quantityOrdered)}</td>
                         <td className="journal-amt">{formatQuantity(line.quantityReceived)}</td>
                         <td className="journal-amt">{formatQuantity(line.quantityRemaining)}</td>
+                        {isAdmin ? (
+                          <td className="journal-amt">
+                            {lineAmount != null ? formatMoney(lineAmount) : '—'}
+                          </td>
+                        ) : null}
                         {!receptionReadOnly ? (
                           <>
                             <td style={{ maxWidth: '7rem' }}>
@@ -594,24 +741,26 @@ export function PurchasingSection({ visible, companyId, departments, products, o
                                 '—'
                               )}
                             </td>
-                            <td style={{ maxWidth: '8rem' }}>
-                              {editable ? (
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  disabled={busy}
-                                  value={receiveCost[line.productId] ?? ''}
-                                  onChange={(e) =>
-                                    setReceiveCost((prev) => ({
-                                      ...prev,
-                                      [line.productId]: e.target.value,
-                                    }))
-                                  }
-                                />
-                              ) : (
-                                '—'
-                              )}
-                            </td>
+                            {isAdmin ? (
+                              <td style={{ maxWidth: '8rem' }}>
+                                {editable ? (
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    disabled={busy}
+                                    value={receiveCost[line.productId] ?? ''}
+                                    onChange={(e) =>
+                                      setReceiveCost((prev) => ({
+                                        ...prev,
+                                        [line.productId]: e.target.value,
+                                      }))
+                                    }
+                                  />
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                            ) : null}
                           </>
                         ) : null}
                       </tr>

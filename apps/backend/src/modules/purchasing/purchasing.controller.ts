@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -37,6 +38,17 @@ export class PurchasingController {
     return this.purchasingService.listPurchaseOrders(
       n !== undefined && Number.isFinite(n) && n > 0 ? n : undefined,
     );
+  }
+
+  /** Totaux montants commandes (estimés) — admin uniquement, hors journal de caisse. */
+  @Get('orders-summary')
+  @Roles('ADMIN')
+  ordersSummary(@Query('companyId') companyId?: string) {
+    const n = companyId ? Number(companyId) : NaN;
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new BadRequestException('companyId est requis.');
+    }
+    return this.purchasingService.getPurchaseOrdersAmountSummary(n);
   }
 
   @Get('orders/:id')

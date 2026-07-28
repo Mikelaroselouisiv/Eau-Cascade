@@ -1,5 +1,14 @@
-import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 
 export enum InventorySessionKindDto {
   OPENING = 'OPENING',
@@ -24,6 +33,12 @@ export class CreateInventorySessionDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  /** Si true : n’inclut que les produits dont le stock système est > 0. */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === 1 || value === '1')
+  @IsBoolean()
+  onlyPositiveStock?: boolean;
 }
 
 export class UpdateInventoryLineDto {

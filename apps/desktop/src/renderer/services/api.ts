@@ -39,6 +39,7 @@ import type {
   ProductRecipeDetail,
   PurchaseOrderListItem,
   PurchaseOrderDetail,
+  PurchaseOrdersAmountSummary,
 } from '../types/api';
 import { resolveApiBaseUrl } from '../config/resolve-api-base-url';
 
@@ -422,6 +423,42 @@ export async function createSale(payload: CreateSalePayload) {
   return data;
 }
 
+export async function listSaleCashGaps(params: {
+  companyId: number;
+  departmentId?: number;
+  take?: number;
+}) {
+  const { data } = await api.get<import('../types/api').SaleCashGaps>('/sales/cash-gaps', {
+    params: {
+      companyId: params.companyId,
+      departmentId: params.departmentId,
+      take: params.take,
+    },
+  });
+  return data;
+}
+
+export async function settleSaleChange(saleId: number) {
+  const { data } = await api.post<{
+    id: number;
+    changeSettled: number;
+    changeDue: number;
+    balanceDue: number;
+  }>(`/sales/${saleId}/settle-change`);
+  return data;
+}
+
+export async function collectSaleBalance(saleId: number, amount: number) {
+  const { data } = await api.post<{
+    id: number;
+    amountCollected: number;
+    amountPaid: number;
+    balanceDue: number;
+    changeDue: number;
+  }>(`/sales/${saleId}/collect-balance`, { amount });
+  return data;
+}
+
 export async function listDeliveries(params?: {
   companyId?: number;
   departmentId?: number;
@@ -524,7 +561,12 @@ export async function exportSalePdf(id: number): Promise<Blob> {
   return data;
 }
 
-export async function getInventoryAlerts(params?: { threshold?: number; companyId?: number; skip?: number; take?: number }) {
+export async function getInventoryAlerts(params?: {
+  threshold?: number;
+  companyId?: number;
+  skip?: number;
+  take?: number;
+}) {
   const threshold = params?.threshold ?? 5;
   const companyId = params?.companyId;
   const skip = params?.skip ?? 0;
@@ -532,6 +574,22 @@ export async function getInventoryAlerts(params?: { threshold?: number; companyI
   const { data } = await api.get<{ items: Product[]; total: number }>(
     `/inventory/alerts?threshold=${encodeURIComponent(String(threshold))}${companyId ? `&companyId=${companyId}` : ''}&skip=${skip}&take=${take}`,
   );
+  return data;
+}
+
+export async function getZeroStockAlerts(params?: {
+  companyId?: number;
+  skip?: number;
+  take?: number;
+}) {
+  const companyId = params?.companyId;
+  const skip = params?.skip ?? 0;
+  const take = params?.take ?? 8;
+  const q = new URLSearchParams();
+  if (companyId) q.set('companyId', String(companyId));
+  q.set('skip', String(skip));
+  q.set('take', String(take));
+  const { data } = await api.get<{ items: Product[]; total: number }>(`/inventory/alerts/zero?${q}`);
   return data;
 }
 
@@ -603,6 +661,7 @@ export async function createInventorySession(payload: {
   kind?: 'OPENING' | 'CLOSING' | 'AD_HOC';
   label?: string;
   note?: string;
+  onlyPositiveStock?: boolean;
 }): Promise<InventorySessionDetail> {
   const { data } = await api.post<InventorySessionDetail>('/inventory/sessions', payload);
   return data;
@@ -623,12 +682,13 @@ export async function listInventorySessions(params?: {
 
 export async function getInventoryCountSheet(
   departmentId: number,
-  opts?: { asOf?: string },
+  opts?: { asOf?: string; onlyPositiveStock?: boolean },
 ): Promise<InventoryCountSheet> {
   const { data } = await api.get<InventoryCountSheet>('/inventory/count-sheet', {
     params: {
       departmentId,
       ...(opts?.asOf?.trim() ? { asOf: opts.asOf.trim() } : {}),
+      ...(opts?.onlyPositiveStock ? { onlyPositiveStock: true } : {}),
     },
   });
   return data;
@@ -636,12 +696,13 @@ export async function getInventoryCountSheet(
 
 export async function exportInventoryCountSheetPdf(
   departmentId: number,
-  opts?: { asOf?: string },
+  opts?: { asOf?: string; onlyPositiveStock?: boolean },
 ): Promise<Blob> {
   const { data } = await api.get<Blob>('/inventory/count-sheet/export/pdf', {
     params: {
       departmentId,
       ...(opts?.asOf?.trim() ? { asOf: opts.asOf.trim() } : {}),
+      ...(opts?.onlyPositiveStock ? { onlyPositiveStock: true } : {}),
     },
     responseType: 'blob',
   });
@@ -780,12 +841,14 @@ export async function getRegisterClosingCashPreview(sessionId: number): Promise<
   openingCash: number;
   salesCash: number;
   expenses: number;
+  unsettledChange: number;
   expected: number;
 }> {
   const { data } = await api.get<{
     openingCash: number;
     salesCash: number;
     expenses: number;
+    unsettledChange: number;
     expected: number;
   }>(`/register-sessions/${sessionId}/closing-cash-preview`);
   return data;
@@ -829,6 +892,15 @@ export async function listPurchaseOrders(companyId?: number): Promise<PurchaseOr
   return data;
 }
 
+export async function getPurchaseOrdersAmountSummary(
+  companyId: number,
+): Promise<PurchaseOrdersAmountSummary> {
+  const { data } = await api.get<PurchaseOrdersAmountSummary>('/purchasing/orders-summary', {
+    params: { companyId },
+  });
+  return data;
+}
+
 export async function getPurchaseOrder(id: number): Promise<PurchaseOrderDetail> {
   const { data } = await api.get<PurchaseOrderDetail>(`/purchasing/orders/${id}`);
   return data;
@@ -838,7 +910,7 @@ export async function receivePurchaseOrder(
   purchaseOrderId: number,
   payload: {
     note?: string;
-    lines: Array<{ productId: number; quantity: number; unitCost: number }>;
+    lines: Array<{ productId: number; quantity: number; unitCost?: number }>;
   },
 ): Promise<PurchaseOrderDetail> {
   const { data } = await api.post<PurchaseOrderDetail>(

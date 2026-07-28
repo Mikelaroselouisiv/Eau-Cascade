@@ -906,6 +906,8 @@ function EditProductModal({
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const { can } = useAuth();
+  const isAdmin = can(['ADMIN']);
   const initialCompanyId = product.company?.id ?? product.companyId ?? companies[0]?.id ?? 0;
   const [companyId, setCompanyId] = useState<number>(initialCompanyId);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -1046,7 +1048,7 @@ function EditProductModal({
         sku: sku.trim() || undefined,
         barcode: barcode.trim() || undefined,
         description: description.trim() || undefined,
-        cost: Number(cost),
+        ...(isAdmin ? { cost: Number(cost) } : {}),
         stock: Number(stock),
         stockMin: Number(stockMin),
         departmentId: deptId === '' ? null : Number(deptId),
@@ -1167,13 +1169,15 @@ function EditProductModal({
               Aucun conditionnement pour ce département. Créez-en dans Configuration → Conditionnement.
             </p>
           ) : null}
-          <MoneyField
-            label="Coût"
-            min={0}
-            step={0.01}
-            value={cost}
-            onChange={(e) => setCost(e.target.value)}
-          />
+          {isAdmin ? (
+            <MoneyField
+              label="Coût"
+              min={0}
+              step={0.01}
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+            />
+          ) : null}
           <MoneyField
             label="Prix unitaire"
             min={0}

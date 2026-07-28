@@ -108,6 +108,17 @@ function buildTicketText(saleData, width = 58) {
     }
     lines.push(separator);
     lines.push(`TOTAL: ${formatMoney(saleData.total ?? 0)}`);
+    if (saleData.amountReceived != null && saleData.amountReceived !== '') {
+      lines.push(clipLine(`Reçu: ${formatMoney(saleData.amountReceived)}`, lineWidth));
+    }
+    const changeDue = Number(saleData.changeDue ?? 0);
+    const balanceDue = Number(saleData.balanceDue ?? 0);
+    if (changeDue > 0.009) {
+      lines.push(clipLine(`Monnaie due: ${formatMoney(changeDue)}`, lineWidth));
+    }
+    if (balanceDue > 0.009) {
+      lines.push(clipLine(`Reste à payer: ${formatMoney(balanceDue)}`, lineWidth));
+    }
     lines.push(`Paiement: ${saleData.paymentMode ?? 'N/A'}`);
   }
 

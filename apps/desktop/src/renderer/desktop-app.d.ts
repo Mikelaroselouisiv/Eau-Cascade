@@ -15,6 +15,9 @@ declare global {
         dateTime?: string;
         items: Array<{ name: string; qty: number; price: number }>;
         total: number;
+        amountReceived?: number;
+        changeDue?: number;
+        balanceDue?: number;
         paymentMode: string;
         paperWidth?: 58 | 80;
         printerName?: string;

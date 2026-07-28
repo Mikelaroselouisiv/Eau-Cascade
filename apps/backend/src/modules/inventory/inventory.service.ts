@@ -277,12 +277,14 @@ export class InventoryService {
     const skip = Math.max(0, Math.floor(opts?.skip ?? 0));
     const rawTake = opts?.take ?? 10;
     const take = Math.min(200, Math.max(1, Math.floor(rawTake)));
+    const safeThreshold = Number.isFinite(threshold) && threshold > 0 ? threshold : 5;
 
-    const where = {
+    // Faible = encore du stock, mais strictement sous le seuil (ex. seuil 5 → 0 < stock < 5).
+    // Les stocks à zéro ont leur propre moniteur.
+    const where: Prisma.ProductWhereInput = {
       trackStock: true,
       isService: false,
-      // Stock bas = strictement sous le seuil (ex. seuil 5 → 0 à 4).
-      stock: { lt: threshold },
+      stock: { gt: 0, lt: safeThreshold },
       ...(companyId ? { department: { companyId } } : {}),
     };
 
@@ -294,6 +296,33 @@ export class InventoryService {
           department: true,
         },
         orderBy: { stock: 'asc' },
+        skip,
+        take,
+      }),
+      this.prisma.product.count({ where }),
+    ]).then(([items, total]) => ({ items, total }));
+  }
+
+  getZeroStockAlerts(companyId?: number, opts?: { skip?: number; take?: number }) {
+    const skip = Math.max(0, Math.floor(opts?.skip ?? 0));
+    const rawTake = opts?.take ?? 8;
+    const take = Math.min(200, Math.max(1, Math.floor(rawTake)));
+
+    const where: Prisma.ProductWhereInput = {
+      trackStock: true,
+      isService: false,
+      stock: { lte: 0 },
+      ...(companyId ? { department: { companyId } } : {}),
+    };
+
+    return Promise.all([
+      this.prisma.product.findMany({
+        where,
+        include: {
+          saleUnits: { include: { packagingUnit: true } },
+          department: true,
+        },
+        orderBy: [{ department: { name: 'asc' } }, { name: 'asc' }],
         skip,
         take,
       }),
@@ -315,6 +344,7 @@ export class InventoryService {
     note: string | undefined,
     createdById: number | undefined,
     kind: InventorySessionKind = InventorySessionKind.AD_HOC,
+    onlyPositiveStock = false,
   ) {
     const dept = await this.prisma.department.findUnique({ where: { id: departmentId } });
     if (!dept) {
@@ -326,6 +356,7 @@ export class InventoryService {
         departmentId,
         trackStock: true,
         isService: false,
+        ...(onlyPositiveStock ? { stock: { gt: 0 } } : {}),
       },
     });
 
@@ -373,7 +404,12 @@ export class InventoryService {
         action: 'INVENTORY_SESSION_CREATED',
         entity: 'InventorySession',
         entityId: String(session.id),
-        metadata: { departmentId, label: label ?? null },
+        metadata: {
+          departmentId,
+          label: label ?? null,
+          onlyPositiveStock,
+          lineCount: products.length,
+        },
       });
       return created;
     });
@@ -443,7 +479,11 @@ export class InventoryService {
     });
   }
 
-  async getCountSheetContext(departmentId: number, asOfRaw?: string) {
+  async getCountSheetContext(
+    departmentId: number,
+    asOfRaw?: string,
+    onlyPositiveStock = false,
+  ) {
     const department = await this.prisma.department.findUnique({
       where: { id: departmentId },
       include: { company: true },
@@ -475,6 +515,18 @@ export class InventoryService {
         )
       : null;
 
+    const mapped = products.map((p) => {
+      const current = Number(p.stock);
+      const stock = deltas ? current - (deltas.get(p.id) ?? 0) : current;
+      return {
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        stock,
+        unitLabel: this.packagingLabelFromProduct(p),
+      };
+    });
+
     return {
       generatedAt: asOf ? asOf.toISOString() : new Date().toISOString(),
       asOf: asOf ? asOf.toISOString() : null,
@@ -483,17 +535,7 @@ export class InventoryService {
         name: department.name,
         company: department.company,
       },
-      products: products.map((p) => {
-        const current = Number(p.stock);
-        const stock = deltas ? current - (deltas.get(p.id) ?? 0) : current;
-        return {
-          id: p.id,
-          name: p.name,
-          sku: p.sku,
-          stock,
-          unitLabel: this.packagingLabelFromProduct(p),
-        };
-      }),
+      products: onlyPositiveStock ? mapped.filter((p) => Number(p.stock) > 0) : mapped,
     };
   }
 

@@ -88,4 +88,14 @@ export class CreateSaleDto {
   @IsOptional()
   @IsBoolean()
   specialSale?: boolean;
+
+  /**
+   * Espèces réellement tendues par le client (vente classique).
+   * Si fourni : peut être > ou < au total (monnaie due / reste à payer).
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amountReceived?: number;
 }

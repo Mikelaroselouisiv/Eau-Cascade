@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   closeRegisterSession,
+  collectSaleBalance,
   createSale,
   ensureDefaultRegister,
   getActiveRegisterSession,
@@ -12,7 +13,9 @@ import {
   getPrinterSettings,
   getRegisterClosingCashPreview,
   listRegisters,
+  listSaleCashGaps,
   openRegisterSession,
+  settleSaleChange,
 } from '../services/api';
 import { isLikelyNetworkError } from '../services/api-errors';
 import { enqueueSale, syncSalesQueue } from '../services/offline-queue';
@@ -27,6 +30,7 @@ import type {
   ProductSaleUnit,
   RegisterListItem,
   RegisterSessionDetail,
+  SaleCashGapRow,
 } from '../types/api';
 import { RegisterStockCountForm } from '../components/RegisterStockCountForm';
 import { formatRegisterCode } from '../utils/registerDisplay';
@@ -127,6 +131,12 @@ export function PosPage() {
   const [activeDraftId, setActiveDraftId] = useState<string>('d1');
   const [status, setStatus] = useAutoClearMessage();
   const [printTicket, setPrintTicket] = useState(false);
+  const [amountReceived, setAmountReceived] = useState('');
+  const [cashGaps, setCashGaps] = useState<{
+    changeOwed: SaleCashGapRow[];
+    balanceOwed: SaleCashGapRow[];
+  }>({ changeOwed: [], balanceOwed: [] });
+  const [cashGapBusyId, setCashGapBusyId] = useState<number | null>(null);
 
   const [registerSession, setRegisterSession] = useState<RegisterSessionDetail | null>(null);
   const [registers, setRegisters] = useState<RegisterListItem[]>([]);
@@ -360,6 +370,44 @@ export function PosPage() {
     );
   }, [activeCart, saleMode]);
 
+  const tenderPreview = useMemo(() => {
+    if (saleMode !== 'classic') return null;
+    const raw = amountReceived.trim().replace(',', '.');
+    if (raw === '') return null;
+    const received = Number(raw);
+    if (!Number.isFinite(received) || received < 0) return null;
+    const changeDue = Math.max(0, Math.round((received - cartTotal) * 100) / 100);
+    const balanceDue = Math.max(0, Math.round((cartTotal - received) * 100) / 100);
+    return { received, changeDue, balanceDue };
+  }, [amountReceived, cartTotal, saleMode]);
+
+  const showTenderField =
+    saleMode === 'classic' &&
+    (activeDraft?.paymentMethod === 'CASH' || activeDraft?.paymentMethod === 'SPLIT');
+
+  async function refreshCashGaps() {
+    const cid = effectiveCompanyId;
+    if (cid == null) {
+      setCashGaps({ changeOwed: [], balanceOwed: [] });
+      return;
+    }
+    try {
+      const gaps = await listSaleCashGaps({
+        companyId: cid,
+        departmentId: effectiveDepartmentId,
+        take: 40,
+      });
+      setCashGaps(gaps);
+    } catch {
+      // silencieux : panneau secondaire
+    }
+  }
+
+  useEffect(() => {
+    void refreshCashGaps();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveCompanyId, effectiveDepartmentId, salesEnabled]);
+
   function switchSaleMode(mode: 'classic' | 'special') {
     if (mode === saleMode) return;
     if (mode === 'special' && !canSpecialSale) return;
@@ -546,7 +594,33 @@ export function PosPage() {
       refuseClosedCaisse();
       return;
     }
+
+    let tendered: number | undefined;
+    if (showTenderField) {
+      const raw = amountReceived.trim().replace(',', '.');
+      if (raw === '') {
+        setStatus('Indiquez le montant reçu', { persist: true });
+        return;
+      }
+      tendered = Number(raw);
+      if (!Number.isFinite(tendered) || tendered < 0) {
+        setStatus('Montant reçu invalide', { persist: true });
+        return;
+      }
+    }
+
     const total = cartTotal;
+    const applied = tendered != null ? Math.min(tendered, total) : total;
+    const changeDue =
+      tendered != null ? Math.max(0, Math.round((tendered - total) * 100) / 100) : 0;
+    const balanceDue =
+      tendered != null ? Math.max(0, Math.round((total - tendered) * 100) / 100) : 0;
+
+    if (applied < 0.01 && total > 0.009) {
+      setStatus('Montant reçu insuffisant', { persist: true });
+      return;
+    }
+
     const clientName = activeDraft.name || null;
     const clientUuid =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -560,11 +634,17 @@ export function PosPage() {
           ? { unitPrice: l.manualUnitPrice }
           : {}),
       })),
-      payments: [{ method: activeDraft.paymentMethod, amount: total }],
+      payments: [
+        {
+          method: activeDraft.paymentMethod,
+          amount: applied > 0.009 ? applied : total > 0.009 ? applied : 0.01,
+        },
+      ],
       clientName,
       clientUuid,
       registerId: registerSession.registerId,
       ...(saleMode === 'special' ? { specialSale: true } : {}),
+      ...(tendered != null ? { amountReceived: tendered } : {}),
     };
     try {
       if (!navigator.onLine) {
@@ -572,10 +652,23 @@ export function PosPage() {
         window.dispatchEvent(new Event('pos-pending-sales-changed'));
         setStatus('Hors ligne : vente mise en file d’attente');
         removeActiveDraftFromUI();
+        setAmountReceived('');
         return;
       }
-      const sale = (await createSale(payload)) as { id: number };
-      setStatus(`Vente #${sale.id} enregistrée`);
+      const sale = (await createSale(payload)) as {
+        id: number;
+        changeDue?: number;
+        balanceDue?: number;
+        amountReceived?: number;
+      };
+      const msgParts = [`Vente #${sale.id} enregistrée`];
+      if ((sale.changeDue ?? changeDue) > 0.009) {
+        msgParts.push(`monnaie due ${formatMoney(sale.changeDue ?? changeDue)}`);
+      }
+      if ((sale.balanceDue ?? balanceDue) > 0.009) {
+        msgParts.push(`reste ${formatMoney(sale.balanceDue ?? balanceDue)}`);
+      }
+      setStatus(msgParts.join(' — '));
       if (printTicket && window.desktopApp?.printReceipt) {
         await window.desktopApp.printReceipt({
           saleId: sale.id,
@@ -597,6 +690,9 @@ export function PosPage() {
             };
           }),
           total,
+          amountReceived: sale.amountReceived ?? tendered,
+          changeDue: sale.changeDue ?? changeDue,
+          balanceDue: sale.balanceDue ?? balanceDue,
           paymentMode: activeDraft.paymentMethod,
           paperWidth: printer?.paperWidth === 80 ? 80 : 58,
           printerName: printer?.deviceName ?? '',
@@ -608,6 +704,8 @@ export function PosPage() {
         });
       }
       removeActiveDraftFromUI();
+      setAmountReceived('');
+      await refreshCashGaps();
       const deptId = typeof user?.departmentId === 'number' ? user.departmentId : undefined;
       if (isCashier) {
         setProducts(await loadProductsWithCache(deptId));
@@ -620,9 +718,36 @@ export function PosPage() {
         window.dispatchEvent(new Event('pos-pending-sales-changed'));
         setStatus('Réseau indisponible : vente mise en file d’attente');
         removeActiveDraftFromUI();
+        setAmountReceived('');
         return;
       }
       setStatus('Échec vente (stock ou données)', { persist: true });
+    }
+  }
+
+  async function onSettleChange(saleId: number) {
+    setCashGapBusyId(saleId);
+    try {
+      const r = await settleSaleChange(saleId);
+      setStatus(`Monnaie remise — fiche #${saleId} (${formatMoney(r.changeSettled)})`);
+      await refreshCashGaps();
+    } catch {
+      setStatus('Impossible de remettre la monnaie', { persist: true });
+    } finally {
+      setCashGapBusyId(null);
+    }
+  }
+
+  async function onCollectBalance(saleId: number, balanceDue: number) {
+    setCashGapBusyId(saleId);
+    try {
+      await collectSaleBalance(saleId, balanceDue);
+      setStatus(`Reste encaissé — fiche #${saleId} (${formatMoney(balanceDue)})`);
+      await refreshCashGaps();
+    } catch {
+      setStatus('Impossible d’encaisser le reste', { persist: true });
+    } finally {
+      setCashGapBusyId(null);
     }
   }
 
@@ -1100,6 +1225,37 @@ export function PosPage() {
             <span>Total</span>
             <strong>{formatMoney(cartTotal)}</strong>
           </div>
+          {showTenderField ? (
+            <div className="pos-tender-block">
+              <MoneyField
+                label="Montant reçu"
+                currencyCode={currencyCode}
+                type="text"
+                inputMode="decimal"
+                value={amountReceived}
+                disabled={!salesEnabled}
+                onChange={(e) => setAmountReceived(e.target.value)}
+                placeholder="0.00"
+              />
+              {tenderPreview ? (
+                <div className="pos-tender-preview">
+                  {tenderPreview.changeDue > 0.009 ? (
+                    <span className="pos-tender-change">
+                      Monnaie due : {formatMoney(tenderPreview.changeDue)}
+                    </span>
+                  ) : null}
+                  {tenderPreview.balanceDue > 0.009 ? (
+                    <span className="pos-tender-balance">
+                      Reste client : {formatMoney(tenderPreview.balanceDue)}
+                    </span>
+                  ) : null}
+                  {tenderPreview.changeDue <= 0.009 && tenderPreview.balanceDue <= 0.009 ? (
+                    <span className="pos-tender-ok">Montant exact</span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <label className="checkbox-row" style={{ margin: '0.75rem 0' }}>
             <input
               type="checkbox"
@@ -1111,11 +1267,68 @@ export function PosPage() {
           <button
             type="button"
             className="btn btn-primary btn-block"
-            disabled={activeCart.length === 0 || !specialPricesReady}
+            disabled={
+              activeCart.length === 0 ||
+              !specialPricesReady ||
+              (showTenderField && amountReceived.trim() === '')
+            }
             onClick={() => void checkout()}
           >
             Encaisser
           </button>
+
+          <div className="pos-cash-gaps">
+            <section className="pos-cash-gap-list">
+              <h3>Monnaie à rendre</h3>
+              {cashGaps.changeOwed.length === 0 ? (
+                <p className="dept-hint">Aucune</p>
+              ) : (
+                <ul>
+                  {cashGaps.changeOwed.map((row) => (
+                    <li key={`c-${row.id}`}>
+                      <div>
+                        <strong>#{row.id}</strong> {row.clientName?.trim() || 'Client'}
+                        <div className="dept-hint">{formatMoney(row.changeDue)}</div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={!salesEnabled || cashGapBusyId === row.id}
+                        onClick={() => void onSettleChange(row.id)}
+                      >
+                        Remettre
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            <section className="pos-cash-gap-list">
+              <h3>Restes à encaisser</h3>
+              {cashGaps.balanceOwed.length === 0 ? (
+                <p className="dept-hint">Aucun</p>
+              ) : (
+                <ul>
+                  {cashGaps.balanceOwed.map((row) => (
+                    <li key={`b-${row.id}`}>
+                      <div>
+                        <strong>#{row.id}</strong> {row.clientName?.trim() || 'Client'}
+                        <div className="dept-hint">{formatMoney(row.balanceDue)}</div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={!salesEnabled || cashGapBusyId === row.id}
+                        onClick={() => void onCollectBalance(row.id, row.balanceDue)}
+                      >
+                        Encaisser
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
         </aside>
       </div>
 

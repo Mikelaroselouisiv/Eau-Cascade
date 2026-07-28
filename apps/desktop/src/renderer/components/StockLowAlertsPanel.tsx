@@ -30,10 +30,10 @@ export function StockLowAlertsPanel({ alerts, total, loading, canLoadMore, onLoa
           <h2 className="stock-alert-title">Alertes stock faible</h2>
           {hasAlerts ? (
             <p className="stock-alert-lead">
-              {total} produit{total > 1 ? 's' : ''} en dessous du stock minimum — réapprovisionnement recommandé.
+              {total} produit{total > 1 ? 's' : ''} encore en stock mais sous le minimum — réapprovisionnement recommandé.
             </p>
           ) : (
-            <p className="stock-alert-lead">Aucun produit sous le seuil minimum pour cette entreprise.</p>
+            <p className="stock-alert-lead">Aucun produit faible (hors ruptures à zéro) pour cette entreprise.</p>
           )}
         </div>
         {hasAlerts ? <span className="stock-alert-badge">{total}</span> : null}

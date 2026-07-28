@@ -138,7 +138,22 @@ export class SalesService {
       }
 
       const paymentTotal = createSaleDto.payments.reduce((acc, p) => acc + p.amount, 0);
-      if (paymentTotal < total - 0.01) {
+      const tenderedRaw =
+        createSaleDto.amountReceived != null ? Number(createSaleDto.amountReceived) : null;
+      const hasTender = tenderedRaw != null && Number.isFinite(tenderedRaw);
+
+      let amountReceived = hasTender ? this.round2(Math.max(0, tenderedRaw!)) : this.round2(paymentTotal);
+      let changeDue = 0;
+      let amountPaid = this.round2(paymentTotal);
+
+      if (hasTender) {
+        // Paiements = part appliquée à la vente (pas le tender brut).
+        amountPaid = this.round2(Math.min(amountReceived, total));
+        changeDue = this.round2(Math.max(0, amountReceived - total));
+        if (amountPaid < 0.01 && total > 0.009) {
+          throw new BadRequestException('Montant reçu insuffisant');
+        }
+      } else if (paymentTotal < total - 0.01) {
         throw new BadRequestException('Le montant payé est inférieur au total de la vente');
       }
 
@@ -164,9 +179,11 @@ export class SalesService {
       const clientUuid = createSaleDto.clientUuid ?? null;
       const insertedRows = await tx.$queryRaw<Array<{ id: number }>>`
         INSERT INTO "Sale"
-          ("total", "subtotal", "tax", "cashier", "userId", "storeId", "registerId", "clientUuid", "updatedAt")
+          ("total", "subtotal", "tax", "cashier", "userId", "storeId", "registerId", "clientUuid",
+           "amountPaid", "amountReceived", "changeDue", "updatedAt")
         VALUES
-          (${total}, ${total}, 0, ${cashier}, ${userId ?? null}, ${storeId}, ${registerId}, ${clientUuid}, NOW())
+          (${total}, ${total}, 0, ${cashier}, ${userId ?? null}, ${storeId}, ${registerId}, ${clientUuid},
+           ${amountPaid}, ${amountReceived}, ${changeDue}, NOW())
         RETURNING "id";
       `;
       const saleId = insertedRows?.[0]?.id;
@@ -175,8 +192,6 @@ export class SalesService {
       await tx.saleItem.createMany({
         data: saleItemsData.map((it) => ({
           saleId,
-          // saleItemsData contient déjà quantity/baseQuantity/unitPrice/subtotal/lineLabel + product/productSaleUnit connect.
-          // On réutilise la structure Prisma en passant directement les champs attendus par la table.
           quantity: it.quantity as unknown as Prisma.Decimal,
           baseQuantity: it.baseQuantity as unknown as Prisma.Decimal,
           unitPrice: it.unitPrice as unknown as Prisma.Decimal,
@@ -188,8 +203,25 @@ export class SalesService {
         })),
       });
 
+      // Stocker la part appliquée (pas le tender) pour que caisse / finance restent justes.
+      let appliedPayments = hasTender
+        ? createSaleDto.payments
+            .map((p, idx) => (idx === 0 ? { ...p, amount: amountPaid } : { ...p, amount: 0 }))
+            .filter((p) => p.amount > 0.009)
+        : [...createSaleDto.payments];
+
+      if (appliedPayments.length === 0 && amountPaid > 0.009) {
+        appliedPayments = [
+          {
+            method: createSaleDto.payments[0]?.method ?? ('CASH' as const),
+            amount: amountPaid,
+            reference: createSaleDto.payments[0]?.reference,
+          },
+        ];
+      }
+
       await tx.payment.createMany({
-        data: createSaleDto.payments.map((payment) => ({
+        data: appliedPayments.map((payment) => ({
           saleId,
           amount: payment.amount as unknown as Prisma.Decimal,
           method: payment.method,
@@ -197,9 +229,8 @@ export class SalesService {
         })),
       });
 
-      // Journal financier : INCOME seulement pour la part réellement encaissée.
-      // La part CREDIT est reportée (créances) et n’entre au journal qu’au remboursement.
-      const cashCollected = createSaleDto.payments
+      // Journal financier : INCOME = part réellement appliquée (hors CREDIT).
+      const cashCollected = appliedPayments
         .filter((p) => p.method !== 'CREDIT')
         .reduce((acc, p) => acc + p.amount, 0);
       if (firstCompanyId != null && cashCollected > 0.009) {
@@ -210,7 +241,7 @@ export class SalesService {
             amount: cashCollected,
             description:
               cashCollected + 0.01 < total
-                ? `Encaissement partiel vente #${saleId} (crédit)`
+                ? `Encaissement partiel vente #${saleId}`
                 : `Encaissement vente #${saleId}`,
             userId: userId ?? null,
             categoryId,
@@ -246,16 +277,27 @@ export class SalesService {
         }
       }
 
-      const sale = { id: saleId };
+      const sale = {
+        id: saleId,
+        total,
+        amountPaid,
+        amountReceived,
+        changeDue,
+        balanceDue: this.round2(Math.max(0, total - amountPaid)),
+      };
       await this.auditService.log({
         userId,
         action: 'SALE_CREATED',
         entity: 'SALE',
         entityId: String(saleId),
-        metadata: { total },
+        metadata: { total, amountReceived, changeDue, amountPaid },
       });
       return sale;
     });
+  }
+
+  private round2(n: number) {
+    return Math.round(n * 100) / 100;
   }
 
   findAll() {
@@ -288,6 +330,227 @@ export class SalesService {
       throw new NotFoundException('Vente introuvable');
     }
     return sale;
+  }
+
+  /**
+   * Écarts cash ouverts (héritage entre sessions de caisse) :
+   * - changeDue > 0 : l’entreprise doit la monnaie au client
+   * - amountPaid < total : le client doit un reste
+   */
+  async listCashGaps(opts: { companyId: number; departmentId?: number; take?: number }) {
+    const take = Math.min(100, Math.max(1, Math.floor(opts.take ?? 50)));
+    const deptFilter =
+      opts.departmentId != null
+        ? {
+            items: {
+              some: {
+                deletedAt: null,
+                product: { companyId: opts.companyId, departmentId: opts.departmentId },
+              },
+            },
+          }
+        : {
+            items: {
+              some: { deletedAt: null, product: { companyId: opts.companyId } },
+            },
+          };
+
+    const rows = await this.prisma.sale.findMany({
+      where: {
+        deletedAt: null,
+        status: 'COMPLETED',
+        creditCustomerId: null,
+        ...deptFilter,
+      },
+      select: {
+        id: true,
+        total: true,
+        amountPaid: true,
+        amountReceived: true,
+        changeDue: true,
+        clientName: true,
+        cashier: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 300,
+    });
+
+    const changeOwed = rows
+      .filter((s) => Number(s.changeDue) > 0.009)
+      .slice(0, take)
+      .map((s) => ({
+        id: s.id,
+        clientName: s.clientName,
+        cashier: s.cashier,
+        createdAt: s.createdAt,
+        total: Number(s.total),
+        amountReceived: Number(s.amountReceived),
+        amountPaid: Number(s.amountPaid),
+        changeDue: Number(s.changeDue),
+        balanceDue: 0,
+        kind: 'CHANGE_OWED' as const,
+      }));
+
+    const balanceOwed = rows
+      .filter((s) => {
+        const total = Number(s.total);
+        const paid = Number(s.amountPaid);
+        return Number(s.changeDue) <= 0.009 && total - paid > 0.009;
+      })
+      .slice(0, take)
+      .map((s) => {
+        const total = Number(s.total);
+        const paid = Number(s.amountPaid);
+        return {
+          id: s.id,
+          clientName: s.clientName,
+          cashier: s.cashier,
+          createdAt: s.createdAt,
+          total,
+          amountReceived: Number(s.amountReceived),
+          amountPaid: paid,
+          changeDue: 0,
+          balanceDue: this.round2(total - paid),
+          kind: 'BALANCE_OWED' as const,
+        };
+      });
+
+    return { changeOwed, balanceOwed };
+  }
+
+  /** Remet la monnaie due au client (sort les espèces de la caisse). */
+  async settleChange(saleId: number, userId?: number) {
+    const sale = await this.prisma.sale.findFirst({
+      where: { id: saleId, deletedAt: null, creditCustomerId: null },
+    });
+    if (!sale) throw new NotFoundException('Vente introuvable');
+    if (sale.status !== 'COMPLETED') {
+      throw new BadRequestException('Vente non complétée');
+    }
+    const due = this.round2(Number(sale.changeDue));
+    if (due <= 0.009) {
+      throw new BadRequestException('Aucune monnaie due sur cette fiche');
+    }
+
+    const updated = await this.prisma.sale.update({
+      where: { id: saleId },
+      data: {
+        changeDue: 0,
+        changeSettledAt: new Date(),
+      },
+      select: {
+        id: true,
+        total: true,
+        amountPaid: true,
+        amountReceived: true,
+        changeDue: true,
+        clientName: true,
+      },
+    });
+
+    await this.auditService.log({
+      userId,
+      action: 'SALE_CHANGE_SETTLED',
+      entity: 'SALE',
+      entityId: String(saleId),
+      metadata: { changeSettled: due },
+    });
+
+    return {
+      id: updated.id,
+      changeSettled: due,
+      changeDue: 0,
+      balanceDue: this.round2(Math.max(0, Number(updated.total) - Number(updated.amountPaid))),
+    };
+  }
+
+  /** Encaisser un reste dû par le client sur une vente classique. */
+  async collectBalance(saleId: number, amount: number, userId?: number) {
+    const pay = this.round2(amount);
+    if (pay <= 0) throw new BadRequestException('Montant invalide');
+
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findFirst({
+        where: { id: saleId, deletedAt: null, creditCustomerId: null },
+        include: {
+          items: {
+            where: { deletedAt: null },
+            take: 1,
+            include: { product: { select: { companyId: true } } },
+          },
+        },
+      });
+      if (!sale) throw new NotFoundException('Vente introuvable');
+      if (sale.status !== 'COMPLETED') {
+        throw new BadRequestException('Vente non complétée');
+      }
+      if (Number(sale.changeDue) > 0.009) {
+        throw new BadRequestException('Réglez d’abord la monnaie due au client');
+      }
+
+      const total = this.round2(Number(sale.total));
+      const paid = this.round2(Number(sale.amountPaid));
+      const due = this.round2(Math.max(0, total - paid));
+      if (due <= 0.009) {
+        throw new BadRequestException('Aucun reste à encaisser');
+      }
+      if (pay > due + 0.01) {
+        throw new BadRequestException(`Montant supérieur au reste (${due.toFixed(2)} HTG)`);
+      }
+
+      const apply = Math.min(pay, due);
+      await tx.payment.create({
+        data: {
+          saleId,
+          amount: apply,
+          method: 'CASH',
+          reference: 'Reste dû POS',
+        },
+      });
+
+      const newPaid = this.round2(paid + apply);
+      const settled = newPaid >= total - 0.009;
+      await tx.sale.update({
+        where: { id: saleId },
+        data: {
+          amountPaid: newPaid,
+          amountReceived: { increment: apply },
+          cashBalanceSettledAt: settled ? new Date() : sale.cashBalanceSettledAt,
+        },
+      });
+
+      const companyId = sale.items[0]?.product?.companyId;
+      if (companyId != null && apply > 0.009) {
+        const categoryId = await this.findOrCreateVentesPosCategoryId(tx, companyId);
+        // Une 2e écriture finance (saleId unique) : on n’attache pas saleId pour éviter le conflit.
+        await tx.financeEntry.create({
+          data: {
+            type: FinanceType.INCOME,
+            amount: apply,
+            description: `Reste dû vente #${saleId}`,
+            userId: userId ?? null,
+            categoryId,
+          },
+        });
+      }
+
+      await this.auditService.log({
+        userId,
+        action: 'SALE_BALANCE_COLLECTED',
+        entity: 'SALE',
+        entityId: String(saleId),
+        metadata: { amount: apply, balanceDue: this.round2(total - newPaid) },
+      });
+
+      return {
+        id: saleId,
+        amountCollected: apply,
+        amountPaid: newPaid,
+        balanceDue: this.round2(Math.max(0, total - newPaid)),
+        changeDue: 0,
+      };
+    });
   }
 
   async cancelSale(id: number, userId?: number) {

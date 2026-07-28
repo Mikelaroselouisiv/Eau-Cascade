@@ -210,7 +210,26 @@ export interface PurchaseOrderListItem {
   createdBy?: UserAttribution | null;
   receptionStatus?: ReceptionStatus;
   lineProgress?: PurchaseOrderLineProgress[];
+  /** Estimation : Σ (qté commandée × prix unitaire) — hors caisse. */
+  amountOrderedEst?: number;
+  /** Montant réellement réceptionné : Σ (qté reçue × coût unitaire). */
+  amountReceived?: number;
+  /** Estimation du reste à recevoir : Σ (reste × prix unitaire). */
+  amountPendingEst?: number;
+  orderedLinesMissingPrice?: number;
   _count: { lines: number; goodsReceipts?: number };
+}
+
+export interface PurchaseOrdersAmountSummary {
+  companyId: number;
+  orderCount: number;
+  pendingCount: number;
+  partialCount: number;
+  completeCount: number;
+  ordersMissingPrice: number;
+  amountOrderedEst: number;
+  amountReceived: number;
+  amountPendingEst: number;
 }
 
 export interface PurchaseOrderLineDetail {
@@ -347,6 +366,26 @@ export interface CreateSalePayload {
   registerId?: number;
   /** Vente spéciale (prix manuels) — ADMIN / MANAGER. */
   specialSale?: boolean;
+  /** Espèces tendues (vente classique) — peut différer du total. */
+  amountReceived?: number;
+}
+
+export interface SaleCashGapRow {
+  id: number;
+  clientName?: string | null;
+  cashier?: string | null;
+  createdAt: string;
+  total: number;
+  amountReceived: number;
+  amountPaid: number;
+  changeDue: number;
+  balanceDue: number;
+  kind: 'CHANGE_OWED' | 'BALANCE_OWED';
+}
+
+export interface SaleCashGaps {
+  changeOwed: SaleCashGapRow[];
+  balanceOwed: SaleCashGapRow[];
 }
 
 export interface SalePaymentRow {
@@ -366,6 +405,11 @@ export interface Sale {
   createdAt: string;
   clientName?: string | null;
   cashier?: string | null;
+  amountPaid?: number | string;
+  amountReceived?: number | string;
+  changeDue?: number | string;
+  changeSettledAt?: string | null;
+  cashBalanceSettledAt?: string | null;
   userId?: number | null;
   user?: {
     id: number;

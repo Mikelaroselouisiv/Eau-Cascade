@@ -73,8 +73,18 @@ export class PurchasingService {
   private enrichPurchaseOrder<
     T extends {
       status: PurchaseOrderStatus;
-      lines: Array<{ productId: number; quantityOrdered: Prisma.Decimal }>;
-      goodsReceipts: Array<{ lines: Array<{ productId: number; quantity: Prisma.Decimal }> }>;
+      lines: Array<{
+        productId: number;
+        quantityOrdered: Prisma.Decimal;
+        unitPriceEst?: Prisma.Decimal | null;
+      }>;
+      goodsReceipts: Array<{
+        lines: Array<{
+          productId: number;
+          quantity: Prisma.Decimal;
+          unitCost?: Prisma.Decimal | null;
+        }>;
+      }>;
     },
   >(po: T) {
     const posted = po.goodsReceipts ?? [];
@@ -84,10 +94,49 @@ export class PurchasingService {
       po.status === PurchaseOrderStatus.CLOSED
         ? ('complete' as ReceptionStatus)
         : this.receptionStatusFromProgress(lineProgress);
+
+    let amountOrderedEst = 0;
+    let orderedLinesMissingPrice = 0;
+    for (const line of po.lines) {
+      const qty = Number(line.quantityOrdered);
+      const price = line.unitPriceEst != null ? Number(line.unitPriceEst) : null;
+      if (price == null || !Number.isFinite(price)) {
+        orderedLinesMissingPrice += 1;
+        continue;
+      }
+      amountOrderedEst += qty * price;
+    }
+
+    let amountReceived = 0;
+    for (const gr of posted) {
+      for (const line of gr.lines) {
+        const qty = Number(line.quantity);
+        const cost = line.unitCost != null ? Number(line.unitCost) : 0;
+        if (Number.isFinite(qty) && Number.isFinite(cost)) {
+          amountReceived += qty * cost;
+        }
+      }
+    }
+
+    let amountPendingEst = 0;
+    for (const prog of lineProgress) {
+      if (prog.quantityRemaining <= 0) continue;
+      const line = po.lines.find((l) => l.productId === prog.productId);
+      const price = line?.unitPriceEst != null ? Number(line.unitPriceEst) : null;
+      if (price == null || !Number.isFinite(price)) continue;
+      amountPendingEst += prog.quantityRemaining * price;
+    }
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
     return {
       ...po,
       receptionStatus,
       lineProgress,
+      amountOrderedEst: round2(amountOrderedEst),
+      amountReceived: round2(amountReceived),
+      amountPendingEst: round2(amountPendingEst),
+      orderedLinesMissingPrice,
     };
   }
 
@@ -101,11 +150,11 @@ export class PurchasingService {
         include: {
           department: { select: { id: true, name: true } },
           createdBy: { select: USER_ATTRIBUTION_SELECT },
-          lines: { select: { productId: true, quantityOrdered: true } },
+          lines: { select: { productId: true, quantityOrdered: true, unitPriceEst: true } },
           goodsReceipts: {
             where: { status: GoodsReceiptStatus.POSTED, deletedAt: null },
             select: {
-              lines: { select: { productId: true, quantity: true } },
+              lines: { select: { productId: true, quantity: true, unitCost: true } },
             },
           },
           _count: { select: { lines: true, goodsReceipts: true } },
@@ -114,6 +163,63 @@ export class PurchasingService {
         take: 100,
       })
       .then((rows) => rows.map((po) => this.enrichPurchaseOrder(po)));
+  }
+
+  /**
+   * Totaux estimés des commandes (qty × prix unitaire) — suivi opérationnel admin.
+   * N’impacte pas la caisse / le journal : seuls les achats reçus y sont enregistrés.
+   */
+  async getPurchaseOrdersAmountSummary(companyId: number) {
+    const rows = await this.prisma.purchaseOrder.findMany({
+      where: {
+        deletedAt: null,
+        companyId,
+        status: { not: PurchaseOrderStatus.CANCELLED },
+      },
+      include: {
+        lines: { select: { productId: true, quantityOrdered: true, unitPriceEst: true } },
+        goodsReceipts: {
+          where: { status: GoodsReceiptStatus.POSTED, deletedAt: null },
+          select: {
+            lines: { select: { productId: true, quantity: true, unitCost: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const enriched = rows.map((po) => this.enrichPurchaseOrder(po));
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
+    let amountOrderedEst = 0;
+    let amountReceived = 0;
+    let amountPendingEst = 0;
+    let ordersMissingPrice = 0;
+    let pendingCount = 0;
+    let partialCount = 0;
+    let completeCount = 0;
+
+    for (const po of enriched) {
+      amountOrderedEst += po.amountOrderedEst;
+      amountReceived += po.amountReceived;
+      amountPendingEst += po.amountPendingEst;
+      if (po.orderedLinesMissingPrice > 0) ordersMissingPrice += 1;
+      if (po.receptionStatus === 'pending') pendingCount += 1;
+      else if (po.receptionStatus === 'partial') partialCount += 1;
+      else completeCount += 1;
+    }
+
+    return {
+      companyId,
+      orderCount: enriched.length,
+      pendingCount,
+      partialCount,
+      completeCount,
+      ordersMissingPrice,
+      amountOrderedEst: round2(amountOrderedEst),
+      amountReceived: round2(amountReceived),
+      amountPendingEst: round2(amountPendingEst),
+    };
   }
 
   async getPurchaseOrder(id: number) {
@@ -304,6 +410,18 @@ export class PurchasingService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      const costByProduct = new Map<number, number>();
+      for (const line of po.lines) {
+        if (line.unitPriceEst != null) {
+          costByProduct.set(line.productId, Number(line.unitPriceEst));
+        }
+      }
+      for (const p of products) {
+        if (!costByProduct.has(p.id)) {
+          costByProduct.set(p.id, Number(p.cost));
+        }
+      }
+
       const gr = await tx.goodsReceipt.create({
         data: {
           departmentId: po.departmentId,
@@ -315,7 +433,10 @@ export class PurchasingService {
             create: activeLines.map((l) => ({
               productId: l.productId,
               quantity: l.quantity,
-              unitCost: l.unitCost,
+              unitCost:
+                l.unitCost != null && Number.isFinite(Number(l.unitCost))
+                  ? Number(l.unitCost)
+                  : (costByProduct.get(l.productId) ?? 0),
             })),
           },
         },

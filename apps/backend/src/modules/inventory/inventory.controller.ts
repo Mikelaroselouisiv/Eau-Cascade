@@ -51,6 +51,7 @@ export class InventoryController {
       dto.note,
       user?.id,
       dto.kind ?? undefined,
+      dto.onlyPositiveStock === true,
     );
   }
 
@@ -70,12 +71,17 @@ export class InventoryController {
   getCountSheet(
     @Query('departmentId') departmentId?: string,
     @Query('asOf') asOf?: string,
+    @Query('onlyPositiveStock') onlyPositiveStockRaw?: string,
   ) {
     const deptId = InventoryController.parsePositiveInt(departmentId);
     if (!deptId) {
       throw new BadRequestException('departmentId est requis.');
     }
-    return this.inventoryService.getCountSheetContext(deptId, asOf?.trim() || undefined);
+    return this.inventoryService.getCountSheetContext(
+      deptId,
+      asOf?.trim() || undefined,
+      InventoryController.parseTruthy(onlyPositiveStockRaw),
+    );
   }
 
   @Get('count-sheet/export/pdf')
@@ -84,6 +90,7 @@ export class InventoryController {
     @Res() res: Response,
     @Query('departmentId') departmentId?: string,
     @Query('asOf') asOf?: string,
+    @Query('onlyPositiveStock') onlyPositiveStockRaw?: string,
   ) {
     const deptId = InventoryController.parsePositiveInt(departmentId);
     if (!deptId) {
@@ -92,6 +99,7 @@ export class InventoryController {
     const sheet = await this.inventoryService.getCountSheetContext(
       deptId,
       asOf?.trim() || undefined,
+      InventoryController.parseTruthy(onlyPositiveStockRaw),
     );
     const pdfBuffer = await InventoryController.buildCountSheetPdf(sheet);
     const filenameDate = formatDateFr(new Date()).replace(/\//g, '-');
@@ -300,6 +308,19 @@ export class InventoryController {
     return this.inventoryService.getLowStockAlerts(Number(threshold ?? 5), companyId, { skip, take });
   }
 
+  @Get('alerts/zero')
+  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  zeroAlerts(
+    @Query('companyId') companyIdRaw?: string,
+    @Query('skip') skipRaw?: string,
+    @Query('take') takeRaw?: string,
+  ) {
+    const companyId = companyIdRaw ? Number.parseInt(companyIdRaw, 10) : undefined;
+    const skip = skipRaw ? Number.parseInt(skipRaw, 10) : 0;
+    const take = takeRaw ? Number.parseInt(takeRaw, 10) : 8;
+    return this.inventoryService.getZeroStockAlerts(companyId, { skip, take });
+  }
+
   @Get('sessions/export/pdf')
   @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'ACCOUNTANT')
   async exportInventorySessionsPdf(
@@ -429,6 +450,12 @@ export class InventoryController {
     if (raw === undefined || raw === '') return undefined;
     const n = Number(raw);
     return Number.isFinite(n) && n > 0 ? n : undefined;
+  }
+
+  private static parseTruthy(raw?: string): boolean {
+    if (raw === undefined || raw === '') return false;
+    const v = raw.trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes' || v === 'on';
   }
 
   private static parseSessionFilters(

@@ -258,12 +258,31 @@ export class RegisterSessionsService {
       expenseRows.reduce((acc, e) => acc + Number(e.amount), 0),
     );
 
-    const expected = this.round2(openingCash + salesCash - expenses);
+    // Monnaie encore due aux clients : cash toujours dans le tiroir.
+    const unsettledChangeRows = await this.prisma.sale.findMany({
+      where: {
+        deletedAt: null,
+        status: 'COMPLETED',
+        creditCustomerId: null,
+        changeDue: { gt: 0.009 },
+        OR: [
+          { userId: session.openedById },
+          { registerId: session.registerId },
+        ],
+      },
+      select: { changeDue: true },
+    });
+    const unsettledChange = this.round2(
+      unsettledChangeRows.reduce((acc, s) => acc + Number(s.changeDue), 0),
+    );
+
+    const expected = this.round2(openingCash + salesCash + unsettledChange - expenses);
 
     return {
       openingCash,
       salesCash,
       expenses,
+      unsettledChange,
       expected: expected < 0 ? 0 : expected,
     };
   }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { getDepartments, getMarginAnalysis } from '../services/api';
 import type { Department, MarginAnalysisReport } from '../types/api';
+import { useAuth } from '../context/AuthContext';
 import { formatMoney } from '../utils/currency';
 import { defaultMonthStartYmd, formatYmd } from '../utils/datetime';
 import { formatQuantity } from '../utils/formatQuantity';
@@ -24,6 +25,8 @@ type Props = {
 };
 
 export function DashboardBeneficesTab({ companyId }: Props) {
+  const { can } = useAuth();
+  const canSeePurchaseCosts = can(['ADMIN']);
   const [dateFrom, setDateFrom] = useState(defaultMonthStartYmd);
   const [dateTo, setDateTo] = useState(() => formatYmd(new Date()));
   const [departmentId, setDepartmentId] = useState<number | ''>('');
@@ -43,19 +46,23 @@ export function DashboardBeneficesTab({ companyId }: Props) {
   }, [companyId]);
 
   async function load() {
+    if (!dateFrom || !dateTo || dateFrom > dateTo) {
+      setErr('Plage de dates invalide.');
+      return;
+    }
     setLoading(true);
     setErr('');
     try {
-      const data = await getMarginAnalysis({
+      const res = await getMarginAnalysis({
         companyId,
         dateFrom,
         dateTo,
-        departmentId: typeof departmentId === 'number' ? departmentId : undefined,
+        departmentId: departmentId === '' ? undefined : departmentId,
       });
-      setReport(data);
+      setReport(res);
     } catch (e) {
       setReport(null);
-      setErr(formatApiError(e, 'Analyse impossible'));
+      setErr(formatApiError(e, 'Analyse impossible.'));
     } finally {
       setLoading(false);
     }
@@ -78,17 +85,16 @@ export function DashboardBeneficesTab({ companyId }: Props) {
     );
   }, [report, q]);
 
+  const colSpan = canSeePurchaseCosts ? 7 : 4;
+
   return (
-    <div className="benefices-dashboard">
-      <section className="card" style={{ marginTop: '0.5rem' }}>
-        <h2 style={{ marginTop: 0 }}>Analyse des bénéfices</h2>
-        <p className="dept-hint" style={{ marginTop: 0 }}>
-          Bénéfice brut = chiffre d’affaires − coût des marchandises (coût produit × quantité de base
-          vendue).
-        </p>
+    <div>
+      <section className="card">
+        <h2>Analyse des bénéfices</h2>
         <div
           className="form-grid inline"
           style={{
+            marginBottom: '0.85rem',
             gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
             alignItems: 'end',
           }}
@@ -127,20 +133,24 @@ export function DashboardBeneficesTab({ companyId }: Props) {
           <span className="credit-kpi-label">Chiffre d’affaires</span>
           <strong className="credit-kpi-value">{formatMoney(report?.revenue ?? 0)}</strong>
         </div>
-        <div className="credit-kpi credit-kpi-debt">
-          <span className="credit-kpi-label">Coût marchandises</span>
-          <strong className="credit-kpi-value">{formatMoney(report?.cost ?? 0)}</strong>
-        </div>
-        <div className={`credit-kpi ${(report?.margin ?? 0) >= 0 ? 'credit-kpi-clear' : 'credit-kpi-overdue'}`}>
-          <span className="credit-kpi-label">Bénéfice brut</span>
-          <strong className="credit-kpi-value">{formatMoney(report?.margin ?? 0)}</strong>
-        </div>
-        <div className="credit-kpi">
-          <span className="credit-kpi-label">Marge</span>
-          <strong className="credit-kpi-value">
-            {report?.marginPct != null ? `${report.marginPct.toFixed(1)} %` : '—'}
-          </strong>
-        </div>
+        {canSeePurchaseCosts ? (
+          <>
+            <div className="credit-kpi credit-kpi-debt">
+              <span className="credit-kpi-label">Coût marchandises</span>
+              <strong className="credit-kpi-value">{formatMoney(report?.cost ?? 0)}</strong>
+            </div>
+            <div className={`credit-kpi ${(report?.margin ?? 0) >= 0 ? 'credit-kpi-clear' : 'credit-kpi-overdue'}`}>
+              <span className="credit-kpi-label">Bénéfice brut</span>
+              <strong className="credit-kpi-value">{formatMoney(report?.margin ?? 0)}</strong>
+            </div>
+            <div className="credit-kpi">
+              <span className="credit-kpi-label">Marge</span>
+              <strong className="credit-kpi-value">
+                {report?.marginPct != null ? `${report.marginPct.toFixed(1)} %` : '—'}
+              </strong>
+            </div>
+          </>
+        ) : null}
       </section>
 
       <section className="card" style={{ marginTop: '1rem' }}>
@@ -164,22 +174,26 @@ export function DashboardBeneficesTab({ companyId }: Props) {
                 <th>Département</th>
                 <th>Qté (base)</th>
                 <th>CA</th>
-                <th>Coût</th>
-                <th>Bénéfice</th>
-                <th>Marge</th>
+                {canSeePurchaseCosts ? (
+                  <>
+                    <th>Coût</th>
+                    <th>Bénéfice</th>
+                    <th>Marge</th>
+                  </>
+                ) : null}
               </tr>
             </thead>
             <tbody>
               {loading && !report ? (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={colSpan} className="muted">
                     Chargement…
                   </td>
                 </tr>
               ) : null}
               {!loading && filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={colSpan} className="muted">
                     Aucune vente sur cette période.
                   </td>
                 </tr>
@@ -193,13 +207,17 @@ export function DashboardBeneficesTab({ companyId }: Props) {
                   <td>{p.departmentName ?? '—'}</td>
                   <td className="journal-amt">{formatQuantity(p.quantity)}</td>
                   <td className="journal-amt">{formatMoney(p.revenue)}</td>
-                  <td className="journal-amt">{formatMoney(p.cost)}</td>
-                  <td className={`journal-amt ${p.margin >= 0 ? 'ok' : 'debt'}`}>
-                    {formatMoney(p.margin)}
-                  </td>
-                  <td className="journal-amt">
-                    {p.marginPct != null ? `${p.marginPct.toFixed(1)} %` : '—'}
-                  </td>
+                  {canSeePurchaseCosts ? (
+                    <>
+                      <td className="journal-amt">{formatMoney(p.cost)}</td>
+                      <td className={`journal-amt ${p.margin >= 0 ? 'ok' : 'debt'}`}>
+                        {formatMoney(p.margin)}
+                      </td>
+                      <td className="journal-amt">
+                        {p.marginPct != null ? `${p.marginPct.toFixed(1)} %` : '—'}
+                      </td>
+                    </>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

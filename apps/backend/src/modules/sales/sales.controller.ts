@@ -10,12 +10,14 @@ import {
   Query,
   Res,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { CollectSaleBalanceDto } from './dto/cash-gap.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SalesService } from './sales.service';
 
@@ -31,6 +33,46 @@ export class SalesController {
     @GetUser() user?: { id?: number; role?: string },
   ) {
     return this.salesService.create(createSaleDto, user?.id, user?.role);
+  }
+
+  @Get('cash-gaps')
+  @Roles('ADMIN', 'MANAGER', 'CASHIER')
+  listCashGaps(
+    @Query('companyId') companyIdRaw?: string,
+    @Query('departmentId') departmentIdRaw?: string,
+    @Query('take') takeRaw?: string,
+  ) {
+    const companyId = companyIdRaw ? Number.parseInt(companyIdRaw, 10) : NaN;
+    if (!Number.isFinite(companyId) || companyId <= 0) {
+      throw new BadRequestException('companyId requis');
+    }
+    const departmentIdN = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : NaN;
+    const takeN = takeRaw ? Number.parseInt(takeRaw, 10) : undefined;
+    return this.salesService.listCashGaps({
+      companyId,
+      departmentId:
+        Number.isFinite(departmentIdN) && departmentIdN > 0 ? departmentIdN : undefined,
+      take: takeN,
+    });
+  }
+
+  @Post(':id/settle-change')
+  @Roles('ADMIN', 'MANAGER', 'CASHIER')
+  settleChange(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user?: { id?: number },
+  ) {
+    return this.salesService.settleChange(id, user?.id);
+  }
+
+  @Post(':id/collect-balance')
+  @Roles('ADMIN', 'MANAGER', 'CASHIER')
+  collectBalance(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CollectSaleBalanceDto,
+    @GetUser() user?: { id?: number },
+  ) {
+    return this.salesService.collectBalance(id, dto.amount, user?.id);
   }
 
   @Get()

@@ -1,0 +1,24 @@
+/** Libellés de dépenses manuelles (sélection). */
+export const EXPENSE_LABEL_OPTIONS = [
+  'SALAIRE',
+  'CARBURANT',
+  'LOYER',
+  'FOURNITURE DE BUREAU',
+  'ENTRETIEN ET REPARATION',
+  'PUBLICITE ET PROMOTION',
+  'ASSURANCE',
+  "FRAIS D'ADMINISTRATION",
+  'FRAIS DE COMMUNICATION',
+  "FRAIS D'INTERNET",
+  'FRAIS DE BANQUE',
+  'TRANSPORT',
+  'EAU PORTABLE',
+  'EAU DINEPA',
+  'AMORTISSEMENT',
+  'FRAIS DE CONSULTATION',
+  'AUTRES DEPENSES',
+] as const;
+
+export type ExpenseLabelOption = (typeof EXPENSE_LABEL_OPTIONS)[number];
+
+export const EXPENSE_LABEL_OTHER: ExpenseLabelOption = 'AUTRES DEPENSES';

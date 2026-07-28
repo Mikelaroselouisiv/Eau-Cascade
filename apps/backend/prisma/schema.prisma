@@ -321,8 +321,14 @@ model Sale {
   /// Client crédit (null = vente caisse classique).
   creditCustomerId Int?
   creditCustomer   CreditCustomer? @relation(fields: [creditCustomerId], references: [id], onDelete: SetNull)
-  /// Montant déjà encaissé (acomptes + remboursements crédit).
+  /// Montant déjà encaissé (acomptes + remboursements crédit / encaissement POS).
   amountPaid Decimal     @default(0) @db.Decimal(12, 2)
+  /// Espèces tendues par le client à l’encaissement POS (peut différer du total).
+  amountReceived Decimal @default(0) @db.Decimal(12, 2)
+  /// Monnaie encore due au client (0 = réglée ou aucune).
+  changeDue Decimal      @default(0) @db.Decimal(12, 2)
+  changeSettledAt DateTime?
+  cashBalanceSettledAt DateTime?
   items      SaleItem[]
   payments   Payment[]
   creditPayments CreditPayment[]
@@ -340,6 +346,8 @@ model Sale {
   deletedAt  DateTime?
 
   @@index([creditCustomerId, createdAt])
+  @@index([changeDue, status])
+  @@index([amountPaid, status])
 }
 
 model SaleItem {
