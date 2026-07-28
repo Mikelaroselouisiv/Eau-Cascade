@@ -1542,28 +1542,26 @@ export function DashboardPage() {
                     order: movementDateOrder,
                     take: movementsPageSize,
                   });
-                  if (companyId !== '') {
-                    const cid = Number(companyId);
-                    void getInventoryAlerts({
-                      threshold: 5,
-                      companyId: cid,
-                      skip: 0,
-                      take: alertsTake,
-                    }).then((a) => {
-                      setAlerts(a.items);
-                      setAlertsTotal(a.total);
-                      setAlertsSkip(0);
-                    });
-                    void getZeroStockAlerts({
-                      companyId: cid,
-                      skip: 0,
-                      take: zeroAlertsTake,
-                    }).then((z) => {
-                      setZeroAlerts(z.items);
-                      setZeroAlertsTotal(z.total);
-                      setZeroAlertsSkip(0);
-                    });
-                  }
+                  const cid = Number(companyId);
+                  void getInventoryAlerts({
+                    threshold: 5,
+                    companyId: cid,
+                    skip: 0,
+                    take: alertsTake,
+                  }).then((a) => {
+                    setAlerts(a.items);
+                    setAlertsTotal(a.total);
+                    setAlertsSkip(0);
+                  });
+                  void getZeroStockAlerts({
+                    companyId: cid,
+                    skip: 0,
+                    take: zeroAlertsTake,
+                  }).then((z) => {
+                    setZeroAlerts(z.items);
+                    setZeroAlertsTotal(z.total);
+                    setZeroAlertsSkip(0);
+                  });
                 }}
               />
 
