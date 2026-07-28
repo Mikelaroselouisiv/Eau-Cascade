@@ -104,6 +104,15 @@ export class RegisterSessionsController {
     });
   }
 
+  @Get(':id/closing-cash-preview')
+  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  closingCashPreview(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: { id: number },
+  ) {
+    return this.registerSessionsService.getClosingCashPreview(id, user.id);
+  }
+
   @Get(':id')
   @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
   getOne(@Param('id', ParseIntPipe) id: number) {

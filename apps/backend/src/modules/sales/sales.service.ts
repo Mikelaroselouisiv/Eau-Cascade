@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { FinanceType, MovementType, Prisma } from '@prisma/client';
 import { resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -18,7 +18,30 @@ export class SalesService {
     private readonly deliveriesService: DeliveriesService,
   ) {}
 
-  async create(createSaleDto: CreateSaleDto, userId?: number) {
+  async create(
+    createSaleDto: CreateSaleDto,
+    userId?: number,
+    role?: string,
+  ) {
+    const isSpecialSale =
+      !!createSaleDto.specialSale ||
+      createSaleDto.items.some((it) => it.unitPrice != null);
+
+    if (isSpecialSale) {
+      if (role !== 'ADMIN' && role !== 'MANAGER') {
+        throw new ForbiddenException(
+          'Vente spéciale réservée aux administrateurs et managers',
+        );
+      }
+      for (const item of createSaleDto.items) {
+        if (item.unitPrice == null || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) < 0) {
+          throw new BadRequestException(
+            'Chaque ligne de vente spéciale doit avoir un prix unitaire',
+          );
+        }
+      }
+    }
+
     if (createSaleDto.clientUuid) {
       const existing = await this.prisma.sale.findUnique({
         where: { clientUuid: createSaleDto.clientUuid },
@@ -92,7 +115,9 @@ export class SalesService {
           minQuantity: Number(v.minQuantity),
           unitPrice: Number(v.unitPrice),
         }));
-        const unitPrice = resolveVolumeUnitPrice(Number(psu.salePrice), tierRows, item.quantity);
+        const unitPrice = isSpecialSale
+          ? Number(item.unitPrice)
+          : resolveVolumeUnitPrice(Number(psu.salePrice), tierRows, item.quantity);
         const subtotal = unitPrice * item.quantity;
         total += subtotal;
 

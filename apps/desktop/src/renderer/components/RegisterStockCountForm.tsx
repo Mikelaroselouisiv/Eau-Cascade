@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { InventoryCountSheetRow } from '../types/api';
 import { formatQuantity, formatQuantityInput } from '../utils/formatQuantity';
 
@@ -14,11 +14,15 @@ type Props = {
 };
 
 function parseQty(raw: string): number | null {
-  const trimmed = raw.trim().replace(',', '.');
+  const trimmed = raw.trim().replace(/\s/g, '').replace(',', '.');
   if (trimmed === '') return null;
   const n = Number(trimmed);
   if (!Number.isFinite(n) || n < 0) return null;
   return n;
+}
+
+function initialCounts(products: InventoryCountSheetRow[]): CountMap {
+  return Object.fromEntries(products.map((p) => [p.id, formatQuantityInput(p.stock)]));
 }
 
 export function RegisterStockCountForm({
@@ -29,10 +33,13 @@ export function RegisterStockCountForm({
   error,
   onSubmit,
 }: Props) {
-  const [counts, setCounts] = useState<CountMap>(() =>
-    Object.fromEntries(products.map((p) => [p.id, ''])),
-  );
+  const [counts, setCounts] = useState<CountMap>(() => initialCounts(products));
   const [touched, setTouched] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    setCounts(initialCounts(products));
+    setTouched({});
+  }, [products]);
 
   const linesReady = useMemo(() => {
     return products.every((p) => parseQty(counts[p.id] ?? '') !== null);
@@ -80,7 +87,10 @@ export function RegisterStockCountForm({
                   disabled={busy}
                   placeholder={formatQuantityInput(p.stock)}
                   aria-label={`Quantité comptée — ${p.name}`}
-                  onChange={(e) => setCounts((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                  onChange={(e) => {
+                    setTouched((prev) => ({ ...prev, [p.id]: true }));
+                    setCounts((prev) => ({ ...prev, [p.id]: e.target.value }));
+                  }}
                   onBlur={(e) => handleBlur(p.id, e.target.value)}
                 />
                 <div className="register-count-unit">{p.unitLabel}</div>

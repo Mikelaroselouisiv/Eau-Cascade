@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNumber,
@@ -24,6 +25,13 @@ export class CreateSaleItemDto {
   @IsNumber()
   @Min(0.0001)
   quantity: number;
+
+  /** Prix unitaire saisi à la main (vente spéciale uniquement). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitPrice?: number;
 }
 
 export class CreatePaymentDto {
@@ -75,4 +83,9 @@ export class CreateSaleDto {
   @IsString()
   @MinLength(8)
   clientUuid?: string;
+
+  /** Vente spéciale : prix unitaires saisis manuellement (ADMIN / MANAGER uniquement). */
+  @IsOptional()
+  @IsBoolean()
+  specialSale?: boolean;
 }

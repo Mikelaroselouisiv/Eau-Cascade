@@ -10,6 +10,7 @@ import {
   getDepartments,
   getInventoryCountSheet,
   getPrinterSettings,
+  getRegisterClosingCashPreview,
   listRegisters,
   openRegisterSession,
 } from '../services/api';
@@ -58,6 +59,8 @@ type CartLine = {
   quantity: number;
   /** Facteur stock (1 = 1 unité vendue = 1 unité de stock) */
   unitsPerPackage: number;
+  /** Prix unitaire saisi (vente spéciale) — null = non renseigné */
+  manualUnitPrice?: number | null;
 };
 
 function defaultSaleUnit(p: Product): ProductSaleUnit | undefined {
@@ -98,9 +101,11 @@ function effectiveUnitPrice(product: Product | undefined, line: CartLine): numbe
 }
 
 export function PosPage() {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const cashierLabel = user?.fullName?.trim() || user?.phone || 'Caissier';
   const isCashier = user?.role === 'CASHIER';
+  const canSpecialSale = can(['ADMIN', 'MANAGER']);
+  const [saleMode, setSaleMode] = useState<'classic' | 'special'>('classic');
   const [products, setProducts] = useState<Product[]>([]);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [printer, setPrinter] = useState<DepartmentPrinterSettings | null>(null);
@@ -138,6 +143,12 @@ export function PosPage() {
   const salesEnabled = registerSession != null;
 
   const currencyCode = resolveCurrencyCode(company?.currency);
+
+  useEffect(() => {
+    if (!canSpecialSale && saleMode === 'special') {
+      setSaleMode('classic');
+    }
+  }, [canSpecialSale, saleMode]);
 
   const effectiveDepartmentId = useMemo(() => {
     if (isCashier) {
@@ -331,11 +342,31 @@ export function PosPage() {
   const cartTotal = useMemo(
     () =>
       activeCart.reduce((sum, l) => {
+        if (saleMode === 'special') {
+          const price = l.manualUnitPrice;
+          if (price == null || !Number.isFinite(price)) return sum;
+          return sum + price * l.quantity;
+        }
         const p = products.find((x) => x.id === l.productId);
         return sum + effectiveUnitPrice(p, l) * l.quantity;
       }, 0),
-    [activeCart, products],
+    [activeCart, products, saleMode],
   );
+
+  const specialPricesReady = useMemo(() => {
+    if (saleMode !== 'special') return true;
+    return activeCart.every(
+      (l) => l.manualUnitPrice != null && Number.isFinite(l.manualUnitPrice) && l.manualUnitPrice >= 0,
+    );
+  }, [activeCart, saleMode]);
+
+  function switchSaleMode(mode: 'classic' | 'special') {
+    if (mode === saleMode) return;
+    if (mode === 'special' && !canSpecialSale) return;
+    setSaleMode(mode);
+    setDrafts([{ id: 'd1', cart: [], paymentMethod: 'CASH', name: 'Client' }]);
+    setActiveDraftId('d1');
+  }
 
   function updateActiveDraft(next: (d: SaleDraft) => SaleDraft) {
     setDrafts((prev) => prev.map((d) => (d.id === activeDraftId ? next(d) : d)));
@@ -432,6 +463,7 @@ export function PosPage() {
             label,
             quantity: firstQty,
             unitsPerPackage: up,
+            ...(saleMode === 'special' ? { manualUnitPrice: null } : {}),
           },
         ],
       };
@@ -479,8 +511,37 @@ export function PosPage() {
     }));
   }
 
+  function setLineManualPrice(productSaleUnitId: number, raw: string) {
+    const trimmed = raw.trim().replace(',', '.');
+    if (trimmed === '') {
+      updateActiveDraft((d) => ({
+        ...d,
+        cart: d.cart.map((l) =>
+          l.productSaleUnitId === productSaleUnitId ? { ...l, manualUnitPrice: null } : l,
+        ),
+      }));
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) return;
+    updateActiveDraft((d) => ({
+      ...d,
+      cart: d.cart.map((l) =>
+        l.productSaleUnitId === productSaleUnitId ? { ...l, manualUnitPrice: parsed } : l,
+      ),
+    }));
+  }
+
   async function checkout() {
     if (activeCart.length === 0) return;
+    if (saleMode === 'special' && !canSpecialSale) {
+      setStatus('Vente spéciale réservée aux managers et administrateurs', { persist: true });
+      return;
+    }
+    if (saleMode === 'special' && !specialPricesReady) {
+      setStatus('Renseignez le prix de chaque ligne', { persist: true });
+      return;
+    }
     if (!registerSession) {
       refuseClosedCaisse();
       return;
@@ -495,10 +556,15 @@ export function PosPage() {
       items: activeCart.map((l) => ({
         productSaleUnitId: l.productSaleUnitId,
         quantity: l.quantity,
+        ...(saleMode === 'special' && l.manualUnitPrice != null
+          ? { unitPrice: l.manualUnitPrice }
+          : {}),
       })),
       payments: [{ method: activeDraft.paymentMethod, amount: total }],
       clientName,
       clientUuid,
+      registerId: registerSession.registerId,
+      ...(saleMode === 'special' ? { specialSale: true } : {}),
     };
     try {
       if (!navigator.onLine) {
@@ -512,6 +578,7 @@ export function PosPage() {
       setStatus(`Vente #${sale.id} enregistrée`);
       if (printTicket && window.desktopApp?.printReceipt) {
         await window.desktopApp.printReceipt({
+          saleId: sale.id,
           companyName: company?.name ?? 'Entreprise',
           companyPhone: company?.phone ?? null,
           address: [company?.address, company?.city].filter(Boolean).join(', ') || '',
@@ -519,10 +586,14 @@ export function PosPage() {
           receiptClientName: activeDraft.name || null,
           items: activeCart.map((x) => {
             const pr = products.find((z) => z.id === x.productId);
+            const price =
+              saleMode === 'special'
+                ? (x.manualUnitPrice ?? 0)
+                : effectiveUnitPrice(pr, x);
             return {
               name: x.label,
               qty: x.quantity,
-              price: effectiveUnitPrice(pr, x),
+              price,
             };
           }),
           total,
@@ -620,7 +691,22 @@ export function PosPage() {
 
   async function openRegisterPanel(mode: 'open' | 'close') {
     setRegisterError('');
+    setClosingCashCounted('');
+    if (mode === 'open') {
+      setOpeningCash('');
+      setClosingCashExpected('');
+    }
     await refreshCountProducts();
+    if (mode === 'close' && registerSession) {
+      try {
+        const preview = await getRegisterClosingCashPreview(registerSession.id);
+        setClosingCashExpected(String(preview.expected));
+      } catch {
+        const opening = Number(registerSession.openingCashAmount ?? 0);
+        setClosingCashExpected(Number.isFinite(opening) ? String(opening) : '0');
+        setRegisterError('Impossible de calculer les espèces attendues.');
+      }
+    }
     setRegisterPanel(mode);
   }
 
@@ -628,6 +714,28 @@ export function PosPage() {
     <div className="page-inner pos-page">
       <header className="page-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
         <h1 style={{ margin: 0 }}>Caisse</h1>
+        <div className="pos-sale-mode" role="tablist" aria-label="Type de vente">
+          <button
+            type="button"
+            role="tab"
+            className={`pos-sale-mode-btn${saleMode === 'classic' ? ' active' : ''}`}
+            aria-selected={saleMode === 'classic'}
+            onClick={() => switchSaleMode('classic')}
+          >
+            Vente classique
+          </button>
+          {canSpecialSale ? (
+            <button
+              type="button"
+              role="tab"
+              className={`pos-sale-mode-btn${saleMode === 'special' ? ' active' : ''}`}
+              aria-selected={saleMode === 'special'}
+              onClick={() => switchSaleMode('special')}
+            >
+              Vente spéciale
+            </button>
+          ) : null}
+        </div>
         {registerSession ? (
           <span className="info-text" style={{ margin: 0 }}>
             Caisse {formatRegisterCode(registerSession.register.code)} ·{' '}
@@ -684,6 +792,7 @@ export function PosPage() {
                 </select>
               </label>
               <RegisterStockCountForm
+                key={`open-${countProducts.map((p) => p.id).join('-')}`}
                 products={countProducts}
                 submitLabel="Ouvrir"
                 busy={registerBusy}
@@ -704,6 +813,7 @@ export function PosPage() {
             </>
           ) : registerSession ? (
             <RegisterStockCountForm
+              key={`close-${countProducts.map((p) => p.id).join('-')}`}
               products={countProducts}
               submitLabel="Fermer"
               busy={registerBusy}
@@ -716,8 +826,8 @@ export function PosPage() {
                     type="text"
                     inputMode="decimal"
                     value={closingCashExpected}
-                    disabled={registerBusy}
-                    onChange={(e) => setClosingCashExpected(e.target.value)}
+                    disabled
+                    readOnly
                   />
                   <MoneyField
                     label="Espèces comptées"
@@ -885,15 +995,45 @@ export function PosPage() {
           <ul className="cart-lines">
             {activeCart.map((l) => {
               const pr = products.find((x) => x.id === l.productId);
-              const unitP = effectiveUnitPrice(pr, l);
-              const lineTotal = unitP * l.quantity;
+              const unitP =
+                saleMode === 'special'
+                  ? (l.manualUnitPrice ?? 0)
+                  : effectiveUnitPrice(pr, l);
+              const lineTotal =
+                saleMode === 'special' && (l.manualUnitPrice == null || !Number.isFinite(l.manualUnitPrice))
+                  ? 0
+                  : unitP * l.quantity;
               return (
               <li key={l.productSaleUnitId} className="cart-line">
                 <div className="cart-line-main">
                   <div className="cart-line-title">{l.label}</div>
-                  <div className="cart-line-sub">
-                    {formatMoney(unitP)} × {formatQty(l.quantity)} = {formatMoney(lineTotal)}
-                  </div>
+                  {saleMode === 'special' ? (
+                    <label className="cart-price-label">
+                      Prix unitaire
+                      <input
+                        className="cart-price-input"
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step="0.01"
+                        disabled={!salesEnabled}
+                        value={l.manualUnitPrice == null ? '' : String(l.manualUnitPrice)}
+                        placeholder="0.00"
+                        onChange={(e) => setLineManualPrice(l.productSaleUnitId, e.target.value)}
+                      />
+                    </label>
+                  ) : (
+                    <div className="cart-line-sub">
+                      {formatMoney(unitP)} × {formatQty(l.quantity)} = {formatMoney(lineTotal)}
+                    </div>
+                  )}
+                  {saleMode === 'special' ? (
+                    <div className="cart-line-sub">
+                      {l.manualUnitPrice == null
+                        ? `× ${formatQty(l.quantity)}`
+                        : `${formatMoney(unitP)} × ${formatQty(l.quantity)} = ${formatMoney(lineTotal)}`}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="cart-qty-editor">
                   <div className="cart-qty-steppers">
@@ -971,7 +1111,7 @@ export function PosPage() {
           <button
             type="button"
             className="btn btn-primary btn-block"
-            disabled={activeCart.length === 0}
+            disabled={activeCart.length === 0 || !specialPricesReady}
             onClick={() => void checkout()}
           >
             Encaisser

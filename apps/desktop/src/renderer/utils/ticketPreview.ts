@@ -22,6 +22,8 @@ export type TicketPreviewInput = {
   showLogoOnReceipt?: boolean;
   receiptLogoUrl?: string | null;
   cashier?: string;
+  saleId?: number;
+  receiptClientName?: string | null;
   isTest?: boolean;
   previewSampleBody?: string | null;
   items?: Array<{ name: string; qty: number; price: number }>;
@@ -62,6 +64,12 @@ export function buildTicketPreviewText(data: TicketPreviewInput): string {
   }
 
   lines.push(separator);
+  if (data.saleId != null) {
+    lines.push(clipLine(`Vente #${data.saleId}`, lineWidth));
+  }
+  if (data.receiptClientName) {
+    lines.push(clipLine(`Client: ${data.receiptClientName}`, lineWidth));
+  }
   lines.push(`Caissier: ${data.cashier ?? 'N/A'}`);
   lines.push(`Date: ${date}`);
   lines.push(separator);

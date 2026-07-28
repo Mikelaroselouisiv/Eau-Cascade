@@ -328,6 +328,8 @@ export interface Product {
 export interface SaleItemPayload {
   productSaleUnitId: number;
   quantity: number;
+  /** Prix unitaire manuel (vente spéciale). */
+  unitPrice?: number;
 }
 
 export interface PaymentPayload {
@@ -342,6 +344,9 @@ export interface CreateSalePayload {
   clientName?: string | null;
   /** UUID client pour idempotence (offline / rejeu). */
   clientUuid?: string;
+  registerId?: number;
+  /** Vente spéciale (prix manuels) — ADMIN / MANAGER. */
+  specialSale?: boolean;
 }
 
 export interface SalePaymentRow {

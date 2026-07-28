@@ -776,6 +776,21 @@ export async function closeRegisterSession(
   return data;
 }
 
+export async function getRegisterClosingCashPreview(sessionId: number): Promise<{
+  openingCash: number;
+  salesCash: number;
+  expenses: number;
+  expected: number;
+}> {
+  const { data } = await api.get<{
+    openingCash: number;
+    salesCash: number;
+    expenses: number;
+    expected: number;
+  }>(`/register-sessions/${sessionId}/closing-cash-preview`);
+  return data;
+}
+
 export async function getGlobalStockSnapshot(params?: {
   companyIds?: number[];
   departmentIds?: number[];

@@ -4,7 +4,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  DeliveryStatus,
   FinanceType,
   PaymentMethod,
   Prisma,
@@ -13,6 +12,7 @@ import { resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { DeliveriesService } from '../deliveries/deliveries.service';
 import { InventoryService } from '../inventory/inventory.service';
 import {
   CreateCreditCustomerDto,
@@ -29,6 +29,7 @@ export class CreditService {
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
     private readonly auditService: AuditService,
+    private readonly deliveriesService: DeliveriesService,
   ) {}
 
   private round2(n: number) {
@@ -207,8 +208,9 @@ export class CreditService {
   }
 
   /**
-   * Vente à crédit autonome : crée la vente, sort le stock (livraison complète),
+   * Vente à crédit autonome : crée la vente + fiche livraison PENDING (comme le POS),
    * n’écrit PAS l’encaissement total en finance (seulement un acompte éventuel).
+   * La sortie de stock se fait à la livraison.
    */
   async createCreditSale(dto: CreateCreditSaleDto, userId?: number) {
     const customer = await this.prisma.creditCustomer.findFirst({
@@ -363,57 +365,16 @@ export class CreditService {
         include: { items: true },
       });
 
-      // Stock : sortie immédiate (panel crédit = marchandise remise au client).
-      const delivery = await tx.delivery.create({
-        data: {
-          saleId: sale.id,
-          companyId: customer.companyId,
-          departmentId: firstDepartmentId,
-          status: DeliveryStatus.DELIVERED,
-          deliveredAt: new Date(),
-          deliveredById: userId ?? null,
-          note: 'Crédit — sortie stock à la vente',
-          items: {
-            create: sale.items.map((it) => ({
-              saleItemId: it.id,
-              quantityOrdered: it.quantity,
-              quantityDelivered: it.quantity,
-            })),
-          },
-        },
+      // Fiche livraison PENDING — stock sort à la livraison (même flux que le POS).
+      const delivery = await this.deliveriesService.createFromSaleTx(tx, {
+        saleId: sale.id,
+        companyId: customer.companyId,
+        departmentId: firstDepartmentId,
+        items: sale.items.map((it) => ({
+          saleItemId: it.id,
+          quantityOrdered: Number(it.quantity),
+        })),
       });
-
-      for (const it of sale.items) {
-        const product = await tx.product.findUnique({ where: { id: it.productId } });
-        if (!product) continue;
-        const baseQty = Number(it.baseQuantity);
-        if (product.isService) {
-          const recipe = await tx.productRecipe.findUnique({
-            where: { parentProductId: product.id },
-            include: { components: true },
-          });
-          if (recipe?.components.length) {
-            for (const c of recipe.components) {
-              const need = Number(c.quantityPerParentBaseUnit) * baseQty;
-              await this.inventoryService.decrementStockTx(
-                tx,
-                c.componentProductId,
-                need,
-                userId,
-                `Crédit vente #${sale.id}`,
-              );
-            }
-          }
-        } else if (product.trackStock) {
-          await this.inventoryService.decrementStockTx(
-            tx,
-            product.id,
-            baseQty,
-            userId,
-            `Crédit vente #${sale.id}`,
-          );
-        }
-      }
 
       // Acompte → journal finance (cash), sans lier saleId unique POS.
       if (down > 0.009) {

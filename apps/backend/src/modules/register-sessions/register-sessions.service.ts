@@ -205,6 +205,73 @@ export class RegisterSessionsService {
     });
   }
 
+  /**
+   * Espèces attendues à la fermeture :
+   * fond d’ouverture + encaissements espèces (session) − dépenses (session).
+   */
+  async getClosingCashPreview(sessionId: number, userId: number) {
+    const session = await this.prisma.registerSession.findFirst({
+      where: { id: sessionId, deletedAt: null },
+    });
+    if (!session) {
+      throw new NotFoundException('Session introuvable');
+    }
+    if (session.status !== RegisterSessionStatus.OPEN) {
+      throw new BadRequestException('Cette caisse est déjà fermée.');
+    }
+    if (session.openedById !== userId) {
+      throw new BadRequestException('Seul l’utilisateur ayant ouvert la caisse peut la fermer.');
+    }
+
+    const openedAt = session.openedAt;
+    const openingCash = this.round2(Number(session.openingCashAmount ?? 0));
+
+    const cashPayments = await this.prisma.payment.findMany({
+      where: {
+        method: 'CASH',
+        sale: {
+          deletedAt: null,
+          status: 'COMPLETED',
+          createdAt: { gte: openedAt },
+          OR: [
+            { userId: session.openedById },
+            { registerId: session.registerId },
+          ],
+        },
+      },
+      select: { amount: true },
+    });
+    const salesCash = this.round2(
+      cashPayments.reduce((acc, p) => acc + Number(p.amount), 0),
+    );
+
+    const expenseRows = await this.prisma.financeEntry.findMany({
+      where: {
+        type: 'EXPENSE',
+        deletedAt: null,
+        userId: session.openedById,
+        createdAt: { gte: openedAt },
+      },
+      select: { amount: true },
+    });
+    const expenses = this.round2(
+      expenseRows.reduce((acc, e) => acc + Number(e.amount), 0),
+    );
+
+    const expected = this.round2(openingCash + salesCash - expenses);
+
+    return {
+      openingCash,
+      salesCash,
+      expenses,
+      expected: expected < 0 ? 0 : expected,
+    };
+  }
+
+  private round2(n: number) {
+    return Math.round(n * 100) / 100;
+  }
+
   async openSession(dto: OpenRegisterSessionDto, userId: number) {
     const dept = await this.prisma.department.findUnique({
       where: { id: dto.departmentId },

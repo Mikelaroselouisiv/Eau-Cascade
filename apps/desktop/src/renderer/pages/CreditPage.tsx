@@ -8,9 +8,11 @@ import {
   createCreditCustomer,
   createCreditSale,
   getCompanies,
+  getCompanyById,
   getCreditCustomer,
   getCreditSummary,
   getDepartments,
+  getPrinterSettings,
   getProducts,
   listCreditCustomers,
   recordCreditPayment,
@@ -59,7 +61,7 @@ type PanelMode = 'overview' | 'new-customer' | 'fiche';
 type CartLine = { productSaleUnitId: number; productName: string; unitLabel: string; unitPrice: number; quantity: number };
 
 export function CreditPage() {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const canManage = can(['ADMIN', 'MANAGER']);
   const [message, setMessage] = useAutoClearMessage();
 
@@ -93,6 +95,7 @@ export function CreditPage() {
   const [downPayment, setDownPayment] = useState('');
   const [saleNote, setSaleNote] = useState('');
   const [saleBusy, setSaleBusy] = useState(false);
+  const [printTicket, setPrintTicket] = useState(false);
 
   const [payAmount, setPayAmount] = useState('');
   const [paySaleId, setPaySaleId] = useState<number | ''>('');
@@ -251,6 +254,7 @@ export function CreditPage() {
     setDownPayment('');
     setSaleNote('');
     setProductQ('');
+    setPrintTicket(false);
     try {
       const list = await getProducts(detail.departmentId ?? undefined);
       setProducts(list);
@@ -295,8 +299,48 @@ export function CreditPage() {
         note: saleNote.trim() || undefined,
       });
       setMessage(
-        `Vente #${result.saleId} — total ${formatMoney(result.total)}, reste ${formatMoney(result.balanceDue)} (stock sorti)`,
+        `Vente #${result.saleId} — total ${formatMoney(result.total)}, reste ${formatMoney(result.balanceDue)} (fiche livraison créée)`,
       );
+
+      if (printTicket && window.desktopApp?.printReceipt) {
+        try {
+          const company = await getCompanyById(detail.companyId).catch(() => null);
+          const deptId = detail.departmentId ?? undefined;
+          const printer =
+            typeof deptId === 'number' ? await getPrinterSettings(deptId).catch(() => null) : null;
+          const cashierLabel =
+            user?.fullName?.trim() || user?.phone || 'Caissier';
+          await window.desktopApp.printReceipt({
+            saleId: result.saleId,
+            companyName: company?.name ?? 'Entreprise',
+            companyPhone: company?.phone ?? null,
+            address: [company?.address, company?.city].filter(Boolean).join(', ') || '',
+            cashier: cashierLabel,
+            dateTime: formatDateTime(new Date().toISOString()),
+            receiptClientName: detail.name,
+            items: cart.map((l) => ({
+              name: `${l.productName} (${l.unitLabel})`,
+              qty: l.quantity,
+              price: l.unitPrice,
+            })),
+            total: result.total,
+            paymentMode: Number(downPayment) > 0 ? 'SPLIT' : 'CREDIT',
+            paperWidth: printer?.paperWidth === 80 ? 80 : 58,
+            printerName: printer?.deviceName ?? '',
+            receiptHeaderText: printer?.receiptHeaderText ?? null,
+            receiptFooterText: printer?.receiptFooterText ?? null,
+            receiptLogoUrl: printer?.receiptLogoUrl ?? null,
+            showLogoOnReceipt: printer?.showLogoOnReceipt ?? true,
+            autoCut: printer?.autoCut ?? true,
+          });
+        } catch {
+          setMessage(
+            `Vente #${result.saleId} enregistrée, mais l’impression a échoué`,
+            { persist: true },
+          );
+        }
+      }
+
       setShowSaleModal(false);
       await openFiche(detail.id);
       await refreshList();
@@ -733,8 +777,8 @@ export function CreditPage() {
 
       {showSaleModal && detail ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal credit-modal">
-            <header className="modal-header">
+          <div className="modal card credit-modal">
+            <header className="modal-heading">
               <h2>Achat à crédit — {detail.name}</h2>
               <button type="button" className="btn btn-ghost" onClick={() => setShowSaleModal(false)}>
                 Fermer
@@ -806,10 +850,14 @@ export function CreditPage() {
                 Note
                 <input value={saleNote} onChange={(e) => setSaleNote(e.target.value)} />
               </label>
-              <p className="credit-hint">
-                La marchandise est remise au client : le stock sort immédiatement. Seul l’acompte (s’il y en a)
-                entre dans le journal finance.
-              </p>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={printTicket}
+                  onChange={(e) => setPrintTicket(e.target.checked)}
+                />
+                Imprimer le ticket
+              </label>
               <div className="credit-form-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowSaleModal(false)}>
                   Annuler
@@ -825,8 +873,8 @@ export function CreditPage() {
 
       {showPayModal && detail ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal credit-modal">
-            <header className="modal-header">
+          <div className="modal card credit-modal">
+            <header className="modal-heading">
               <h2>Remboursement — {detail.name}</h2>
               <button type="button" className="btn btn-ghost" onClick={() => setShowPayModal(false)}>
                 Fermer

@@ -28,9 +28,9 @@ export class SalesController {
   @Roles('ADMIN', 'MANAGER', 'CASHIER')
   create(
     @Body() createSaleDto: CreateSaleDto,
-    @GetUser() user?: { id?: number },
+    @GetUser() user?: { id?: number; role?: string },
   ) {
-    return this.salesService.create(createSaleDto, user?.id);
+    return this.salesService.create(createSaleDto, user?.id, user?.role);
   }
 
   @Get()

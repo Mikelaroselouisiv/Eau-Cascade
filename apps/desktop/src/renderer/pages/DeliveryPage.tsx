@@ -403,7 +403,7 @@ export function DeliveryPage() {
 
       {selected ? (
         <div className="modal-backdrop" onClick={() => setSelected(null)}>
-          <div className="modal delivery-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal card delivery-modal" onClick={(e) => e.stopPropagation()}>
             <div className="delivery-modal-head">
               <div>
                 <div className="delivery-modal-ref">Vente #{selected.sale?.id ?? selected.saleId}</div>
