@@ -994,7 +994,7 @@ export class ReportsService {
         ? companies[0].name
         : companies.length > 1
           ? companies.map((c) => c.name).join(', ')
-          : 'POS Entreprise Israel';
+          : 'POS Eau Cascade';
     const logoUrl = companies.length === 1 ? companies[0].logoUrl : null;
     const deptLine =
       departmentId != null && departmentId > 0

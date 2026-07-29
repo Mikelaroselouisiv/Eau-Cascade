@@ -1,8 +1,8 @@
 {
   "name": "desktop",
-  "productName": "POS Entreprise Israel",
+  "productName": "POS Eau Cascade",
   "description": "Point de vente — application desktop",
-  "author": "Entreprise Israel",
+  "author": "Eau Cascade",
   "private": true,
   "version": "4.0.0",
   "type": "module",
@@ -56,8 +56,8 @@
   },
   "build": {
     "icon": "build/icon.ico",
-    "appId": "com.entrepriseisrael.pos.desktop",
-    "productName": "POS Entreprise Israel",
+    "appId": "com.eaucascade.pos.desktop",
+    "productName": "POS Eau Cascade",
     "copyright": "Copyright © 2026",
     "directories": {
       "output": "release",

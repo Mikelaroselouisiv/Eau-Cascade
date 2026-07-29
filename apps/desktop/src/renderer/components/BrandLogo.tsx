@@ -20,7 +20,7 @@ export function BrandLogo({
   return (
     <img
       src={logoUrl}
-      alt="Entreprise Israel"
+      alt="Eau Cascade"
       className={`brand-logo-img ${className}`.trim()}
       style={style}
     />

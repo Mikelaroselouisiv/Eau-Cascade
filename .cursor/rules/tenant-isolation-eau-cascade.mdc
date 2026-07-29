@@ -1,0 +1,46 @@
+---
+description: Isolation stricte POS Eau Cascade vs autres tenants (GCP, secrets, déploiements)
+alwaysApply: true
+---
+
+# Isolation tenant — Eau Cascade
+
+Ce dépôt est **POS Eau Cascade** uniquement. Les autres monorepos POS (Israel, Frères Baziles) sont une **base de code d’inspiration**, jamais une cible d’ops.
+
+## Projet GCP autorisé (seul)
+
+- Compte Cloud SDK attendu : `larosemikelson@gmail.com` (config `pos-eau-cascade`)
+- Project ID : `eau-cascade`
+- Billing : compte lié à ce projet Eau Cascade seulement
+
+## Interdit absolument
+
+- Tout `gcloud` / `gsutil` / SSH / deploy vers `pos-freres-basiles`, `pos-entrprise-israel`, ou tout autre projet / bucket / VM / SA d’un autre tenant
+- Modifier, lire en live, ou « réparer » l’infra Israel ou Frères Baziles depuis ce workspace
+- Réutiliser les secrets CI d’un autre repo (`GCP_SA_KEY`, WIF) sur Eau Cascade
+- Pointer Artifact Registry, GCS, IP publique ou sync vers des ressources d’un autre tenant
+- Activer la config gcloud `default` (Frères) ou `pos-israel` pour travailler ici — rester sur `pos-eau-cascade`
+
+## Avant chaque commande GCP
+
+1. `gcloud config get-value project` doit être `eau-cascade`
+2. Si ce n’est pas le cas : `gcloud config configurations activate pos-eau-cascade` puis `gcloud config set project eau-cascade`
+3. Refuser d’exécuter si le project ID contient `freres` / `bazile` / `baziles` / `israel` / `pos-entrprise`
+
+## Remplacement de noms
+
+Quand tu copies un pattern depuis l’ancien code, remplace toujours :
+
+| Ancien (ne pas utiliser) | Eau Cascade |
+|--------------------------|-------------|
+| `pos-freres-basiles` / `pos-entrprise-israel` | `eau-cascade` |
+| `*-assets` d’un autre tenant | `eau-cascade-assets` |
+| IP / host autre tenant | IP / host de la VM Eau Cascade |
+
+## Fuseau horaire
+
+Toujours **`America/Port-au-Prince`** pour affichage, tickets, PDF et bornes de journée (jamais le TZ OS local).
+
+## Script de garde
+
+Préférer `infra/scripts/assert-eau-cascade-gcp.ps1` avant tout provision / deploy GCP.

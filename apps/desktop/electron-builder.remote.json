@@ -1,7 +1,7 @@
 {
-  "appId": "com.entrepriseisrael.pos.desktop.remote",
-  "productName": "POS Entreprise Israel Remote",
-  "artifactName": "POS-Entreprise-Israel-Remote-${version}.${ext}",
+  "appId": "com.eaucascade.pos.desktop.remote",
+  "productName": "POS Eau Cascade Remote",
+  "artifactName": "POS-Eau-Cascade-Remote-${version}.${ext}",
   "copyright": "Copyright © 2026",
   "icon": "build/icon.ico",
   "directories": {
@@ -34,7 +34,7 @@
   ],
   "publish": {
     "provider": "generic",
-    "url": "https://storage.googleapis.com/pos-entrprise-israel-assets/installers/remote"
+    "url": "https://storage.googleapis.com/eau-cascade-assets/installers/remote"
   },
   "win": {
     "icon": "build/icon.ico",

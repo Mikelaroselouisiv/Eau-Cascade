@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "POS Entreprise Israel",
-    "slug": "pos-entreprises-israel-mobile",
+    "name": "POS Eau Cascade",
+    "slug": "pos-eau-cascade-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -9,7 +9,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.entrepriseisrael.pos.mobile",
+      "bundleIdentifier": "com.eaucascade.pos.mobile",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
@@ -19,7 +19,7 @@
       }
     },
     "android": {
-      "package": "com.entrepriseisrael.pos.mobile",
+      "package": "com.eaucascade.pos.mobile",
       "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.BLUETOOTH_CONNECT",

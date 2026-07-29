@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
   Bootstrap machine mère — appelé automatiquement par l'installateur Server au 1er lancement.
   Prérequis : dossier server-stack avec docker-compose.yml, images/*.tar, defaults.env
@@ -15,7 +15,7 @@ $EnvFile = Join-Path $StackDir '.env.server'
 $DefaultsFile = Join-Path $StackDir 'defaults.env'
 $ImagesDir = Join-Path $StackDir 'images'
 $StateFile = Join-Path $StackDir '.bootstrap-done'
-$TaskName = 'POS-Entreprise-Israel-Server-Stack'
+$TaskName = 'POS-Eau-Cascade-Server-Stack'
 $StartScript = Join-Path $StackDir 'stack-start.ps1'
 
 function Write-Step([string]$Message) {

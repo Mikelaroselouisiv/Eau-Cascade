@@ -16,7 +16,7 @@ export const Colors = {
     textSecondary: '#78716C',
   },
   dark: {
-    // Même palette claire : le POS Israel n'utilise pas le mode sombre.
+    // Même palette claire : le POS Eau Cascade n'utilise pas le mode sombre.
     text: '#1C1917',
     background: '#F7F4EF',
     backgroundElement: '#FFFFFF',

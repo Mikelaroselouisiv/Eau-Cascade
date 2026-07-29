@@ -1,5 +1,5 @@
 /**
- * POS Entreprise Israel: interface toujours claire (pas de mode sombre).
+ * POS Eau Cascade: interface toujours claire (pas de mode sombre).
  */
 
 import { Colors } from '@/constants/theme';

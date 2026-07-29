@@ -234,7 +234,7 @@ export class InventoryController {
       ),
     ];
     const brandName =
-      companyNames.length === 1 ? companyNames[0] : companyNames.join(', ') || 'POS Entreprise Israel';
+      companyNames.length === 1 ? companyNames[0] : companyNames.join(', ') || 'POS Eau Cascade';
 
     const asOfLabel = snapshot.asOf
       ? `Stock au ${formatDateTimeFr(snapshot.asOf)} (rétrospection)`
@@ -357,7 +357,7 @@ export class InventoryController {
     const logoUrl =
       (sessions[0]?.department?.company as { logoUrl?: string | null } | undefined)?.logoUrl ??
       null;
-    const brandName = sessions[0]?.department?.company?.name ?? 'POS Entreprise Israel';
+    const brandName = sessions[0]?.department?.company?.name ?? 'POS Eau Cascade';
 
     const doc = createPdfDoc();
     await drawReportHeader(doc, {

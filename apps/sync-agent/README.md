@@ -12,7 +12,7 @@ Métronome Local (machine mère) ↔ GCP : pull puis push, puis sync assets.
 | `SYNC_INTERVAL_MS` | `45000` | Période du tick |
 | `SYNC_NODE_ID` | `local-mother` | Identifiant nœud source |
 | `LOCAL_ASSETS_DIR` | `./data/assets` | Dossier assets local |
-| `GCS_ASSETS_URI` | — | ex. `gs://pos-entrprise-israel-assets/sync-assets` |
+| `GCS_ASSETS_URI` | — | ex. `gs://eau-cascade-assets/sync-assets` |
 
 ## Lancer
 

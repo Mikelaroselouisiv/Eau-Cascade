@@ -29,7 +29,7 @@ services:
       retries: 10
 
   backend:
-    image: ${GCP_ARTIFACT_IMAGE:-northamerica-northeast1-docker.pkg.dev/pos-entrprise-israel/pos-backend/backend:latest}
+    image: ${GCP_ARTIFACT_IMAGE:-northamerica-northeast1-docker.pkg.dev/eau-cascade/pos-backend/backend:latest}
     container_name: pos_backend_server
     restart: unless-stopped
     env_file:
@@ -60,7 +60,7 @@ services:
       SYNC_INTERVAL_MS: ${SYNC_INTERVAL_MS:-45000}
       SYNC_NODE_ID: ${SYNC_NODE_ID:-local-mother}
       LOCAL_ASSETS_DIR: /data/assets
-      GCS_ASSETS_URI: ${GCS_ASSETS_URI:-gs://pos-entrprise-israel-assets/sync-assets}
+      GCS_ASSETS_URI: ${GCS_ASSETS_URI:-gs://eau-cascade-assets/sync-assets}
     volumes:
       - pos_server_assets:/data/assets
     depends_on:

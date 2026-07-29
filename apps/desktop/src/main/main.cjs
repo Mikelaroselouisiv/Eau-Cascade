@@ -1,4 +1,4 @@
-﻿const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { printReceipt } = require('./thermal-printer.cjs');
@@ -43,7 +43,7 @@ function createWindow() {
     height: 800,
     minWidth: 1024,
     minHeight: 680,
-    title: 'POS Entreprise Israel',
+    title: 'POS Eau Cascade',
     icon: resolveWindowIcon(),
     backgroundColor: '#f7f4ef',
     webPreferences: {
@@ -68,15 +68,15 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  app.setName('POS Entreprise Israel');
+  app.setName('POS Eau Cascade');
   if (process.platform === 'win32') {
     const edition = getAppEdition();
     app.setAppUserModelId(
       edition === 'server'
-        ? 'com.entrepriseisrael.pos.desktop.server'
+        ? 'com.eaucascade.pos.desktop.server'
         : edition === 'remote'
-          ? 'com.entrepriseisrael.pos.desktop.remote'
-          : 'com.entrepriseisrael.pos.desktop',
+          ? 'com.eaucascade.pos.desktop.remote'
+          : 'com.eaucascade.pos.desktop',
     );
   }
 

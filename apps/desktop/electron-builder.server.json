@@ -1,7 +1,7 @@
 {
-  "appId": "com.entrepriseisrael.pos.desktop.server",
-  "productName": "POS Entreprise Israel Server",
-  "artifactName": "POS-Entreprise-Israel-Server-${version}.${ext}",
+  "appId": "com.eaucascade.pos.desktop.server",
+  "productName": "POS Eau Cascade Server",
+  "artifactName": "POS-Eau-Cascade-Server-${version}.${ext}",
   "copyright": "Copyright © 2026",
   "icon": "build/icon.ico",
   "directories": {
@@ -35,7 +35,7 @@
   ],
   "publish": {
     "provider": "generic",
-    "url": "https://storage.googleapis.com/pos-entrprise-israel-assets/installers/server"
+    "url": "https://storage.googleapis.com/eau-cascade-assets/installers/server"
   },
   "win": {
     "icon": "build/icon.ico",

@@ -1,4 +1,4 @@
-﻿# POS Entreprise Israel - Architecture
+# POS Eau Cascade - Architecture
 
 ## Backend NestJS (domain modules)
 

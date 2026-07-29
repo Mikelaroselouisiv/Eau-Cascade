@@ -79,8 +79,8 @@ export function createPdfDoc(opts?: {
     margin: opts?.margin ?? 42,
     layout: opts?.landscape ? 'landscape' : 'portrait',
     info: {
-      Producer: 'POS Entreprise Israel',
-      Creator: 'POS Entreprise Israel',
+      Producer: 'POS Eau Cascade',
+      Creator: 'POS Eau Cascade',
     },
   });
 }
@@ -125,7 +125,7 @@ export async function drawReportHeader(
     }
   }
 
-  const company = opts.brand?.companyName?.trim() || 'POS Entreprise Israel';
+  const company = opts.brand?.companyName?.trim() || 'POS Eau Cascade';
   const headerTextW = contentW - (textLeft - margin);
   doc
     .fillColor(COLORS.accent)

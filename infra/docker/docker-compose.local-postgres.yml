@@ -1,37 +1,35 @@
-# Postgres de développement — POS Entreprise Israel UNIQUEMENT.
-# Projet Compose explicite pour NE PAS écraser Frères Baziles
-# (même dossier relatif infra/docker → sinon Docker réutilise le projet "docker").
+# Postgres de développement — POS Eau Cascade UNIQUEMENT.
+# Projet Compose explicite pour NE PAS écraser Israel / Frères Baziles.
 #
 # Usage :
 #   docker compose -f infra/docker/docker-compose.local-postgres.yml up -d
-#   apps/backend/.env → DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5433/pos_israel?schema=public
+#   apps/backend/.env → DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5434/pos_eau_cascade?schema=public
 #
-# Frères Baziles reste sur :
-#   conteneur pos_postgres, port 5432, DB pos_db, volume docker_postgres_data_local
+# Autres tenants typiques :
+#   Israel  → port 5433, DB pos_israel
+#   Frères  → port 5432, DB pos_db
 
-name: pos-israel
+name: pos-eau-cascade
 
 services:
   postgres:
     image: postgres:16
-    container_name: pos_israel_postgres
+    container_name: pos_eau_cascade_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: pos_israel
+      POSTGRES_DB: pos_eau_cascade
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
-      - postgres_data_israel:/var/lib/postgresql/data
+      - postgres_data_eau_cascade:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d pos_israel"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pos_eau_cascade"]
       interval: 5s
       timeout: 5s
       retries: 10
 
 volumes:
-  postgres_data_israel:
-    # Volume déjà créé pour Israel — ne pas le rattacher au projet Compose "docker" (Frères).
-    name: docker_postgres_data_israel
-    external: true
+  postgres_data_eau_cascade:
+    name: docker_postgres_data_eau_cascade

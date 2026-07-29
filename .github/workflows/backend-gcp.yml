@@ -1,5 +1,5 @@
 # Build Docker backend and push it to Google Artifact Registry, then deploy to the GCP VM.
-# ISRAEL ONLY — never point this workflow at Frères Baziles.
+# EAU CASCADE ONLY — never point this workflow at Israel or Frères Baziles.
 #
 # Secrets: GCP_PROJECT_ID, GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT
 # Variables: GCP_REGION, GCP_ARTIFACT_REPO
@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud (WIF — Israel)
+      - name: Authenticate to Google Cloud (WIF — Eau Cascade)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -76,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud (WIF — Israel)
+      - name: Authenticate to Google Cloud (WIF — Eau Cascade)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}

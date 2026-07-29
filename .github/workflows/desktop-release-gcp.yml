@@ -1,5 +1,5 @@
 # Build desktop Remote, generate latest.yml, upload to GCS installers/remote/.
-# ISRAEL ONLY — never point this workflow at Frères Baziles.
+# EAU CASCADE ONLY — never point this workflow at Israel or Frères Baziles.
 #
 # Secrets: GCP_PROJECT_ID, GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT
 # Variables: GCP_REGION
@@ -55,7 +55,7 @@ jobs:
         working-directory: apps/desktop
         run: npm run dist:win:${{ steps.meta.outputs.edition }}
 
-      - name: Authenticate to Google Cloud (WIF — Israel)
+      - name: Authenticate to Google Cloud (WIF — Eau Cascade)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}

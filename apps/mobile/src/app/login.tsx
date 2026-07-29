@@ -44,7 +44,7 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
         <ThemedText type="title" style={styles.title}>
-          POS Entreprise Israel
+          POS Eau Cascade
         </ThemedText>
 
         <TextInput

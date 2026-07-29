@@ -13,9 +13,9 @@ $ImagesDir = Join-Path $StackDir 'images'
 $DefaultsFile = Join-Path $StackDir 'defaults.env'
 $EnvServer = Join-Path $RepoRoot 'infra\docker\.env.server'
 
-$BackendImage = 'northamerica-northeast1-docker.pkg.dev/pos-entrprise-israel/pos-backend/backend:latest'
-$BackendBundle = 'pos-entrprise-israel/backend:bundle'
-$SyncAgentBundle = 'pos-entrprise-israel/sync-agent:bundle'
+$BackendImage = 'northamerica-northeast1-docker.pkg.dev/eau-cascade/pos-backend/backend:latest'
+$BackendBundle = 'eau-cascade/backend:bundle'
+$SyncAgentBundle = 'eau-cascade/sync-agent:bundle'
 $SyncAgentContext = Join-Path $RepoRoot 'apps\sync-agent'
 
 New-Item -ItemType Directory -Path $ImagesDir -Force | Out-Null
@@ -24,7 +24,7 @@ New-Item -ItemType Directory -Path $ImagesDir -Force | Out-Null
 $defaults = @(
   'REMOTE_API_URL=http://35.203.0.140',
   'SYNC_INTERVAL_MS=45000',
-  'GCS_ASSETS_URI=gs://pos-entrprise-israel-assets/sync-assets'
+  'GCS_ASSETS_URI=gs://eau-cascade-assets/sync-assets'
 )
 if (Test-Path -LiteralPath $EnvServer) {
   $syncLine = Get-Content $EnvServer | Where-Object { $_ -match '^\s*SYNC_API_KEY=' } | Select-Object -First 1

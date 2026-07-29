@@ -36,7 +36,7 @@ La persistance utilise **sql.js** (SQLite compilé en WebAssembly, sans module n
 - `npm run dev` : lance Vite + Electron en mode developpement
 - `npm run build` : build React renderer
 - `npm run start` : lance Electron en mode local (après `npm run build`)
-- **`npm run dist:win`** : build + **installateur Windows** (`release/POS Entreprise Israel Setup x.x.x.exe`). Sans certificat de signature : `forceCodeSigning` est désactivé dans `package.json` (Windows peut afficher « éditeur inconnu »).
+- **`npm run dist:win`** : build + **installateur Windows** (`release/POS Eau Cascade Setup x.x.x.exe`). Sans certificat de signature : `forceCodeSigning` est désactivé dans `package.json` (Windows peut afficher « éditeur inconnu »).
 
 Pour un autre serveur que celui défini dans `public-api.ts`, modifie **`PUBLIC_API_BASE_URL`** ou utilise **`VITE_API_URL`** au build, puis `npm run dist:win`.
 

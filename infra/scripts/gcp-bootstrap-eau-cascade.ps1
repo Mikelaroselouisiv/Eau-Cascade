@@ -1,15 +1,15 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Provisionne l'infra GCP pour POS Entreprises Israel uniquement.
+  Provisionne l'infra GCP pour POS Eau Cascade uniquement.
   N'utilise JAMAIS le projet Frères Baziles.
 #>
 param(
-  [string] $ProjectId = 'pos-entrprise-israel',
+  [string] $ProjectId = 'eau-cascade',
   [string] $Region = 'northamerica-northeast1',
   [string] $Zone = 'northamerica-northeast1-a',
   [string] $ArtifactRepo = 'pos-backend',
-  [string] $Bucket = 'pos-entrprise-israel-assets',
+  [string] $Bucket = 'eau-cascade-assets',
   [string] $VmName = 'pos-api',
   [string] $MachineType = 'e2-medium',
   [string] $CiSaName = 'github-actions',
@@ -20,23 +20,23 @@ param(
 # gcloud.ps1 ecrit sur stderr ("Your active configuration...") — ne pas traiter comme erreur fatale
 $ErrorActionPreference = 'Continue'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-& (Join-Path $ScriptDir 'assert-israel-gcp.ps1')
-if (-not $?) { throw 'assert-israel-gcp.ps1 a echoue' }
+& (Join-Path $ScriptDir 'assert-eau-cascade-gcp.ps1')
+if (-not $?) { throw 'assert-eau-cascade-gcp.ps1 a echoue' }
 
 $active = (& gcloud config get-value project 2>$null | Out-String).Trim()
 if ($active -ne $ProjectId) {
   throw "ABORT: projet actif=$active (attendu $ProjectId)"
 }
 
-function Assert-NotFreres([string] $Value) {
+function Assert-NotOtherTenant([string] $Value) {
   $l = $Value.ToLowerInvariant()
-  if ($l -match 'freres|bazile') {
-    throw "ABORT: valeur interdite (Freres Baziles): $Value"
+  if ($l -match 'freres|bazile|israel|pos-entrprise') {
+    throw "ABORT: valeur interdite (autre tenant): $Value"
   }
 }
 
-Assert-NotFreres $ProjectId
-Assert-NotFreres $Bucket
+Assert-NotOtherTenant $ProjectId
+Assert-NotOtherTenant $Bucket
 
 Write-Host "==> Enable APIs ($ProjectId)" -ForegroundColor Cyan
 $apis = @(
@@ -60,7 +60,7 @@ if (-not $repoExists) {
   gcloud artifacts repositories create $ArtifactRepo `
     --repository-format=docker `
     --location=$Region `
-    --description='POS Entreprises Israel backend images' `
+    --description='POS Eau Cascade backend images' `
     --project=$ProjectId
 } else {
   Write-Host 'Artifact Registry already exists'
@@ -77,7 +77,7 @@ if (-not (gsutil ls -b $bucketUri 2>$null)) {
 # Public read for desktop auto-update installers (same pattern as product needs)
 gsutil iam ch allUsers:objectViewer $bucketUri 2>$null
 @('installers/remote/', 'installers/server/', 'sync-assets/') | ForEach-Object {
-  $marker = Join-Path $env:TEMP "pos-israel-keep-$([guid]::NewGuid().ToString('n')).txt"
+  $marker = Join-Path $env:TEMP "pos-eau-cascade-keep-$([guid]::NewGuid().ToString('n')).txt"
   Set-Content -LiteralPath $marker -Value 'keep' -Encoding ascii
   gsutil cp $marker "$bucketUri/$_.keep" 2>$null
   Remove-Item $marker -Force -ErrorAction SilentlyContinue
@@ -93,8 +93,8 @@ function Ensure-Sa([string] $Name, [string] $Display) {
   return $email
 }
 
-$ciSa = Ensure-Sa $CiSaName 'GitHub Actions POS Israel'
-$vmSa = Ensure-Sa $VmSaName 'Compute VM POS Israel'
+$ciSa = Ensure-Sa $CiSaName 'GitHub Actions POS Eau Cascade'
+$vmSa = Ensure-Sa $VmSaName 'Compute VM POS Eau Cascade'
 
 $ciRoles = @(
   'roles/artifactregistry.writer',
@@ -165,7 +165,7 @@ if (-not $SkipVm) {
       --project=$ProjectId `
       --allow=tcp:80 `
       --target-tags=http-server `
-      --description='POS Israel public HTTP'
+      --description='POS Eau Cascade public HTTP'
   }
 }
 
