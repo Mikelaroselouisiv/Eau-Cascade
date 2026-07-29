@@ -29,6 +29,15 @@ echo "  ZONE=${GCP_VM_ZONE}"
 gcloud auth list 2>/dev/null || true
 gcloud config get-value account 2>/dev/null || true
 
+# scp et ssh n'acceptent pas les mêmes flags
+SCP_OPTS=(
+  --zone="${GCP_VM_ZONE}"
+  --project="${GCP_PROJECT_ID}"
+  --tunnel-through-iap
+  --quiet
+  --scp-flag="-o StrictHostKeyChecking=no"
+  --scp-flag="-o UserKnownHostsFile=/dev/null"
+)
 SSH_OPTS=(
   --zone="${GCP_VM_ZONE}"
   --project="${GCP_PROJECT_ID}"
@@ -38,11 +47,10 @@ SSH_OPTS=(
   --ssh-flag="-o UserKnownHostsFile=/dev/null"
 )
 
-
 echo "==> Copie ${COMPOSE_LOCAL} → ${GCP_VM_NAME}:${REMOTE_DIR}/docker-compose.gcp.yml"
 gcloud compute scp "${COMPOSE_LOCAL}" \
   "${GCP_VM_NAME}:/tmp/docker-compose.gcp.yml" \
-  "${SSH_OPTS[@]}"
+  "${SCP_OPTS[@]}"
 
 REMOTE_SCRIPT=$(cat <<'EOS'
 set -euo pipefail
