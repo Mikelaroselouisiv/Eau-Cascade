@@ -87,11 +87,14 @@ jobs:
 
       - name: Deploy to GCP VM
         env:
-          GCP_VM_NAME: ${{ vars.GCP_VM_NAME != '' && vars.GCP_VM_NAME || 'pos-api' }}
-          GCP_VM_ZONE: ${{ vars.GCP_VM_ZONE != '' && vars.GCP_VM_ZONE || 'northamerica-northeast1-a' }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_VM_NAME: ${{ vars.GCP_VM_NAME || 'pos-api' }}
+          GCP_VM_ZONE: ${{ vars.GCP_VM_ZONE || 'northamerica-northeast1-a' }}
         run: |
           set -euo pipefail
-          case "${{ secrets.GCP_PROJECT_ID }}" in
-            *freres*|*bazile*) echo "ABORT: Freres Baziles project forbidden"; exit 1 ;;
+          echo "Deploy env: PROJECT=${GCP_PROJECT_ID} VM=${GCP_VM_NAME} ZONE=${GCP_VM_ZONE}"
+          case "${GCP_PROJECT_ID}" in
+            *freres*|*bazile*|*israel*|*pos-entrprise*) echo "ABORT: wrong project"; exit 1 ;;
+            '') echo "ABORT: GCP_PROJECT_ID empty"; exit 1 ;;
           esac
-          bash infra/scripts/gcp-deploy-remote.sh
+          bash -x infra/scripts/gcp-deploy-remote.sh
