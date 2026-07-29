@@ -106,3 +106,6 @@ Conteneurs : `pos_postgres_prod`, `pos_backend_prod` (API port 3000).
 - Logging middleware global actif
 - Validation DTO globale active
 - Filtre global des exceptions HTTP
+
+<!-- deploy trigger 2026-07-28 21:56 -->
+
