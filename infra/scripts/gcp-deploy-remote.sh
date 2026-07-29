@@ -26,10 +26,7 @@ echo "==> Deploy context"
 echo "  PROJECT=${GCP_PROJECT_ID}"
 echo "  VM=${GCP_VM_NAME}"
 echo "  ZONE=${GCP_VM_ZONE}"
-gcloud auth list 2>/dev/null || true
-gcloud config get-value account 2>/dev/null || true
 
-# scp et ssh n'acceptent pas les mêmes flags
 SCP_OPTS=(
   --zone="${GCP_VM_ZONE}"
   --project="${GCP_PROJECT_ID}"
@@ -47,16 +44,22 @@ SSH_OPTS=(
   --ssh-flag="-o UserKnownHostsFile=/dev/null"
 )
 
-echo "==> Copie ${COMPOSE_LOCAL} → ${GCP_VM_NAME}:${REMOTE_DIR}/docker-compose.gcp.yml"
+# Staging dans le home SSH (évite /tmp sticky-bit entre users CI vs local)
+STAGE_COMPOSE='pos-docker-compose.gcp.yml'
+STAGE_SCRIPT='pos-gcp-deploy-remote.sh'
+
+echo "==> Copie ${COMPOSE_LOCAL} → ${GCP_VM_NAME}:~/${STAGE_COMPOSE}"
 gcloud compute scp "${COMPOSE_LOCAL}" \
-  "${GCP_VM_NAME}:/tmp/docker-compose.gcp.yml" \
+  "${GCP_VM_NAME}:${STAGE_COMPOSE}" \
   "${SCP_OPTS[@]}"
 
 REMOTE_SCRIPT=$(cat <<'EOS'
 set -euo pipefail
 REMOTE_DIR="${REMOTE_DIR}"
+STAGE_COMPOSE="${STAGE_COMPOSE}"
+STAGE_SCRIPT="${STAGE_SCRIPT}"
 mkdir -p "${REMOTE_DIR}"
-cp /tmp/docker-compose.gcp.yml "${REMOTE_DIR}/docker-compose.gcp.yml"
+cp "${STAGE_COMPOSE}" "${REMOTE_DIR}/docker-compose.gcp.yml"
 cd "${REMOTE_DIR}"
 if [[ ! -f .env.prod ]]; then
   echo "Erreur: .env.prod manquant dans ${REMOTE_DIR}" >&2
@@ -83,12 +86,23 @@ EOS
 )
 
 echo "==> Déploiement sur ${GCP_VM_NAME} (${GCP_VM_ZONE})"
-printf '%s\n' "export REMOTE_DIR='${REMOTE_DIR}'" "$REMOTE_SCRIPT" > /tmp/pos-gcp-deploy-remote.sh
+# Résoudre le home distant du user SSH, puis écrire le script avec chemins absolus
+REMOTE_HOME=$(gcloud compute ssh "${GCP_VM_NAME}" "${SSH_OPTS[@]}" --command='printf %s "$HOME"')
+echo "  REMOTE_HOME=${REMOTE_HOME}"
+
+{
+  echo "export REMOTE_DIR='${REMOTE_DIR}'"
+  echo "export STAGE_COMPOSE='${REMOTE_HOME}/${STAGE_COMPOSE}'"
+  echo "export STAGE_SCRIPT='${REMOTE_HOME}/${STAGE_SCRIPT}'"
+  printf '%s\n' "$REMOTE_SCRIPT"
+} > /tmp/pos-gcp-deploy-remote.sh
+
 gcloud compute scp /tmp/pos-gcp-deploy-remote.sh \
-  "${GCP_VM_NAME}:/tmp/pos-gcp-deploy-remote.sh" \
+  "${GCP_VM_NAME}:${STAGE_SCRIPT}" \
   "${SCP_OPTS[@]}"
+
 gcloud compute ssh "${GCP_VM_NAME}" \
   "${SSH_OPTS[@]}" \
-  --command="sudo bash /tmp/pos-gcp-deploy-remote.sh"
+  --command="sudo bash '${REMOTE_HOME}/${STAGE_SCRIPT}'"
 
 echo "==> Déploiement GCP terminé"
