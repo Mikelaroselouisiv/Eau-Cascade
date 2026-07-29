@@ -78,7 +78,7 @@ echo "==> Déploiement sur ${GCP_VM_NAME} (${GCP_VM_ZONE})"
 printf '%s\n' "export REMOTE_DIR='${REMOTE_DIR}'" "$REMOTE_SCRIPT" > /tmp/pos-gcp-deploy-remote.sh
 gcloud compute scp /tmp/pos-gcp-deploy-remote.sh \
   "${GCP_VM_NAME}:/tmp/pos-gcp-deploy-remote.sh" \
-  "${SSH_OPTS[@]}"
+  "${SCP_OPTS[@]}"
 gcloud compute ssh "${GCP_VM_NAME}" \
   "${SSH_OPTS[@]}" \
   --command="sudo bash /tmp/pos-gcp-deploy-remote.sh"
