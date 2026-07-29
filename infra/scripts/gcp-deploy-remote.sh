@@ -15,44 +15,60 @@ set -euo pipefail
 
 REMOTE_DIR="${GCP_REMOTE_DIR:-/opt/pos}"
 COMPOSE_LOCAL="infra/docker/docker-compose.gcp.yml"
-COMPOSE_REMOTE="${REMOTE_DIR}/docker-compose.gcp.yml"
 
 if [[ ! -f "${COMPOSE_LOCAL}" ]]; then
   echo "Fichier introuvable: ${COMPOSE_LOCAL}" >&2
   exit 1
 fi
 
-# IAP : le SA GitHub Actions n’a souvent pas d’IP publique SSH ouverte.
 SSH_OPTS=(--zone="${GCP_VM_ZONE}" --project="${GCP_PROJECT_ID}" --tunnel-through-iap)
 
-echo "==> Copie ${COMPOSE_LOCAL} → ${GCP_VM_NAME}:${COMPOSE_REMOTE}"
+echo "==> Copie ${COMPOSE_LOCAL} → ${GCP_VM_NAME}:${REMOTE_DIR}/docker-compose.gcp.yml"
 gcloud compute scp "${COMPOSE_LOCAL}" \
   "${GCP_VM_NAME}:/tmp/docker-compose.gcp.yml" \
   "${SSH_OPTS[@]}"
 
+# Script remote exécuté entièrement en root (/opt/pos est root:docker 750).
+REMOTE_SCRIPT=$(cat <<'EOS'
+set -euo pipefail
+REMOTE_DIR="${REMOTE_DIR}"
+mkdir -p "${REMOTE_DIR}"
+cp /tmp/docker-compose.gcp.yml "${REMOTE_DIR}/docker-compose.gcp.yml"
+cd "${REMOTE_DIR}"
+if [[ ! -f .env.prod ]]; then
+  echo "Erreur: .env.prod manquant dans ${REMOTE_DIR}" >&2
+  exit 1
+fi
+TOKEN=$(curl -s -H 'Metadata-Flavor: Google' \
+  'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+AUTH=$(printf 'oauth2accesstoken:%s' "$TOKEN" | base64 -w0)
+mkdir -p /root/.docker
+printf '%s\n' "{\"auths\":{\"northamerica-northeast1-docker.pkg.dev\":{\"auth\":\"$AUTH\"}}}" > /root/.docker/config.json
+# Préférer Compose V2 (plugin) — V1 (1.29) casse avec Docker Engine récent (ContainerConfig).
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE_CMD=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE_CMD=(docker-compose)
+else
+  echo 'docker compose introuvable' >&2
+  exit 1
+fi
+"${COMPOSE_CMD[@]}" -f docker-compose.gcp.yml --env-file .env.prod pull backend
+# --no-deps : ne pas recréer postgres (évite KeyError ContainerConfig + conserve les données)
+"${COMPOSE_CMD[@]}" -f docker-compose.gcp.yml --env-file .env.prod up -d --no-deps --force-recreate backend
+"${COMPOSE_CMD[@]}" -f docker-compose.gcp.yml ps
+EOS
+)
+
+# Inject REMOTE_DIR into the remote environment.
 echo "==> Déploiement sur ${GCP_VM_NAME} (${GCP_VM_ZONE})"
+printf '%s\n' "export REMOTE_DIR='${REMOTE_DIR}'" "$REMOTE_SCRIPT" > /tmp/pos-gcp-deploy-remote.sh
+gcloud compute scp /tmp/pos-gcp-deploy-remote.sh \
+  "${GCP_VM_NAME}:/tmp/pos-gcp-deploy-remote.sh" \
+  "${SSH_OPTS[@]}"
 gcloud compute ssh "${GCP_VM_NAME}" \
   "${SSH_OPTS[@]}" \
-  --command="set -euo pipefail
-    REMOTE_DIR='${REMOTE_DIR}'
-    sudo mkdir -p \"\${REMOTE_DIR}\"
-    sudo cp /tmp/docker-compose.gcp.yml \"\${REMOTE_DIR}/docker-compose.gcp.yml\"
-    cd \"\${REMOTE_DIR}\"
-    if [[ ! -f .env.prod ]]; then
-      echo 'Erreur: .env.prod manquant dans '\${REMOTE_DIR} >&2
-      exit 1
-    fi
-    # Auth Artifact Registry via token metadata (VM SA) — gcloud n'est pas toujours installé
-    TOKEN=\$(curl -s -H 'Metadata-Flavor: Google' \
-      'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
-      | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"access_token\"])')
-    AUTH=\$(printf 'oauth2accesstoken:%s' \"\$TOKEN\" | base64 -w0)
-    sudo mkdir -p /root/.docker
-    printf '%s\n' \"{\\\"auths\\\":{\\\"northamerica-northeast1-docker.pkg.dev\\\":{\\\"auth\\\":\\\"\$AUTH\\\"}}}\" | sudo tee /root/.docker/config.json >/dev/null
-    COMPOSE_CMD=docker-compose
-    if ! command -v docker-compose >/dev/null 2>&1; then COMPOSE_CMD='docker compose'; fi
-    sudo \$COMPOSE_CMD -f docker-compose.gcp.yml --env-file .env.prod pull
-    sudo \$COMPOSE_CMD -f docker-compose.gcp.yml --env-file .env.prod up -d --force-recreate backend
-    sudo \$COMPOSE_CMD -f docker-compose.gcp.yml ps"
+  --command="sudo bash /tmp/pos-gcp-deploy-remote.sh"
 
 echo "==> Déploiement GCP terminé"
