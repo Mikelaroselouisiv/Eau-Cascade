@@ -72,3 +72,6 @@ gcloud compute ssh "${GCP_VM_NAME}" \
   --command="sudo bash /tmp/pos-gcp-deploy-remote.sh"
 
 echo "==> Déploiement GCP terminé"
+
+# retrigger 2026-07-28T22:27:31.8162981-04:00
+
