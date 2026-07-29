@@ -35,17 +35,22 @@ gcloud compute ssh "${GCP_VM_NAME}" \
   "${SSH_OPTS[@]}" \
   --command="set -euo pipefail
     REMOTE_DIR='${REMOTE_DIR}'
+    sudo mkdir -p \"\${REMOTE_DIR}\"
     sudo cp /tmp/docker-compose.gcp.yml \"\${REMOTE_DIR}/docker-compose.gcp.yml\"
     cd \"\${REMOTE_DIR}\"
-    if command -v gcloud >/dev/null 2>&1; then
-      sudo gcloud auth configure-docker northamerica-northeast1-docker.pkg.dev --quiet || true
-    fi
-    COMPOSE_CMD=docker-compose
-    if ! command -v docker-compose >/dev/null 2>&1; then COMPOSE_CMD='docker compose'; fi
     if [[ ! -f .env.prod ]]; then
-      echo 'Erreur: .env.prod manquant' >&2
+      echo 'Erreur: .env.prod manquant dans '\${REMOTE_DIR} >&2
       exit 1
     fi
+    # Auth Artifact Registry via token metadata (VM SA) — gcloud n'est pas toujours installé
+    TOKEN=\$(curl -s -H 'Metadata-Flavor: Google' \
+      'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+      | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"access_token\"])')
+    AUTH=\$(printf 'oauth2accesstoken:%s' \"\$TOKEN\" | base64 -w0)
+    sudo mkdir -p /root/.docker
+    printf '%s\n' \"{\\\"auths\\\":{\\\"northamerica-northeast1-docker.pkg.dev\\\":{\\\"auth\\\":\\\"\$AUTH\\\"}}}\" | sudo tee /root/.docker/config.json >/dev/null
+    COMPOSE_CMD=docker-compose
+    if ! command -v docker-compose >/dev/null 2>&1; then COMPOSE_CMD='docker compose'; fi
     sudo \$COMPOSE_CMD -f docker-compose.gcp.yml --env-file .env.prod pull
     sudo \$COMPOSE_CMD -f docker-compose.gcp.yml --env-file .env.prod up -d --force-recreate backend
     sudo \$COMPOSE_CMD -f docker-compose.gcp.yml ps"
