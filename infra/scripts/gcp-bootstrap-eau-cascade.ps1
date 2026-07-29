@@ -176,7 +176,7 @@ try {
 } catch {}
 
 Write-Host ''
-Write-Host '======== BOOTSTRAP ISRAEL OK ========' -ForegroundColor Green
+Write-Host '======== BOOTSTRAP EAU CASCADE OK ========' -ForegroundColor Green
 Write-Host "PROJECT_ID=$ProjectId"
 Write-Host "REGION=$Region"
 Write-Host "ZONE=$Zone"
