@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -128,13 +129,13 @@ export class SalesController {
   }
 
   @Patch(':id/cancel')
-  @Roles('ADMIN', 'MANAGER')
+  @Permissions('sales.cancel')
   cancel(@Param('id', ParseIntPipe) id: number, @GetUser() user?: { id?: number }) {
     return this.salesService.cancelSale(id, user?.id);
   }
 
   @Patch(':id/refund')
-  @Roles('ADMIN', 'MANAGER')
+  @Permissions('sales.cancel')
   refund(@Param('id', ParseIntPipe) id: number, @GetUser() user?: { id?: number }) {
     return this.salesService.refundSale(id, user?.id);
   }

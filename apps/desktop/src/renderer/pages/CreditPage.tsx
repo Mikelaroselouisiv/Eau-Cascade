@@ -4,6 +4,7 @@ import axios from 'axios';
 import { MoneyField } from '../components/MoneyField';
 import { useAuth } from '../context/AuthContext';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
+import { isLikelyNetworkError } from '../services/api-errors';
 import {
   createCreditCustomer,
   createCreditSale,
@@ -18,6 +19,7 @@ import {
   recordCreditPayment,
   updateCreditCustomer,
 } from '../services/api';
+import { enqueueCreditPayment, enqueueCreditSale } from '../services/offline-queue';
 import type {
   CompanyListItem,
   CreditCustomerDetail,
@@ -29,6 +31,7 @@ import type {
 } from '../types/api';
 import { formatMoney } from '../utils/currency';
 import { formatDateTime } from '../utils/datetime';
+import { saleTicketLabel, saleTicketNo } from '../utils/saleTicketNo';
 
 function formatApiError(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -61,8 +64,8 @@ type PanelMode = 'overview' | 'new-customer' | 'fiche';
 type CartLine = { productSaleUnitId: number; productName: string; unitLabel: string; unitPrice: number; quantity: number };
 
 export function CreditPage() {
-  const { can, user } = useAuth();
-  const canManage = can(['ADMIN', 'MANAGER']);
+  const { user, canPerm } = useAuth();
+  const canManage = canPerm('credit.manage');
   const [message, setMessage] = useAutoClearMessage();
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
@@ -290,16 +293,25 @@ export function CreditPage() {
     e.preventDefault();
     if (!detail || !canManage || cart.length === 0) return;
     setSaleBusy(true);
+    const payload = {
+      creditCustomerId: detail.id,
+      items: cart.map((l) => ({ productSaleUnitId: l.productSaleUnitId, quantity: l.quantity })),
+      downPayment: Number(downPayment) > 0 ? Number(downPayment) : undefined,
+      downPaymentMethod: 'CASH' as const,
+      note: saleNote.trim() || undefined,
+    };
     try {
-      const result = await createCreditSale({
-        creditCustomerId: detail.id,
-        items: cart.map((l) => ({ productSaleUnitId: l.productSaleUnitId, quantity: l.quantity })),
-        downPayment: Number(downPayment) > 0 ? Number(downPayment) : undefined,
-        downPaymentMethod: 'CASH',
-        note: saleNote.trim() || undefined,
-      });
+      if (!navigator.onLine) {
+        await enqueueCreditSale(payload);
+        window.dispatchEvent(new Event('pos-pending-sales-changed'));
+        setMessage('Hors ligne : vente à crédit mise en file d’attente');
+        setShowSaleModal(false);
+        return;
+      }
+      const result = await createCreditSale(payload);
+      const ticketRef = result.ticketNo?.trim() || String(result.saleId);
       setMessage(
-        `Vente #${result.saleId} — total ${formatMoney(result.total)}, reste ${formatMoney(result.balanceDue)} (fiche livraison créée)`,
+        `Vente #${ticketRef} — total ${formatMoney(result.total)}, reste ${formatMoney(result.balanceDue)} (fiche livraison créée)`,
       );
 
       if (printTicket && window.desktopApp?.printReceipt) {
@@ -312,6 +324,7 @@ export function CreditPage() {
             user?.fullName?.trim() || user?.phone || 'Caissier';
           await window.desktopApp.printReceipt({
             saleId: result.saleId,
+            ticketNo: ticketRef,
             companyName: company?.name ?? 'Entreprise',
             companyPhone: company?.phone ?? null,
             address: [company?.address, company?.city].filter(Boolean).join(', ') || '',
@@ -335,7 +348,7 @@ export function CreditPage() {
           });
         } catch {
           setMessage(
-            `Vente #${result.saleId} enregistrée, mais l’impression a échoué`,
+            `Vente #${ticketRef} enregistrée, mais l’impression a échoué`,
             { persist: true },
           );
         }
@@ -345,6 +358,13 @@ export function CreditPage() {
       await openFiche(detail.id);
       await refreshList();
     } catch (err) {
+      if (isLikelyNetworkError(err) || !navigator.onLine) {
+        await enqueueCreditSale(payload);
+        window.dispatchEvent(new Event('pos-pending-sales-changed'));
+        setMessage('Réseau indisponible : vente à crédit mise en file d’attente');
+        setShowSaleModal(false);
+        return;
+      }
       setMessage(formatApiError(err, 'Vente à crédit impossible'), { persist: true });
     } finally {
       setSaleBusy(false);
@@ -360,14 +380,25 @@ export function CreditPage() {
       return;
     }
     setPayBusy(true);
+    const payload = {
+      creditCustomerId: detail.id,
+      amount,
+      saleId: typeof paySaleId === 'number' ? paySaleId : undefined,
+      method: payMethod,
+      note: payNote.trim() || undefined,
+    };
     try {
-      const result = await recordCreditPayment({
-        creditCustomerId: detail.id,
-        amount,
-        saleId: typeof paySaleId === 'number' ? paySaleId : undefined,
-        method: payMethod,
-        note: payNote.trim() || undefined,
-      });
+      if (!navigator.onLine) {
+        await enqueueCreditPayment(payload);
+        window.dispatchEvent(new Event('pos-pending-sales-changed'));
+        setMessage('Hors ligne : encaissement crédit mis en file d’attente');
+        setShowPayModal(false);
+        setPayAmount('');
+        setPaySaleId('');
+        setPayNote('');
+        return;
+      }
+      const result = await recordCreditPayment(payload);
       setMessage(
         `Encaissement ${formatMoney(result.applied)} enregistré (finance entreprise)${
           result.unused > 0.009 ? ` — surplus non affecté ${formatMoney(result.unused)}` : ''
@@ -380,6 +411,16 @@ export function CreditPage() {
       await openFiche(detail.id);
       await refreshList();
     } catch (err) {
+      if (isLikelyNetworkError(err) || !navigator.onLine) {
+        await enqueueCreditPayment(payload);
+        window.dispatchEvent(new Event('pos-pending-sales-changed'));
+        setMessage('Réseau indisponible : encaissement crédit mis en file d’attente');
+        setShowPayModal(false);
+        setPayAmount('');
+        setPaySaleId('');
+        setPayNote('');
+        return;
+      }
       setMessage(formatApiError(err, 'Paiement impossible'), { persist: true });
     } finally {
       setPayBusy(false);
@@ -703,7 +744,7 @@ export function CreditPage() {
                         <tbody>
                           {detail.sales.filter((s) => s.balanceDue > 0.009).map((s) => (
                             <tr key={s.id}>
-                              <td>{s.id}</td>
+                              <td>{saleTicketNo(s)}</td>
                               <td>{formatDateTime(s.createdAt)}</td>
                               <td>{formatMoney(s.total)}</td>
                               <td>{formatMoney(s.amountPaid)}</td>
@@ -750,7 +791,8 @@ export function CreditPage() {
                   {detail.sales.map((s) => (
                     <details key={s.id} className="credit-sale-details">
                       <summary>
-                        Vente #{s.id} — {formatDateTime(s.createdAt)} — {formatMoney(s.total)}
+                        Vente {saleTicketLabel(s)} — {formatDateTime(s.createdAt)} —{' '}
+                        {formatMoney(s.total)}
                         {s.balanceDue > 0.009 ? (
                           <span className="debt"> (reste {formatMoney(s.balanceDue)})</span>
                         ) : (
@@ -900,7 +942,7 @@ export function CreditPage() {
                     .filter((s) => s.balanceDue > 0.009)
                     .map((s) => (
                       <option key={s.id} value={s.id}>
-                        #{s.id} — reste {formatMoney(s.balanceDue)}
+                        {saleTicketLabel(s)} — reste {formatMoney(s.balanceDue)}
                       </option>
                     ))}
                 </select>

@@ -8,6 +8,7 @@ import {
   PaymentMethod,
   Prisma,
 } from '@prisma/client';
+import { newSaleIdentity } from '../../common/utils/sale-ticket-no';
 import { resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -319,8 +320,11 @@ export class CreditService {
         cashier = u?.fullName?.trim() || u?.phone?.trim() || `User#${userId}`;
       }
 
+      const { uuid: saleUuid, ticketNo: saleTicketNo } = newSaleIdentity();
       const sale = await tx.sale.create({
         data: {
+          uuid: saleUuid,
+          ticketNo: saleTicketNo,
           total,
           subtotal: total,
           tax: 0,
@@ -383,7 +387,7 @@ export class CreditService {
           data: {
             type: FinanceType.INCOME,
             amount: down,
-            description: `Acompte crédit — ${customer.name} — vente #${sale.id}`,
+            description: `Acompte crédit — ${customer.name} — vente #${sale.ticketNo}`,
             userId: userId ?? null,
             categoryId,
           },
@@ -419,6 +423,7 @@ export class CreditService {
 
       return {
         saleId: sale.id,
+        ticketNo: sale.ticketNo,
         total,
         amountPaid: down,
         balanceDue: this.round2(total - down),

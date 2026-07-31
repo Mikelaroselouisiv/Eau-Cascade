@@ -1,12 +1,35 @@
 export {};
 
+export type UpdaterState =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+  | 'disabled';
+
+export type UpdaterStatus = {
+  state: UpdaterState;
+  version?: string;
+  currentVersion?: string;
+  percent?: number;
+  message?: string;
+  enabled?: boolean;
+};
+
 declare global {
   interface Window {
     desktopApp?: {
       platform: string;
+      getVersion?: () => Promise<string>;
+      getEdition?: () => Promise<'server' | 'remote'>;
       printReceipt?: (saleData: {
         /** Pour nom de fichier PDF (réimpression / export). */
         saleId?: number;
+        /** Numéro de fiche affiché sur le ticket (stable sync). */
+        ticketNo?: string;
         documentType?: 'RECEIPT' | 'DISBURSEMENT_ORDER';
         companyName: string;
         companyPhone?: string | null;
@@ -30,6 +53,7 @@ declare global {
         isTest?: boolean;
         previewSampleBody?: string | null;
         description?: string;
+        detail?: string;
         amount?: number;
         entryDate?: string;
         entryId?: number;
@@ -43,6 +67,12 @@ declare global {
         outboxRemove: (id: string) => Promise<void>;
         cacheSet: (key: string, json: string) => Promise<void>;
         cacheGet: (key: string) => Promise<string | null>;
+      };
+      updater?: {
+        getStatus: () => Promise<UpdaterStatus>;
+        check: () => Promise<UpdaterStatus>;
+        quitAndInstall: () => Promise<{ ok: boolean; reason?: string }>;
+        onStatus: (callback: (status: UpdaterStatus) => void) => () => void;
       };
     };
   }

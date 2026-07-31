@@ -1,8 +1,37 @@
 import type { CreateSalePayload } from '../types/api';
-import { createSale } from './api';
+import { createCreditSale, createSale, recordCreditPayment } from './api';
 import * as localDb from './local-db-bridge';
 
 const LEGACY_QUEUE_KEY = 'offline_sales_queue';
+
+export type CreditSaleOutboxPayload = {
+  __kind: 'creditSale';
+  creditCustomerId: number;
+  items: Array<{ productSaleUnitId: number; quantity: number }>;
+  downPayment?: number;
+  downPaymentMethod?: 'CASH' | 'CARD' | 'MOBILE_MONEY';
+  note?: string;
+};
+
+export type CreditPaymentOutboxPayload = {
+  __kind: 'creditPayment';
+  creditCustomerId: number;
+  amount: number;
+  saleId?: number;
+  method?: 'CASH' | 'CARD' | 'MOBILE_MONEY';
+  reference?: string;
+  note?: string;
+};
+
+type OutboxPayload = CreateSalePayload | CreditSaleOutboxPayload | CreditPaymentOutboxPayload;
+
+function isCreditSalePayload(p: unknown): p is CreditSaleOutboxPayload {
+  return Boolean(p && typeof p === 'object' && (p as { __kind?: string }).__kind === 'creditSale');
+}
+
+function isCreditPaymentPayload(p: unknown): p is CreditPaymentOutboxPayload {
+  return Boolean(p && typeof p === 'object' && (p as { __kind?: string }).__kind === 'creditPayment');
+}
 
 function ensureClientUuid(payload: CreateSalePayload): CreateSalePayload {
   if (payload.clientUuid) return payload;
@@ -29,16 +58,45 @@ function migrateLegacyQueue() {
   }
 }
 
-export async function enqueueSale(payload: CreateSalePayload) {
+async function enqueueOutbox(payload: OutboxPayload) {
   migrateLegacyQueue();
-  const withUuid = ensureClientUuid(payload);
   if (localDb.hasLocalDb()) {
-    await localDb.outboxEnqueue(withUuid);
+    await localDb.outboxEnqueue(payload);
     return;
   }
   const queue = readLegacyQueue();
-  queue.push(withUuid);
+  queue.push(payload);
   localStorage.setItem(LEGACY_QUEUE_KEY, JSON.stringify(queue));
+}
+
+export async function enqueueSale(payload: CreateSalePayload) {
+  await enqueueOutbox(ensureClientUuid(payload));
+}
+
+export async function enqueueCreditSale(
+  payload: Omit<CreditSaleOutboxPayload, '__kind'>,
+) {
+  await enqueueOutbox({ __kind: 'creditSale', ...payload });
+}
+
+export async function enqueueCreditPayment(
+  payload: Omit<CreditPaymentOutboxPayload, '__kind'>,
+) {
+  await enqueueOutbox({ __kind: 'creditPayment', ...payload });
+}
+
+async function flushPayload(payload: unknown): Promise<void> {
+  if (isCreditSalePayload(payload)) {
+    const { __kind: _k, ...body } = payload;
+    await createCreditSale(body);
+    return;
+  }
+  if (isCreditPaymentPayload(payload)) {
+    const { __kind: _k, ...body } = payload;
+    await recordCreditPayment(body);
+    return;
+  }
+  await createSale(ensureClientUuid(payload as CreateSalePayload));
 }
 
 export async function syncSalesQueue() {
@@ -49,8 +107,7 @@ export async function syncSalesQueue() {
     let synced = 0;
     for (const row of rows) {
       try {
-        const payload = ensureClientUuid(row.payload as CreateSalePayload);
-        await createSale(payload);
+        await flushPayload(row.payload);
         await localDb.outboxRemove(row.id);
         synced += 1;
       } catch {
@@ -64,13 +121,13 @@ export async function syncSalesQueue() {
   const queue = readLegacyQueue();
   if (queue.length === 0) return { synced: 0, pending: 0 };
   let synced = 0;
-  const remaining: CreateSalePayload[] = [];
+  const remaining: OutboxPayload[] = [];
   for (const item of queue) {
     try {
-      await createSale(ensureClientUuid(item));
+      await flushPayload(item);
       synced += 1;
     } catch {
-      remaining.push(ensureClientUuid(item));
+      remaining.push(item);
     }
   }
   localStorage.setItem(LEGACY_QUEUE_KEY, JSON.stringify(remaining));
@@ -85,11 +142,11 @@ export async function pendingSalesCount(): Promise<number> {
   return readLegacyQueue().length;
 }
 
-function readLegacyQueue(): CreateSalePayload[] {
+function readLegacyQueue(): OutboxPayload[] {
   try {
     const raw = localStorage.getItem(LEGACY_QUEUE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as CreateSalePayload[];
+    return JSON.parse(raw) as OutboxPayload[];
   } catch {
     return [];
   }

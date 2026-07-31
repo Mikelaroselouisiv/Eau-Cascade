@@ -65,12 +65,11 @@ export function DashboardPage() {
   type TabId = 'synthese' | 'ventes' | 'achats' | 'stock' | 'banque' | 'benefices';
 
   const { can, canPerm } = useAuth();
-  const isAdmin = can(['ADMIN']);
-  const isManager = can(['MANAGER']);
-  const canAccessDashboard = isAdmin || isManager;
-  const canManageFinance = isAdmin || isManager;
-  const canCancelOrRefund = isAdmin || canPerm('sales.cancel');
-  const canSeePurchases = isAdmin;
+  const isAdmin = can(['ADMIN']) || canPerm('*');
+  const canAccessDashboard = canPerm('dashboard.view');
+  const canManageFinance = canPerm('finance.view') || canPerm('finance.write');
+  const canCancelOrRefund = canPerm('sales.cancel');
+  const canSeePurchases = isAdmin || canPerm('purchasing.manage');
 
   const [tab, setTab] = useState<TabId>(isAdmin ? 'synthese' : 'ventes');
   const [inventoryHistorySlot, setInventoryHistorySlot] = useState<HTMLDivElement | null>(null);
@@ -82,6 +81,7 @@ export function DashboardPage() {
 
   const [expenseLabelChoice, setExpenseLabelChoice] = useState<string>('');
   const [expenseDescOther, setExpenseDescOther] = useState('');
+  const [expenseDetail, setExpenseDetail] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseEntryDate, setExpenseEntryDate] = useState(() => formatYmd(new Date()));
   const [expensePrintOrder, setExpensePrintOrder] = useState(false);
@@ -476,11 +476,13 @@ export function DashboardPage() {
     if (companyId === '') return;
     setMsg('');
     const amount = Number(expenseAmount);
-    const description =
+    const label =
       expenseLabelChoice === EXPENSE_LABEL_OTHER
         ? expenseDescOther.trim()
         : expenseLabelChoice.trim();
-    if (!description || !Number.isFinite(amount) || amount <= 0) return;
+    const detail = expenseDetail.trim();
+    const description = detail ? `${label} — ${detail}` : label;
+    if (!label || !Number.isFinite(amount) || amount <= 0) return;
     if (expensePrintOrder && expenseDeptId === '') {
       setMsg('Choisissez un département pour imprimer l’ordre.', { persist: true });
       return;
@@ -503,10 +505,11 @@ export function DashboardPage() {
             getPrinterSettings(expenseDeptId),
           ]);
           const payload = buildDisbursementOrderPayload({
-            entry,
+            entry: { ...entry, description: label },
             company,
             printer,
             entryDateYmd: expenseEntryDate.trim() || undefined,
+            detail: detail || undefined,
           });
           const r = await window.desktopApp.printReceipt({
             ...payload,
@@ -525,6 +528,7 @@ export function DashboardPage() {
 
       setExpenseLabelChoice('');
       setExpenseDescOther('');
+      setExpenseDetail('');
       setExpenseAmount('');
       setExpenseEntryDate(formatYmd(new Date()));
       setExpensePrintOrder(false);
@@ -706,7 +710,7 @@ export function DashboardPage() {
   async function confirmDeleteSale(sale: Sale) {
     if (companyId === '') return;
     const ok = window.confirm(
-      `Supprimer définitivement la vente n°${sale.id} ?\n\n` +
+      `Supprimer définitivement la vente n°${sale.ticketNo || sale.id} ?\n\n` +
         `Cette action est irréversible : la vente, les lignes, les paiements et l’écriture de caisse seront effacés de la base. ` +
         `Si la vente était encore « complétée », le stock livré sera rétabli.`,
     );
@@ -742,7 +746,7 @@ export function DashboardPage() {
 
   async function confirmCancelSale(sale: Sale) {
     const ok = window.confirm(
-      `Annuler la vente n°${sale.id} ?\n\n` +
+      `Annuler la vente n°${sale.ticketNo || sale.id} ?\n\n` +
         `L’écriture de caisse sera retirée. Le stock déjà livré sera réintégré.`,
     );
     if (!ok) return;
@@ -751,7 +755,7 @@ export function DashboardPage() {
     try {
       await cancelSale(sale.id);
       removeSaleFromList(sale.id);
-      setMsg(`Vente n°${sale.id} annulée.`);
+      setMsg(`Vente n°${sale.ticketNo || sale.id} annulée.`);
     } catch {
       setMsg('Impossible d’annuler cette vente.', { persist: true });
     } finally {
@@ -761,7 +765,7 @@ export function DashboardPage() {
 
   async function confirmRefundSale(sale: Sale) {
     const ok = window.confirm(
-      `Rembourser la vente n°${sale.id} (${formatMoney(sale.total)}) ?\n\n` +
+      `Rembourser la vente n°${sale.ticketNo || sale.id} (${formatMoney(sale.total)}) ?\n\n` +
         `L’écriture de caisse sera retirée. Le stock déjà livré sera réintégré.`,
     );
     if (!ok) return;
@@ -770,7 +774,7 @@ export function DashboardPage() {
     try {
       await refundSale(sale.id);
       removeSaleFromList(sale.id);
-      setMsg(`Vente n°${sale.id} remboursée.`);
+      setMsg(`Vente n°${sale.ticketNo || sale.id} remboursée.`);
     } catch {
       setMsg('Impossible de rembourser cette vente.', { persist: true });
     } finally {
@@ -884,27 +888,24 @@ export function DashboardPage() {
   if (!canAccessDashboard) {
     return (
       <div className="page-inner">
-        <p className="info-text">Accès réservé à l&apos;administrateur ou au gérant.</p>
+        <p className="info-text">Accès au tableau de bord non autorisé pour votre rôle.</p>
       </div>
     );
   }
 
   const dashboardTabs = (
-    isAdmin
-      ? ([
-          ['synthese', 'Synthèse'],
-          ['ventes', 'Ventes'],
-          ['stock', 'Stock & Mouvements'],
-          ['achats', 'Achats & Dépenses'],
-          ['banque', 'Banque'],
-          ['benefices', 'Analyse des bénéfices'],
-        ] as const)
-      : ([
-          ['ventes', 'Ventes'],
-          ['achats', 'Dépenses'],
-          ['banque', 'Banque'],
-          ['benefices', 'Analyse des bénéfices'],
-        ] as const)
+    [
+      ...(isAdmin ? ([['synthese', 'Synthèse']] as const) : []),
+      ['ventes', 'Ventes'] as const,
+      ...(isAdmin ? ([['stock', 'Stock & Mouvements']] as const) : []),
+      ...(canManageFinance
+        ? ([[ 'achats', canSeePurchases ? 'Achats & Dépenses' : 'Dépenses' ]] as const)
+        : []),
+      ...(canPerm('banks.view') || canPerm('banks.manage')
+        ? ([['banque', 'Banque']] as const)
+        : []),
+      ['benefices', 'Analyse des bénéfices'] as const,
+    ] as Array<readonly [TabId, string]>
   );
 
   return (
@@ -1160,7 +1161,7 @@ export function DashboardPage() {
                             tabIndex={0}
                             style={{ cursor: 'pointer' }}
                           >
-                            <td>{s.id}</td>
+                            <td>{s.ticketNo || s.id}</td>
                             <td>{formatDateTime(s.createdAt)}</td>
                             <td>{(s.clientName && s.clientName.trim()) || '—'}</td>
                             <td className="journal-amt">{formatMoney(s.total)}</td>
@@ -1187,7 +1188,7 @@ export function DashboardPage() {
                                       type="button"
                                       className="btn btn-secondary btn-sm"
                                       disabled={saleActionBusy}
-                                      aria-label={`Rembourser la vente n°${s.id}`}
+                                      aria-label={`Rembourser la vente n°${s.ticketNo || s.id}`}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         void confirmRefundSale(s);
@@ -1201,7 +1202,7 @@ export function DashboardPage() {
                                       type="button"
                                       className="btn btn-danger btn-sm"
                                       disabled={saleDeletingId === s.id}
-                                      aria-label={`Supprimer définitivement la vente n°${s.id}`}
+                                      aria-label={`Supprimer définitivement la vente n°${s.ticketNo || s.id}`}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         void confirmDeleteSale(s);
@@ -1277,6 +1278,14 @@ export function DashboardPage() {
                         />
                       </label>
                     ) : null}
+                    <label>
+                      Détail
+                      <input
+                        value={expenseDetail}
+                        onChange={(e) => setExpenseDetail(e.target.value)}
+                        placeholder="Précisions (optionnel)…"
+                      />
+                    </label>
                     <MoneyField
                       label="Montant"
                       min={0.01}

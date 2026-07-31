@@ -1,10 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { FinanceType, MovementType, Prisma } from '@prisma/client';
+import { permissionsSatisfy } from '../../common/permissions';
+import { newSaleIdentity } from '../../common/utils/sale-ticket-no';
 import { resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { DeliveriesService } from '../deliveries/deliveries.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { RolesService } from '../roles/roles.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SalesRepository } from './sales.repository';
 
@@ -16,6 +19,7 @@ export class SalesService {
     private readonly inventoryService: InventoryService,
     private readonly auditService: AuditService,
     private readonly deliveriesService: DeliveriesService,
+    private readonly rolesService: RolesService,
   ) {}
 
   async create(
@@ -28,9 +32,10 @@ export class SalesService {
       createSaleDto.items.some((it) => it.unitPrice != null);
 
     if (isSpecialSale) {
-      if (role !== 'ADMIN' && role !== 'MANAGER') {
+      const perms = role ? await this.rolesService.getPermissionsForUserRole(role) : [];
+      if (!permissionsSatisfy(perms, ['sales.special'])) {
         throw new ForbiddenException(
-          'Vente spéciale réservée aux administrateurs et managers',
+          'Vente spéciale non autorisée pour votre rôle (droit sales.special)',
         );
       }
       for (const item of createSaleDto.items) {
@@ -177,16 +182,18 @@ export class SalesService {
       const registerId = createSaleDto.registerId ?? null;
 
       const clientUuid = createSaleDto.clientUuid ?? null;
-      const insertedRows = await tx.$queryRaw<Array<{ id: number }>>`
+      const { uuid: saleUuid, ticketNo } = newSaleIdentity();
+      const insertedRows = await tx.$queryRaw<Array<{ id: number; ticketNo: string }>>`
         INSERT INTO "Sale"
-          ("total", "subtotal", "tax", "cashier", "userId", "storeId", "registerId", "clientUuid",
+          ("uuid", "ticketNo", "total", "subtotal", "tax", "cashier", "userId", "storeId", "registerId", "clientUuid",
            "amountPaid", "amountReceived", "changeDue", "updatedAt")
         VALUES
-          (${total}, ${total}, 0, ${cashier}, ${userId ?? null}, ${storeId}, ${registerId}, ${clientUuid},
+          (${saleUuid}, ${ticketNo}, ${total}, ${total}, 0, ${cashier}, ${userId ?? null}, ${storeId}, ${registerId}, ${clientUuid},
            ${amountPaid}, ${amountReceived}, ${changeDue}, NOW())
-        RETURNING "id";
+        RETURNING "id", "ticketNo";
       `;
       const saleId = insertedRows?.[0]?.id;
+      const saleTicketNo = insertedRows?.[0]?.ticketNo ?? ticketNo;
       if (!saleId) throw new BadRequestException('Impossible de créer la vente.');
 
       await tx.saleItem.createMany({
@@ -241,8 +248,8 @@ export class SalesService {
             amount: cashCollected,
             description:
               cashCollected + 0.01 < total
-                ? `Encaissement partiel vente #${saleId}`
-                : `Encaissement vente #${saleId}`,
+                ? `Encaissement partiel vente #${saleTicketNo}`
+                : `Encaissement vente #${saleTicketNo}`,
             userId: userId ?? null,
             categoryId,
             saleId,
@@ -279,6 +286,7 @@ export class SalesService {
 
       const sale = {
         id: saleId,
+        ticketNo: saleTicketNo,
         total,
         amountPaid,
         amountReceived,
@@ -290,7 +298,7 @@ export class SalesService {
         action: 'SALE_CREATED',
         entity: 'SALE',
         entityId: String(saleId),
-        metadata: { total, amountReceived, changeDue, amountPaid },
+        metadata: { total, amountReceived, changeDue, amountPaid, ticketNo: saleTicketNo },
       });
       return sale;
     });
@@ -826,7 +834,7 @@ export class SalesService {
 
     const doc = createPdfDoc();
     await drawReportHeader(doc, {
-      title: `Ticket de vente #${sale.id}`,
+      title: `Ticket de vente #${sale.ticketNo || sale.id}`,
       brand: { companyName, logoUrl },
       metaLines: [generatedMetaLine()],
     });

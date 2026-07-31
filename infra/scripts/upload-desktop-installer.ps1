@@ -53,4 +53,12 @@ foreach ($pattern in $patterns) {
   }
 }
 
+# latest.yml doit être revalidé immédiatement (sinon cache GCS ~1 h → détection retardée).
+$latestRemote = "${dest}latest.yml"
+Write-Host "Cache-Control: no-cache sur latest.yml"
+& gsutil setmeta -h "Cache-Control:no-cache,max-age=0" $latestRemote
+if ($LASTEXITCODE -ne 0) {
+  Write-Warning "Impossible de fixer Cache-Control sur latest.yml (objet absent ?)."
+}
+
 Write-Host "Termine. URL publique (Remote updater) : https://storage.googleapis.com/$Bucket/installers/$Edition/"

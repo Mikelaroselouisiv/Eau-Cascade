@@ -105,10 +105,10 @@ function effectiveUnitPrice(product: Product | undefined, line: CartLine): numbe
 }
 
 export function PosPage() {
-  const { user, can } = useAuth();
+  const { user, canPerm } = useAuth();
   const cashierLabel = user?.fullName?.trim() || user?.phone || 'Caissier';
   const isCashier = user?.role === 'CASHIER';
-  const canSpecialSale = can(['ADMIN', 'MANAGER']);
+  const canSpecialSale = canPerm('sales.special');
   const [saleMode, setSaleMode] = useState<'classic' | 'special'>('classic');
   const [products, setProducts] = useState<Product[]>([]);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
@@ -657,11 +657,13 @@ export function PosPage() {
       }
       const sale = (await createSale(payload)) as {
         id: number;
+        ticketNo?: string;
         changeDue?: number;
         balanceDue?: number;
         amountReceived?: number;
       };
-      const msgParts = [`Vente #${sale.id} enregistrée`];
+      const ticketRef = sale.ticketNo?.trim() || String(sale.id);
+      const msgParts = [`Vente #${ticketRef} enregistrée`];
       if ((sale.changeDue ?? changeDue) > 0.009) {
         msgParts.push(`monnaie due ${formatMoney(sale.changeDue ?? changeDue)}`);
       }
@@ -672,6 +674,7 @@ export function PosPage() {
       if (printTicket && window.desktopApp?.printReceipt) {
         await window.desktopApp.printReceipt({
           saleId: sale.id,
+          ticketNo: ticketRef,
           companyName: company?.name ?? 'Entreprise',
           companyPhone: company?.phone ?? null,
           address: [company?.address, company?.city].filter(Boolean).join(', ') || '',

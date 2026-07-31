@@ -42,10 +42,12 @@ cd apps/desktop
 npm run icons
 npm run dist:win:server
 
-# 3. Builder + publier Remote
+# 3. Builder + publier Remote (après bump de version dans apps/desktop/package.json)
 npm run dist:win:remote
 powershell -ExecutionPolicy Bypass -File ../../infra/scripts/upload-desktop-installer.ps1 -Edition remote
 ```
+
+Les postes **Remote** déjà installés détectent `latest.yml` au démarrage (et toutes les 4 h), téléchargent en arrière-plan, affichent une bannière + bouton **Redémarrer et mettre à jour** (sidebar : version + **Mettre à jour** / **Installer**).
 
 Copier l’exe Server sur clé USB ou `installers/server/` sur GCS pour le magasin.
 

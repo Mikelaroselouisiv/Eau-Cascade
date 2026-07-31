@@ -310,6 +310,8 @@ model ProductVolumePrice {
 model Sale {
   id         Int         @id @default(autoincrement())
   uuid       String      @unique @default(uuid())
+  /// Numéro de fiche / ticket affiché et imprimé (stable cross-nœuds, syncé).
+  ticketNo   String      @unique
   /// UUID généré côté client (offline) pour idempotence push.
   clientUuid String?     @unique
   total      Decimal     @db.Decimal(12, 2)

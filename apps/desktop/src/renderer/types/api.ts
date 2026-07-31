@@ -222,6 +222,10 @@ export interface PurchaseOrderListItem {
 
 export interface PurchaseOrdersAmountSummary {
   companyId: number;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  departmentId?: number | null;
+  receptionStatus?: ReceptionStatus | null;
   orderCount: number;
   pendingCount: number;
   partialCount: number;
@@ -398,6 +402,8 @@ export interface SalePaymentRow {
 
 export interface Sale {
   id: number;
+  /** Numéro de fiche imprimé / affiché (stable sync). */
+  ticketNo?: string | null;
   total: number | string;
   subtotal?: number | string;
   tax?: number | string;
@@ -470,6 +476,7 @@ export interface Delivery {
   } | null;
   sale?: {
     id: number;
+    ticketNo?: string | null;
     total: number | string;
     clientName?: string | null;
     cashier?: string | null;
@@ -631,6 +638,7 @@ export interface CreditCustomerDetail extends CreditCustomerListItem {
   availableCredit: number;
   sales: Array<{
     id: number;
+    ticketNo?: string | null;
     total: number;
     amountPaid: number;
     balanceDue: number;

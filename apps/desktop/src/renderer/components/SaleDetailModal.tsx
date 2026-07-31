@@ -7,6 +7,7 @@ import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { buildSaleDetailPrintHtml, openBrowserPrintWindow } from '../utils/saleReceiptBrowserHtml';
 import { buildReceiptPayloadFromSale } from '../utils/receiptPayload';
+import { saleTicketNo } from '../utils/saleTicketNo';
 
 function formatApiError(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -115,7 +116,7 @@ export function SaleDetailModal({
     setReceiptBusy(true);
     try {
       const blob = await exportSalePdf(sale.id);
-      const fileName = `ticket-vente-${sale.id}.pdf`;
+      const fileName = `ticket-vente-${sale.ticketNo || sale.id}.pdf`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -144,7 +145,7 @@ export function SaleDetailModal({
         style={{ maxWidth: 560, width: '100%' }}
       >
         <div className="modal-heading">
-          <h2 id="sale-detail-title">Vente #{sale.id}</h2>
+          <h2 id="sale-detail-title">Vente #{saleTicketNo(sale)}</h2>
           <p className="dept-hint" style={{ margin: 0 }}>
             {formatDateTime(sale.createdAt)}
             {companyName ? ` · ${companyName}` : ''}

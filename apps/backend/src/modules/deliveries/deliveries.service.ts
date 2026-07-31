@@ -24,6 +24,7 @@ const deliveryInclude = {
   sale: {
     select: {
       id: true,
+      ticketNo: true,
       total: true,
       clientName: true,
       cashier: true,
@@ -187,11 +188,14 @@ export class DeliveriesService {
 
     if (q) {
       const asNum = Number.parseInt(q, 10);
+      const ticketQ = q.toUpperCase();
       const or: Prisma.DeliveryWhereInput[] = [
         { sale: { clientName: { contains: q, mode: 'insensitive' } } },
+        { sale: { ticketNo: { contains: ticketQ, mode: 'insensitive' } } },
       ];
+      // Anciens tickets imprimés avec l’id local — ne pas chercher Delivery.id (autre espace).
       if (Number.isFinite(asNum) && String(asNum) === q) {
-        or.push({ saleId: asNum }, { id: asNum });
+        or.push({ saleId: asNum });
       }
       where.OR = or;
     }

@@ -3,30 +3,39 @@
 }
 
 :root {
-  --ei-bg: #f7f4ef;
-  --ei-bg-deep: #efe8df;
+  --ei-bg: #e8f4f2;
+  --ei-bg-deep: #d5ebe8;
   --ei-surface: #ffffff;
-  --ei-surface-2: #faf8f5;
-  --ei-border: #e6ddd2;
-  --ei-border-strong: #d2c4b4;
-  --ei-text: #1c1917;
-  --ei-text-muted: #78716c;
-  --ei-primary: #e67e00;
-  --ei-primary-hover: #c96d00;
-  --ei-primary-soft: #fff4e5;
-  --ei-accent: #ff8c00;
-  --ei-sidebar: #fffaf5;
-  --ei-sidebar-text: #1c1917;
-  --ei-sidebar-muted: #78716c;
+  --ei-surface-2: #f2f9f8;
+  --ei-border: #c5dde0;
+  --ei-border-strong: #9ec4cb;
+  --ei-text: #0a2540;
+  --ei-text-muted: #4a6b7c;
+  --ei-primary: #0f4c81;
+  --ei-primary-hover: #0a355c;
+  --ei-primary-soft: #d9eef7;
+  --ei-accent: #3d9b8f;
+  --ei-sidebar: rgba(255, 255, 255, 0.82);
+  --ei-sidebar-text: #0a2540;
+  --ei-sidebar-muted: #4a6b7c;
+  --ei-navy: #0a2540;
+  --ei-pale-blue: #d6ebf7;
+  --ei-pale-green: #dcefe8;
   --ei-danger: #dc2626;
-  --ei-ok: #16a34a;
+  --ei-ok: #1f9d6c;
   --ei-font: "Segoe UI", "Candara", "Gill Sans", system-ui, sans-serif;
+  --ei-water-bg: url('./assets/water-droplets-bg.png');
 }
 
 body {
   margin: 0;
   font-family: var(--ei-font);
-  background: var(--ei-bg);
+  background:
+    linear-gradient(165deg, rgba(232, 244, 242, 0.88) 0%, rgba(214, 235, 247, 0.82) 45%, rgba(220, 239, 232, 0.9) 100%),
+    var(--ei-water-bg);
+  background-size: auto, cover;
+  background-position: center, center;
+  background-attachment: fixed, fixed;
   color: var(--ei-text);
 }
 
@@ -54,19 +63,22 @@ body {
 }
 
 .card {
-  background: var(--ei-surface);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
   border-radius: 12px;
   border: 1px solid var(--ei-border);
   padding: 1rem;
   color: var(--ei-text);
+  box-shadow: 0 8px 24px rgba(10, 37, 64, 0.06);
 }
 
 .auth-card {
   max-width: 420px;
   margin: 3rem auto;
-  background: #ffffff;
-  border-color: var(--ei-border);
-  box-shadow: 0 12px 32px rgba(28, 25, 23, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(16px);
+  border-color: rgba(157, 196, 203, 0.55);
+  box-shadow: 0 18px 48px rgba(10, 37, 64, 0.28);
 }
 
 .form-grid {
@@ -172,13 +184,14 @@ select {
 .app-shell {
   display: flex;
   min-height: 100vh;
-  background: var(--ei-bg);
+  background: transparent;
 }
 
 .app-sidebar {
   width: 240px;
   flex-shrink: 0;
   background: var(--ei-sidebar);
+  backdrop-filter: blur(14px);
   color: var(--ei-sidebar-text);
   display: flex;
   flex-direction: column;
@@ -193,9 +206,9 @@ select {
   gap: 0.5rem 0.65rem;
   margin: 0 -0.75rem 0.75rem;
   padding: 0.85rem 0.75rem;
-  background: #ffffff;
-  color: var(--ei-sidebar-text);
-  border-bottom: 1px solid var(--ei-border);
+  background: var(--ei-navy);
+  color: #e8f4f8;
+  border-bottom: 1px solid rgba(157, 196, 203, 0.35);
 }
 
 .app-offline-badge {
@@ -209,6 +222,117 @@ select {
   text-align: center;
 }
 
+.app-update-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  background: #0d9488;
+  color: #fff;
+  width: 100%;
+  text-align: center;
+}
+
+.app-update-badge--busy {
+  background: #0369a1;
+}
+
+.app-version-block {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.app-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.app-version-label {
+  font-size: 0.75rem;
+  color: var(--ei-sidebar-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-version-hint {
+  font-size: 0.7rem;
+  color: var(--ei-sidebar-muted);
+}
+
+.app-update-check-btn {
+  font-size: 0.72rem !important;
+  padding: 0.2rem 0.45rem !important;
+  min-height: 0 !important;
+  white-space: nowrap;
+}
+
+.app-update-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin: 0 0 0.85rem;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(13, 148, 136, 0.35);
+  background: linear-gradient(135deg, rgba(224, 242, 241, 0.95), rgba(236, 253, 245, 0.9));
+  color: #134e4a;
+}
+
+.app-update-banner--error {
+  border-color: rgba(185, 28, 28, 0.35);
+  background: linear-gradient(135deg, rgba(254, 226, 226, 0.95), rgba(255, 247, 237, 0.9));
+  color: #7f1d1d;
+}
+
+.app-update-banner--downloaded {
+  border-color: rgba(3, 105, 161, 0.4);
+  background: linear-gradient(135deg, rgba(224, 242, 254, 0.95), rgba(236, 254, 255, 0.9));
+  color: #0c4a6e;
+}
+
+.app-update-banner-copy {
+  display: grid;
+  gap: 0.2rem;
+  min-width: min(100%, 18rem);
+  flex: 1;
+}
+
+.app-update-banner-copy strong {
+  font-size: 0.95rem;
+}
+
+.app-update-banner-copy span {
+  font-size: 0.85rem;
+  opacity: 0.92;
+}
+
+.app-update-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.app-update-progress {
+  margin-top: 0.35rem;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.18);
+  overflow: hidden;
+}
+
+.app-update-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #0d9488;
+  transition: width 0.25s ease;
+}
+
 .brand-logo-img {
   flex-shrink: 0;
   border-radius: 8px;
@@ -217,7 +341,7 @@ select {
 
 .app-brand .brand-logo-img {
   background: #fff;
-  box-shadow: 0 1px 4px rgba(28, 25, 23, 0.12);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
 }
 
 .app-brand-text {
@@ -225,7 +349,7 @@ select {
   font-size: 0.95rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ei-primary);
+  color: #b8dff0;
 }
 
 .app-nav {
@@ -378,9 +502,10 @@ select {
   place-items: center;
   padding: 1rem;
   background:
-    radial-gradient(ellipse 70% 50% at 10% 0%, rgba(255, 140, 0, 0.14), transparent 55%),
-    radial-gradient(ellipse 55% 40% at 100% 100%, rgba(230, 126, 0, 0.1), transparent 50%),
-    linear-gradient(165deg, #fffaf5 0%, #f7f4ef 45%, #efe8df 100%);
+    linear-gradient(160deg, rgba(10, 37, 64, 0.55) 0%, rgba(15, 76, 129, 0.35) 42%, rgba(61, 155, 143, 0.28) 100%),
+    var(--ei-water-bg);
+  background-size: auto, cover;
+  background-position: center, center;
 }
 
 .login-brand {
@@ -390,9 +515,10 @@ select {
 }
 
 .login-brand .brand-logo-img {
-  border-radius: 12px;
+  border-radius: 14px;
   background: #fff;
-  box-shadow: 0 8px 24px rgba(28, 25, 23, 0.1);
+  box-shadow: 0 12px 36px rgba(10, 37, 64, 0.35);
+  padding: 0.35rem 0.55rem;
 }
 
 .login-title {
@@ -1645,6 +1771,10 @@ button.password-field__toggle:focus-visible {
   font-size: 0.78rem;
   line-height: 1.4;
   color: #64748b;
+}
+
+.po-amount-filters {
+  margin-bottom: 0.75rem;
 }
 
 .po-amount-monitor-grid {
@@ -3036,8 +3166,8 @@ button.password-field__toggle:focus-visible {
 }
 
 .delivery-card--pending {
-  border-left-color: #f97316;
-  background: linear-gradient(180deg, #fffaf5 0%, #ffffff 55%);
+  border-left-color: #3d9b8f;
+  background: linear-gradient(180deg, #eef8f4 0%, #ffffff 55%);
 }
 
 .delivery-card--partial {

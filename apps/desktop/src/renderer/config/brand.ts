@@ -1,3 +1,3 @@
-/** Identité produit — Eau Cascade (ne pas réintroduire Frères Baziles). */
-export const BRAND_NAME = 'Eau Cascade';
-export const BRAND_PRODUCT_NAME = 'POS Eau Cascade';
+/** Identité produit — Cascade / Eau Cascade. */
+export const BRAND_NAME = 'Cascade';
+export const BRAND_PRODUCT_NAME = 'POS Cascade';

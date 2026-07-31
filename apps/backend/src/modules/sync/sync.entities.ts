@@ -12,6 +12,8 @@ export const SYNC_ENTITIES = [
   'ProductRecipe',
   'RecipeComponent',
   'User',
+  'ExpenseCategory',
+  'CreditCustomer',
   'Sale',
   'SaleItem',
   'Payment',
@@ -19,7 +21,7 @@ export const SYNC_ENTITIES = [
   'DeliveryItem',
   'StockMovement',
   'FinanceEntry',
-  'ExpenseCategory',
+  'CreditPayment',
   'InventorySession',
   'InventoryLine',
   'PurchaseOrder',
@@ -53,4 +55,5 @@ export const CONFIG_ENTITIES = new Set<SyncEntityName>([
   'User',
   'Store',
   'Register',
+  'CreditCustomer',
 ]);

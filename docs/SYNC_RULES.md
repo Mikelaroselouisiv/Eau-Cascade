@@ -27,12 +27,19 @@ Si un parent requis est introuvable, le push marque `error` et le **curseur n’
 - Upsert par `uuid` ou `clientUuid` : si déjà présent → **no-op** (pas de doublon).
 - Soft delete rare (admin) : propager `deletedAt`.
 
-### Config (`Company`, `Department`, `DepartmentPrinterProfile`, `PackagingUnit`, `User`, `Store`, `Register`)
+### Config (`Company`, `Department`, `DepartmentPrinterProfile`, `PackagingUnit`, `User`, `Store`, `Register`, `CreditCustomer`)
 
 - LWW **symétrique** sur `max(updatedAt, deletedAt)` — un admin peut administrer depuis n’importe quel nœud.
 - Soft delete obligatoire pour ces DELETE métier (tombstone synchronisable). **Hard delete = invisible au sync = résurrection** depuis l’autre nœud.
 - Au pull / push : n’écraser que si `effectiveAt(incoming) > effectiveAt(existing)`.
 - Soft delete plus récent gagne ; une édition ultérieure peut « undelete » (`deletedAt: null`) si son `updatedAt` est plus récent.
+- `CreditCustomer` doit être synchronisé **avant** `Sale` (FK `Sale.creditCustomerUuid`).
+
+### Crédit (`CreditCustomer`, `CreditPayment`)
+
+- `CreditCustomer` : config LWW (fiche client AR).
+- `CreditPayment` : LWW (acomptes / remboursements) — après `Sale` et `FinanceEntry` (FK optionnelles `saleUuid`, `financeEntryUuid`).
+- Une vente crédit crée une `Sale` + `Payment(CREDIT)` + `Delivery(PENDING)` comme le POS ; le sync propage ces entités via l’ordre standard une fois le client résolu.
 
 ### Catalogue / stock (`Product`, `ProductSaleUnit`, `ProductVolumePrice`, `ProductRecipe`, `RecipeComponent`)
 

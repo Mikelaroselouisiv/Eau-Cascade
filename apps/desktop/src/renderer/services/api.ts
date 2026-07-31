@@ -892,11 +892,21 @@ export async function listPurchaseOrders(companyId?: number): Promise<PurchaseOr
   return data;
 }
 
-export async function getPurchaseOrdersAmountSummary(
-  companyId: number,
-): Promise<PurchaseOrdersAmountSummary> {
+export async function getPurchaseOrdersAmountSummary(params: {
+  companyId: number;
+  dateFrom?: string;
+  dateTo?: string;
+  departmentId?: number;
+  receptionStatus?: 'pending' | 'partial' | 'complete';
+}): Promise<PurchaseOrdersAmountSummary> {
   const { data } = await api.get<PurchaseOrdersAmountSummary>('/purchasing/orders-summary', {
-    params: { companyId },
+    params: {
+      companyId: params.companyId,
+      dateFrom: params.dateFrom || undefined,
+      dateTo: params.dateTo || undefined,
+      departmentId: params.departmentId,
+      receptionStatus: params.receptionStatus,
+    },
   });
   return data;
 }
@@ -1237,6 +1247,7 @@ export async function createCreditSale(payload: {
 }) {
   const { data } = await api.post<{
     saleId: number;
+    ticketNo: string;
     total: number;
     amountPaid: number;
     balanceDue: number;

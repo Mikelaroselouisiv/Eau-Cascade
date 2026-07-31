@@ -67,8 +67,14 @@ export class RolesService implements OnModuleInit {
       where: { code: userRoleCode, deletedAt: null, isActive: true },
     });
     if (!userRole) return false;
+    if (userRole.permissions.includes('*') || userRole.code === 'ADMIN') {
+      return requiredRoles.includes('ADMIN') || requiredRoles.length > 0;
+    }
+
+    // Code nommé encore accepté (endpoints non migrés vers @Permissions).
     if (requiredRoles.includes(userRole.code)) return true;
 
+    // Rôle custom : accès si ses droits couvrent ceux d’un rôle requis.
     for (const req of requiredRoles) {
       const target = await this.prisma.appRole.findFirst({
         where: { code: req, deletedAt: null, isActive: true },
@@ -167,10 +173,14 @@ export class RolesService implements OnModuleInit {
     }
   }
 
+  /**
+   * Crée les rôles système absents.
+   * N’écrase pas une config admin existante ; n’ajoute que des droits nouvellement introduits (liste explicite).
+   */
   private async ensureSystemRoles() {
-    /** Permissions retirées des rôles système (ne doivent plus rester en base). */
-    const revokedByRole: Record<string, string[]> = {
-      CASHIER: ['config.view', 'config.manage'],
+    /** Ajouts one-shot (nouveaux codes) — jamais de restauration du catalogue DEFAULT entier. */
+    const additiveOnly: Record<string, string[]> = {
+      MANAGER: ['sales.special', 'finance.view', 'finance.write'],
     };
 
     for (const [code, perms] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
@@ -186,21 +196,12 @@ export class RolesService implements OnModuleInit {
         });
         continue;
       }
-      if (existing.deletedAt || !existing.isActive) continue;
-      if (existing.permissions.includes('*')) continue;
-
-      const revoked = new Set(revokedByRole[code] ?? []);
-      const withoutRevoked = existing.permissions.filter((p) => !revoked.has(p));
-      const missing = perms.filter((p) => !withoutRevoked.includes(p));
-      const next = [...withoutRevoked, ...missing];
-      const changed =
-        next.length !== existing.permissions.length ||
-        next.some((p, i) => p !== existing.permissions[i]);
-      if (!changed) continue;
-
+      if (existing.deletedAt || !existing.isActive || existing.permissions.includes('*')) continue;
+      const toAdd = (additiveOnly[code] ?? []).filter((p) => !existing.permissions.includes(p));
+      if (toAdd.length === 0) continue;
       await this.prisma.appRole.update({
         where: { id: existing.id },
-        data: { permissions: next },
+        data: { permissions: [...existing.permissions, ...toAdd] },
       });
       this.cache.delete(code);
     }

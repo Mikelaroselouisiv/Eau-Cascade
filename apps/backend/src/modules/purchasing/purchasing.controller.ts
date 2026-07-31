@@ -43,12 +43,30 @@ export class PurchasingController {
   /** Totaux montants commandes (estimés) — admin uniquement, hors journal de caisse. */
   @Get('orders-summary')
   @Roles('ADMIN')
-  ordersSummary(@Query('companyId') companyId?: string) {
+  ordersSummary(
+    @Query('companyId') companyId?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('departmentId') departmentId?: string,
+    @Query('receptionStatus') receptionStatus?: string,
+  ) {
     const n = companyId ? Number(companyId) : NaN;
     if (!Number.isFinite(n) || n <= 0) {
       throw new BadRequestException('companyId est requis.');
     }
-    return this.purchasingService.getPurchaseOrdersAmountSummary(n);
+    const dept = departmentId ? Number(departmentId) : undefined;
+    const reception =
+      receptionStatus === 'pending' ||
+      receptionStatus === 'partial' ||
+      receptionStatus === 'complete'
+        ? receptionStatus
+        : undefined;
+    return this.purchasingService.getPurchaseOrdersAmountSummary(n, {
+      dateFrom: dateFrom?.trim() || undefined,
+      dateTo: dateTo?.trim() || undefined,
+      departmentId: dept != null && Number.isFinite(dept) && dept > 0 ? dept : undefined,
+      receptionStatus: reception,
+    });
   }
 
   @Get('orders/:id')

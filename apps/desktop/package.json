@@ -1,8 +1,8 @@
 {
   "name": "desktop",
-  "productName": "POS Eau Cascade",
+  "productName": "POS Cascade",
   "description": "Point de vente — application desktop",
-  "author": "Eau Cascade",
+  "author": "Cascade",
   "private": true,
   "version": "4.0.0",
   "type": "module",
@@ -57,7 +57,7 @@
   "build": {
     "icon": "build/icon.ico",
     "appId": "com.eaucascade.pos.desktop",
-    "productName": "POS Eau Cascade",
+    "productName": "POS Cascade",
     "copyright": "Copyright © 2026",
     "directories": {
       "output": "release",

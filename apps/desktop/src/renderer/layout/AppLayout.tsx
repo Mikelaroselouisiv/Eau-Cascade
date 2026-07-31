@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { BrandLogo } from '../components/BrandLogo';
+import { UpdateBanner } from '../components/UpdateBanner';
 import { BRAND_NAME } from '../config/brand';
 import { useAuth } from '../context/AuthContext';
+import { useAppUpdater } from '../hooks/useAppUpdater';
 import { pendingSalesCount, syncSalesQueue } from '../services/offline-queue';
 import { formatRoleLabel } from '../utils/roleLabels';
 
@@ -16,10 +18,28 @@ const nav: Array<{ to: string; label: string; permission: string }> = [
 ];
 
 export function AppLayout() {
-  const { user, logout, can, canPerm } = useAuth();
+  const { user, logout, canPerm } = useAuth();
   const navigate = useNavigate();
   const [pendingSales, setPendingSales] = useState(0);
   const syncRunning = useRef(false);
+  const { available: updaterAvailable, status, appVersion, checkForUpdates, quitAndInstall } =
+    useAppUpdater();
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [checkHint, setCheckHint] = useState('');
+
+  useEffect(() => {
+    // Nouvelle version / nouvel état → réafficher la bannière.
+    setUpdateDismissed(false);
+    if (
+      status.state === 'available' ||
+      status.state === 'downloading' ||
+      status.state === 'downloaded' ||
+      status.state === 'error'
+    ) {
+      setCheckHint('');
+    }
+  }, [status.state, status.version]);
 
   const refreshPending = useCallback(() => {
     void pendingSalesCount().then(setPendingSales);
@@ -65,22 +85,51 @@ export function AppLayout() {
     };
   }, [syncPendingSales]);
 
-  const visible = nav.filter((item) => {
-    if (item.permission === 'credit.view') {
-      return can(['ADMIN', 'MANAGER']) || canPerm('credit.view');
+  const visible = nav.filter((item) => canPerm(item.permission));
+
+  const showUpdateBanner =
+    updaterAvailable &&
+    !updateDismissed &&
+    (status.state === 'available' ||
+      status.state === 'downloading' ||
+      status.state === 'downloaded' ||
+      status.state === 'error');
+
+  async function onCheckUpdates() {
+    if (!updaterAvailable || updateChecking) return;
+    setUpdateChecking(true);
+    setUpdateDismissed(false);
+    setCheckHint('');
+    try {
+      const next = await checkForUpdates();
+      if (next?.state === 'not-available') {
+        setCheckHint('Déjà à jour');
+      } else if (next?.state === 'error') {
+        setCheckHint(next.message || 'Erreur');
+      }
+    } finally {
+      setUpdateChecking(false);
     }
-    return canPerm(item.permission);
-  });
+  }
 
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
         <div className="app-brand">
-          <BrandLogo size={36} wide />
+          <BrandLogo size={42} wide />
           <span className="app-brand-text">{BRAND_NAME}</span>
           {pendingSales > 0 ? (
             <span className="app-offline-badge" title="Ventes en attente de synchronisation">
               {pendingSales} hors ligne
+            </span>
+          ) : null}
+          {status.state === 'downloaded' ? (
+            <span className="app-update-badge" title="Mise à jour prête à installer">
+              MAJ prête
+            </span>
+          ) : status.state === 'downloading' || status.state === 'available' ? (
+            <span className="app-update-badge app-update-badge--busy" title="Téléchargement…">
+              MAJ…
             </span>
           ) : null}
         </div>
@@ -103,6 +152,36 @@ export function AppLayout() {
             <div className="app-user-email">{user?.phone}</div>
             <div className="app-user-role">{formatRoleLabel(user?.role, user?.roleLabel)}</div>
           </div>
+          {appVersion ? (
+            <div className="app-version-block">
+              <div className="app-version-row">
+                <span className="app-version-label">v{appVersion}</span>
+                {updaterAvailable && status.state !== 'disabled' ? (
+                  status.state === 'downloaded' ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary app-update-check-btn"
+                      onClick={() => void quitAndInstall()}
+                    >
+                      Installer
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-ghost app-update-check-btn"
+                      onClick={() => void onCheckUpdates()}
+                      disabled={updateChecking || status.state === 'downloading'}
+                    >
+                      {updateChecking || status.state === 'checking'
+                        ? 'Vérification…'
+                        : 'Mettre à jour'}
+                    </button>
+                  )
+                ) : null}
+              </div>
+              {checkHint ? <div className="app-version-hint">{checkHint}</div> : null}
+            </div>
+          ) : null}
           <button
             type="button"
             className="btn btn-ghost"
@@ -116,6 +195,15 @@ export function AppLayout() {
         </div>
       </aside>
       <div className="app-main">
+        {showUpdateBanner ? (
+          <UpdateBanner
+            status={status}
+            checking={updateChecking}
+            onCheck={() => void onCheckUpdates()}
+            onInstall={() => void quitAndInstall()}
+            onDismiss={() => setUpdateDismissed(true)}
+          />
+        ) : null}
         <Outlet />
       </div>
     </div>

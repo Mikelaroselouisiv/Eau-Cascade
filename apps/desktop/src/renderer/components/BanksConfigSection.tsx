@@ -32,8 +32,8 @@ type Props = {
 };
 
 export function BanksConfigSection({ onMessage }: Props) {
-  const { can } = useAuth();
-  const canManage = can(['ADMIN', 'MANAGER']);
+  const { canPerm } = useAuth();
+  const canManage = canPerm('banks.manage');
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [companyId, setCompanyId] = useState<number | ''>('');

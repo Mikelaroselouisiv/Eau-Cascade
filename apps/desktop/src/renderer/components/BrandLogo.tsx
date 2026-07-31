@@ -1,5 +1,5 @@
 /**
- * Logo entreprise : `assets/icons/Logo Israel.png` (alias wide) + fallback icon.png
+ * Logo entreprise : `assets/icons/logo-wide.png` (Cascade)
  */
 import logoUrl from '@monorepo-assets/icons/logo-wide.png';
 
@@ -14,13 +14,13 @@ export function BrandLogo({
   wide?: boolean;
 }) {
   const style = wide
-    ? { height: size, width: 'auto', maxWidth: size * 3.2, objectFit: 'contain' as const }
+    ? { height: size, width: 'auto', maxWidth: size * 4.2, objectFit: 'contain' as const }
     : { width: size, height: size, objectFit: 'contain' as const };
 
   return (
     <img
       src={logoUrl}
-      alt="Eau Cascade"
+      alt="Cascade"
       className={`brand-logo-img ${className}`.trim()}
       style={style}
     />

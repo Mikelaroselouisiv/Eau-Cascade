@@ -3,7 +3,14 @@ const fs = require('fs');
 const path = require('path');
 const { printReceipt } = require('./thermal-printer.cjs');
 const localDb = require('./local-db.cjs');
-const { initUpdater } = require('./updater.cjs');
+const {
+  initUpdater,
+  setMainWindow,
+  checkForUpdatesManual,
+  quitAndInstall,
+  getUpdaterStatus,
+  getAppVersion,
+} = require('./updater.cjs');
 const { getAppEdition } = require('./edition.cjs');
 const { ensureServerStack } = require('./server-bootstrap.cjs');
 
@@ -43,9 +50,9 @@ function createWindow() {
     height: 800,
     minWidth: 1024,
     minHeight: 680,
-    title: 'POS Eau Cascade',
+    title: 'POS Cascade',
     icon: resolveWindowIcon(),
-    backgroundColor: '#f7f4ef',
+    backgroundColor: '#0a2540',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -65,10 +72,12 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
+
+  return mainWindow;
 }
 
 app.whenReady().then(async () => {
-  app.setName('POS Eau Cascade');
+  app.setName('POS Cascade');
   if (process.platform === 'win32') {
     const edition = getAppEdition();
     app.setAppUserModelId(
@@ -111,16 +120,20 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('app:get-edition', () => getAppEdition());
+  ipcMain.handle('app:get-version', () => getAppVersion());
+  ipcMain.handle('updater:get-status', () => getUpdaterStatus());
+  ipcMain.handle('updater:check', () => checkForUpdatesManual({ silent: false }));
+  ipcMain.handle('updater:quit-and-install', () => quitAndInstall());
 
-  createWindow();
-
-  if (!isDev && getAppEdition() === 'remote') {
-    initUpdater();
-  }
+  const mainWindow = createWindow();
+  setMainWindow(mainWindow);
+  // Remote prod : polling GCS. Dev / Server : statut « disabled » pour l’UI version.
+  initUpdater(mainWindow);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      const win = createWindow();
+      setMainWindow(win);
     }
   });
 });

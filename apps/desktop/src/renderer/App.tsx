@@ -9,7 +9,7 @@ import { DeliveryPage } from './pages/DeliveryPage';
 import { LoginPage } from './pages/LoginPage';
 import { PosPage } from './pages/PosPage';
 import { ProtectedRoute } from './pages/ProtectedRoute';
-import { RequireRole } from './pages/RequireRole';
+import { RequirePermission } from './pages/RequirePermission';
 import { StockPage } from './pages/StockPage';
 
 export default function App() {
@@ -30,49 +30,49 @@ export default function App() {
             <Route
               path="dashboard"
               element={
-                <RequireRole roles={['ADMIN', 'MANAGER']}>
+                <RequirePermission permission="dashboard.view">
                   <DashboardPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
             <Route
               path="credit"
               element={
-                <RequireRole roles={['ADMIN', 'MANAGER']}>
+                <RequirePermission permission="credit.view">
                   <CreditPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
             <Route
               path="stock"
               element={
-                <RequireRole roles={['ADMIN', 'MANAGER', 'STOCK_MANAGER']}>
+                <RequirePermission permission="stock.view">
                   <StockPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
             <Route
               path="pos"
               element={
-                <RequireRole roles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                <RequirePermission permission="pos.use">
                   <PosPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
             <Route
               path="livraisons"
               element={
-                <RequireRole roles={['ADMIN', 'MANAGER', 'CASHIER', 'LIVREUR', 'ACCOUNTANT']}>
+                <RequirePermission permission="deliveries.view">
                   <DeliveryPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
             <Route
               path="config"
               element={
-                <RequireRole roles={['ADMIN', 'MANAGER']}>
+                <RequirePermission permission="config.view">
                   <ConfigPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
           </Route>

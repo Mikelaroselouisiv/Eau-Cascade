@@ -16,6 +16,7 @@ export type DisbursementPrintPayload = {
   isTest?: boolean;
   previewSampleBody?: string | null;
   description: string;
+  detail?: string;
   amount: number;
   entryDate?: string;
   entryId?: number;
@@ -34,9 +35,10 @@ export function buildDisbursementOrderPayload(opts: {
   printer: DepartmentPrinterSettings | null;
   /** YYYY-MM-DD prioritaire sur createdAt. */
   entryDateYmd?: string;
+  detail?: string;
   isTest?: boolean;
 }): DisbursementPrintPayload {
-  const { entry, company, printer, entryDateYmd, isTest } = opts;
+  const { entry, company, printer, entryDateYmd, detail, isTest } = opts;
   const preparedBy =
     entry.user?.fullName?.trim() ||
     entry.user?.phone?.trim() ||
@@ -60,6 +62,7 @@ export function buildDisbursementOrderPayload(opts: {
     isTest: !!isTest,
     previewSampleBody: printer?.disbursementPreviewSampleBody ?? null,
     description: entry.description,
+    detail: detail?.trim() || undefined,
     amount: Number(entry.amount),
     entryDate: entryDateYmd?.trim() || formatYmd(entry.createdAt),
     entryId: entry.id,

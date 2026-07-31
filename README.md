@@ -25,7 +25,7 @@ npm run icons
 npm run dev
 ```
 
-Logo source unique : `assets/icons/icon.png`
+Logo source unique : `assets/icons/icon.png` (+ `logo-wide.png` pour l’UI)
 
 ## GCP
 

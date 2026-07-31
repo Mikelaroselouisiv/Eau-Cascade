@@ -19,6 +19,7 @@ export type DisbursementOrderPreviewInput = {
   isTest?: boolean;
   previewSampleBody?: string | null;
   description?: string;
+  detail?: string;
   amount?: number;
   entryDate?: string;
   entryId?: number;
@@ -76,6 +77,8 @@ export function buildDisbursementOrderPreviewText(data: DisbursementOrderPreview
     }
     lines.push(separator);
     lines.push(clipLine(`Libellé: ${data.description ?? '—'}`, lineWidth));
+    const detail = String(data.detail || '').trim();
+    if (detail) lines.push(clipLine(`Détail: ${detail}`, lineWidth));
     lines.push(clipLine(`Montant: ${formatMoneyCompact(data.amount ?? 0)}`, lineWidth));
     lines.push(separator);
   }

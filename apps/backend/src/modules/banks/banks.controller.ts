@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -25,16 +26,17 @@ import {
 
 @Controller('banks')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'MANAGER')
 export class BanksController {
   constructor(private readonly banksService: BanksService) {}
 
   @Get('summary')
+  @Permissions('banks.view')
   summary(@Query('companyId', ParseIntPipe) companyId: number) {
     return this.banksService.summary(companyId);
   }
 
   @Get()
+  @Permissions('banks.view')
   listBanks(
     @Query('companyId', ParseIntPipe) companyId: number,
     @Query('includeInactive') includeInactive?: string,
@@ -46,11 +48,13 @@ export class BanksController {
   }
 
   @Post()
+  @Permissions('banks.manage')
   createBank(@Body() dto: CreateBankDto, @GetUser() user?: { id?: number }) {
     return this.banksService.createBank(dto, user?.id);
   }
 
   @Patch(':id')
+  @Permissions('banks.manage')
   updateBank(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateBankDto,
@@ -60,11 +64,13 @@ export class BanksController {
   }
 
   @Post('accounts')
+  @Permissions('banks.manage')
   createAccount(@Body() dto: CreateBankAccountDto, @GetUser() user?: { id?: number }) {
     return this.banksService.createAccount(dto, user?.id);
   }
 
   @Patch('accounts/:id')
+  @Permissions('banks.manage')
   updateAccount(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateBankAccountDto,
@@ -74,6 +80,7 @@ export class BanksController {
   }
 
   @Get('transactions')
+  @Permissions('banks.view')
   listTransactions(
     @Query('companyId', ParseIntPipe) companyId: number,
     @Query('bankAccountId') bankAccountId?: string,
@@ -89,6 +96,7 @@ export class BanksController {
   }
 
   @Post('transactions')
+  @Permissions('banks.manage')
   createTransaction(
     @Body() dto: CreateBankTransactionDto,
     @GetUser() user?: { id?: number },

@@ -1,7 +1,7 @@
 /**
- * Source logo : assets/icons/Logo Israel.png (préféré) ou assets/icons/icon.png
+ * Source logo : assets/icons/icon.png (+ logo-wide.png pour l’UI)
  * → apps/desktop/build/icon.png + public/icon.png + icon.ico
- * Note : l’ICO exige un PNG carré (icon.png est généré/paddé si besoin en amont).
+ * Note : l’ICO exige un PNG carré.
  */
 import fs from 'fs';
 import path from 'path';
@@ -11,8 +11,9 @@ import pngToIco from 'png-to-ico';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, '..');
 const monorepoRoot = path.resolve(desktopRoot, '../..');
-const brandedLogo = path.join(monorepoRoot, 'assets', 'icons', 'Logo Israel.png');
-const sourceLogo = path.join(monorepoRoot, 'assets', 'icons', 'icon.png');
+const iconsDir = path.join(monorepoRoot, 'assets', 'icons');
+const sourceLogo = path.join(iconsDir, 'icon.png');
+const brandedLogo = path.join(iconsDir, 'logo-wide.png');
 
 const buildPng = path.join(desktopRoot, 'build', 'icon.png');
 const publicPng = path.join(desktopRoot, 'public', 'icon.png');
@@ -21,7 +22,7 @@ const publicIco = path.join(desktopRoot, 'public', 'icon.ico');
 
 if (!fs.existsSync(sourceLogo)) {
   console.error(`[icons] Logo introuvable : ${sourceLogo}`);
-  console.error('[icons] Placez Logo Israel.png puis générez icon.png carré, ou placez icon.png');
+  console.error('[icons] Placez icon.png (carré) et logo-wide.png dans assets/icons/');
   process.exit(1);
 }
 
@@ -33,7 +34,7 @@ fs.copyFileSync(sourceLogo, buildPng);
 fs.copyFileSync(sourceLogo, publicPng);
 console.log('[icons] PNG ←', sourceLogo);
 if (fs.existsSync(brandedLogo)) {
-  console.log('[icons] Brand file present:', brandedLogo);
+  console.log('[icons] Brand wide present:', brandedLogo);
 }
 console.log('[icons]   →', buildPng);
 console.log('[icons]   →', publicPng);

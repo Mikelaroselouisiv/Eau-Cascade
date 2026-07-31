@@ -80,8 +80,10 @@ type Tab = 'company' | 'printer' | 'packaging' | 'banques' | 'users' | 'roles';
 type PrinterDocType = 'RECEIPT' | 'DISBURSEMENT_ORDER';
 
 export function ConfigPage() {
-  const { can } = useAuth();
-  const isAdmin = can(['ADMIN']);
+  const { can, canPerm } = useAuth();
+  const isAdmin = can(['ADMIN']) || canPerm('*');
+  const canManageRoles = canPerm('roles.manage');
+  const canViewUsers = canPerm('users.view') || canPerm('users.manage');
   const [tab, setTab] = useState<Tab>('company');
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -371,7 +373,8 @@ export function ConfigPage() {
             ['printer', 'Imprimante'],
             ['packaging', 'Conditionnement'],
             ['banques', 'Banques'],
-            ...(isAdmin ? [['users', 'Utilisateurs'] as const, ['roles', 'Rôles & autorisations'] as const] : []),
+            ...(canViewUsers ? [['users', 'Utilisateurs'] as const] : []),
+            ...(canManageRoles ? [['roles', 'Rôles & autorisations'] as const] : []),
           ] as const
         ).map(([id, label]) => (
           <button
@@ -753,7 +756,7 @@ export function ConfigPage() {
         <BanksConfigSection onMessage={(m, o) => setMsg(m, o)} />
       )}
 
-      {tab === 'users' && isAdmin && (
+      {tab === 'users' && canViewUsers && (
         <UsersSection
           items={users}
           companies={companies}
@@ -765,7 +768,7 @@ export function ConfigPage() {
         />
       )}
 
-      {tab === 'roles' && isAdmin && (
+      {tab === 'roles' && canManageRoles && (
         <RolesSection
           appRoles={appRoles}
           onChange={async () => {
@@ -843,10 +846,10 @@ function CompaniesSection({
   onMessage: (m: string, options?: AutoClearMessageOptions) => void;
   onCatalogChanged: () => Promise<void>;
 }) {
-  const { can } = useAuth();
-  const canCreate = can(['ADMIN']);
-  const canEdit = can(['ADMIN', 'MANAGER']);
-  const canDelete = can(['ADMIN']);
+  const { can, canPerm } = useAuth();
+  const canCreate = canPerm('company.manage');
+  const canEdit = canPerm('company.manage');
+  const canDelete = can(['ADMIN']) || canPerm('*');
 
   const [rows, setRows] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1554,9 +1557,9 @@ function CompanyDepartmentsPanel({
   companyId: number;
   onDepartmentsChanged: () => Promise<void>;
 }) {
-  const { can } = useAuth();
-  const canEdit = can(['ADMIN', 'MANAGER']);
-  const canDelete = can(['ADMIN']);
+  const { can, canPerm } = useAuth();
+  const canEdit = canPerm('departments.manage');
+  const canDelete = can(['ADMIN']) || canPerm('*');
 
   const [items, setItems] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2406,6 +2409,7 @@ function RolesSection({
   onChange: () => Promise<void>;
   onMessage: (m: string, options?: AutoClearMessageOptions) => void;
 }) {
+  const { refreshUser } = useAuth();
   const [permissions, setPermissions] = useState<PermissionDefinition[]>([]);
   const [editRole, setEditRole] = useState<AppRoleRow | null>(null);
   const [editPerms, setEditPerms] = useState<string[]>([]);
@@ -2435,7 +2439,8 @@ function RolesSection({
       await updateRole(editRole.id, { permissions: editPerms });
       setEditRole(null);
       await onChange();
-      onMessage('Rôle mis à jour.');
+      await refreshUser().catch(() => undefined);
+      onMessage('Rôle mis à jour. Session rafraîchie pour votre compte.');
     } catch (err) {
       onMessage(formatApiError(err, 'Enregistrement impossible.'), { persist: true });
     } finally {
@@ -2489,8 +2494,10 @@ function RolesSection({
       <div className="card">
         <h2>Rôles et autorisations</h2>
         <p className="dept-hint">
-          Modifiez les droits sans toucher au code. Les rôles système (Administrateur, Gérant, etc.) ne
-          peuvent pas être supprimés ; vous pouvez ajuster leurs autorisations.
+          Les autorisations du Gérant (et des autres rôles) sont appliquées à l’API et à l’interface.
+          Retirer un droit (ex. crédit, finance, vente spéciale) bloque réellement l’accès. Les rôles
+          système ne peuvent pas être supprimés. Après modification, les utilisateurs concernés doivent
+          se reconnecter (ou rafraîchir la session).
         </p>
 
         <div className="table-wrap">

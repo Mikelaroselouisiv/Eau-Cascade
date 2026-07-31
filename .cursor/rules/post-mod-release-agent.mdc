@@ -1,0 +1,62 @@
+---
+description: Agent post-modification — commit, push GitHub, deploy GCP, release desktop Remote/Server
+alwaysApply: true
+---
+
+# Agent post-modification — POS Eau Cascade
+
+Quand l’utilisateur dit qu’il a **fini de modifier le code** (ou demande commit / push / deploy / release), exécuter **tout le pipeline** ci-dessous sans attendre d’autres instructions, sauf s’il limite explicitement le scope (ex. « commit seulement »).
+
+## Isolation (obligatoire)
+
+1. Avant toute ops GCP locale : `gcloud config configurations activate pos-eau-cascade` puis `gcloud config set project eau-cascade`
+2. Lancer `infra/scripts/assert-eau-cascade-gcp.ps1` — **refuser** si le projet n’est pas `eau-cascade`
+3. Jamais Israel / Frères Baziles (voir `tenant-isolation-eau-cascade.mdc`)
+
+## Pipeline standard
+
+### 1. Préparer
+
+- `git status` / `git diff` / `git log` (style des messages)
+- Ne **pas** committer : `.env`, secrets, `apps/backend/dist/`, artefacts `release/`, images scratch type `ChatGPT Image*`
+- Si changements **desktop** : bumper `apps/desktop/package.json` → `version` (semver) pour que `electron-updater` détecte la MAJ Remote
+- Fuseau métier : `America/Port-au-Prince` uniquement
+
+### 2. Commit + push GitHub
+
+- Branche attendue : `main` (repo `Eau-Cascade`)
+- Message commit : style repo, focus « why », 1–2 phrases
+- `git push -u origin HEAD` (droits réseau / credentials requis)
+- `gh` Windows : `"C:\Program Files\GitHub CLI\gh.exe"` si pas dans le PATH
+
+### 3. Backend → Artifact Registry → VM GCP
+
+- Push sur `main` avec chemins `apps/backend/**` (ou Dockerfile / compose / deploy script) → workflow **`Backend - build and push to GCP`** (`.github/workflows/backend-gcp.yml`)
+- Sinon déclencher : `gh workflow run "Backend - build and push to GCP" --ref main`
+- Surveiller : `gh run watch` / `gh run list --workflow=backend-gcp.yml`
+- API publique attendue : `http://35.203.5.250` (projet `eau-cascade` uniquement)
+
+### 4. Desktop → build CI → GCS (notifications MAJ)
+
+Workflow **`Desktop - release to GCS`** (`.github/workflows/desktop-release-gcp.yml`) :
+
+```powershell
+& "C:\Program Files\GitHub CLI\gh.exe" workflow run "Desktop - release to GCS" --ref main -f edition=remote
+& "C:\Program Files\GitHub CLI\gh.exe" workflow run "Desktop - release to GCS" --ref main -f edition=server
+```
+
+- **Remote** : upload `exe` + `latest.yml` + `blockmap` → `gs://eau-cascade-assets/installers/remote/`  
+  → les apps Remote détectent la MAJ (démarrage + toutes les 4 h), bannière + « Redémarrer et mettre à jour »
+- **Server** : mêmes artefacts → `gs://eau-cascade-assets/installers/server/` (installateur magasin ; pas d’auto-update Electron côté Server)
+- Cache : le script `upload-desktop-installer.ps1` met `Cache-Control: no-cache` sur `latest.yml`
+- Alternative locale (si CI indisponible) : `npm run dist:win:remote|server` puis `infra/scripts/upload-desktop-installer.ps1 -Edition …` **après** assert GCP Eau Cascade
+
+### 5. Vérifications de fin
+
+- Runs GitHub Actions verts (backend + 2 desktop)
+- Optionnel smoke : `infra/scripts/e2e-smoke.ps1 -ApiUrl http://35.203.5.250`
+- Rapporter à l’utilisateur : SHA commit, URL des runs, version desktop publiée, URLs GCS
+
+## Réponses à l’utilisateur
+
+Après chaque passage : résumé court (commit, push, statut CI backend, statut releases Remote/Server). Pas de procédure manuelle magasin — les postes Remote se mettent à jour seuls via le feed GCS.

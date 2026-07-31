@@ -114,7 +114,7 @@ export function LoginPage() {
       <main className="login-page">
         <div className="auth-card card">
           <div className="login-brand">
-            <BrandLogo size={56} wide />
+            <BrandLogo size={72} wide />
           </div>
           <h1 className="login-title">{BRAND_NAME}</h1>
           <p className="login-sub">Configuration initiale — créez le compte administrateur.</p>
@@ -177,7 +177,7 @@ export function LoginPage() {
     <main className="login-page">
       <div className="auth-card card">
         <div className="login-brand">
-          <BrandLogo size={56} wide />
+          <BrandLogo size={72} wide />
         </div>
         <h1 className="login-title">{BRAND_NAME}</h1>
         <p className="login-sub">Connexion au point de vente</p>
