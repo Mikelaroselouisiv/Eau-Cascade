@@ -1495,22 +1495,32 @@ select {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.45);
-  display: grid;
-  place-items: center;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
   z-index: 1000;
-  padding: 1rem;
+  padding: 1.25rem 1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal {
   max-width: 480px;
   width: 100%;
-  max-height: 90vh;
+  max-height: min(90vh, 100%);
   overflow: auto;
+  margin-top: auto;
+  margin-bottom: auto;
+  flex-shrink: 0;
 }
 
 .modal-company {
   max-width: 720px;
   width: 100%;
+  /* Formulaire long : collé en haut du viewport, pas coupé par le centrage. */
+  margin-top: 1.25rem;
+  margin-bottom: 1.25rem;
+  max-height: none;
 }
 
 .modal-purchasing {

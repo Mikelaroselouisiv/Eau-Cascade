@@ -46,7 +46,15 @@ function setMainWindow(win) {
 }
 
 function isUpdaterEnabled() {
-  return getAppEdition() === 'remote' && !process.env.VITE_DEV_SERVER_URL;
+  const edition = getAppEdition();
+  return (
+    (edition === 'remote' || edition === 'server') &&
+    !process.env.VITE_DEV_SERVER_URL
+  );
+}
+
+function getUpdateFeedUrl() {
+  return getAppEdition() === 'server' ? UPDATE_FEEDS.server : UPDATE_FEEDS.remote;
 }
 
 function initUpdater(win) {
@@ -56,10 +64,7 @@ function initUpdater(win) {
   if (!isUpdaterEnabled()) {
     broadcast({
       state: 'disabled',
-      message:
-        getAppEdition() === 'server'
-          ? 'Mises à jour automatiques réservées à l’édition Remote.'
-          : 'Mises à jour indisponibles en mode développement.',
+      message: 'Mises à jour indisponibles en mode développement.',
     });
     return;
   }
@@ -71,7 +76,7 @@ function initUpdater(win) {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.setFeedURL({
     provider: 'generic',
-    url: UPDATE_FEEDS.remote,
+    url: getUpdateFeedUrl(),
   });
 
   autoUpdater.on('checking-for-update', () => {
@@ -156,10 +161,7 @@ async function checkForUpdatesManual(opts = {}) {
   if (!isUpdaterEnabled()) {
     const status = {
       state: 'disabled',
-      message:
-        getAppEdition() === 'server'
-          ? 'Mises à jour automatiques réservées à l’édition Remote.'
-          : 'Mises à jour indisponibles en mode développement.',
+      message: 'Mises à jour indisponibles en mode développement.',
     };
     broadcast(status);
     return status;

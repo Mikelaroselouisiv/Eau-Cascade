@@ -1,4 +1,4 @@
-/** URL publique GCS pour electron-updater (édition Remote uniquement). */
+/** URLs publiques GCS pour electron-updater (Remote et Server). */
 const GCS_BUCKET = 'eau-cascade-assets';
 
 const UPDATE_FEEDS = {

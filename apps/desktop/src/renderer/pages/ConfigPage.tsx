@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { FormEvent } from 'react';
 import {
   type CompanyCreatePayload,
@@ -1091,7 +1092,7 @@ function CompanyFormModal({
     }
   }
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
         className="modal card modal-company"
@@ -1177,7 +1178,8 @@ function CompanyFormModal({
           <p className="dept-hint dept-embedded">Enregistrez l’entreprise pour ajouter des départements.</p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
