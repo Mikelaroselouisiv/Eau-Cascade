@@ -30,7 +30,7 @@ $ResolvedReleaseDir = if ($ReleaseDir) {
 }
 
 if (-not (Test-Path -LiteralPath $ResolvedReleaseDir)) {
-  Write-Error "Dossier release introuvable: $ResolvedReleaseDir — lancez dist:win:$Edition d'abord."
+  Write-Error "Dossier release introuvable: $ResolvedReleaseDir - lancez dist:win:$Edition d'abord."
 }
 
 if (-not (Get-Command gsutil -ErrorAction SilentlyContinue)) {
@@ -40,7 +40,7 @@ if (-not (Get-Command gsutil -ErrorAction SilentlyContinue)) {
 $dest = "gs://$Bucket/installers/$Edition/"
 $patterns = @('*.exe', 'latest.yml', '*.blockmap')
 
-Write-Host "Upload $ResolvedReleaseDir → $dest"
+Write-Host "Upload $ResolvedReleaseDir -> $dest"
 
 foreach ($pattern in $patterns) {
   $files = Get-ChildItem -LiteralPath $ResolvedReleaseDir -Filter $pattern -File -ErrorAction SilentlyContinue
@@ -53,12 +53,12 @@ foreach ($pattern in $patterns) {
   }
 }
 
-# latest.yml doit être revalidé immédiatement (sinon cache GCS ~1 h → détection retardée).
+# latest.yml doit etre revalide immediatement (sinon cache GCS ~1 h -> detection retardee).
 $latestRemote = "${dest}latest.yml"
-Write-Host "Cache-Control: no-cache sur latest.yml"
-& gsutil setmeta -h "Cache-Control:no-cache,max-age=0" $latestRemote
+Write-Host 'Cache-Control: no-cache sur latest.yml'
+& gsutil setmeta -h 'Cache-Control:no-cache,max-age=0' $latestRemote
 if ($LASTEXITCODE -ne 0) {
-  Write-Warning "Impossible de fixer Cache-Control sur latest.yml (objet absent ?)."
+  Write-Warning 'Impossible de fixer Cache-Control sur latest.yml (objet absent ?).'
 }
 
 Write-Host "Termine. URL publique (Remote updater) : https://storage.googleapis.com/$Bucket/installers/$Edition/"
