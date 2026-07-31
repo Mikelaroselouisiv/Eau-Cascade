@@ -43,7 +43,7 @@ services:
       - .env.server
     environment:
       LOCAL_API_URL: http://backend:3000
-      REMOTE_API_URL: ${REMOTE_API_URL:-http://35.203.0.140}
+      REMOTE_API_URL: ${REMOTE_API_URL:-http://35.203.5.250}
       SYNC_API_KEY: ${SYNC_API_KEY}
       SYNC_INTERVAL_MS: ${SYNC_INTERVAL_MS:-45000}
       SYNC_NODE_ID: ${SYNC_NODE_ID:-local-mother}

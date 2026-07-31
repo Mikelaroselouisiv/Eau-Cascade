@@ -47,9 +47,15 @@ Workflow **`Desktop - release to GCS`** (`.github/workflows/desktop-release-gcp.
 
 - **Remote** : upload `exe` + `latest.yml` + `blockmap` → `gs://eau-cascade-assets/installers/remote/`  
   → les apps Remote détectent la MAJ (démarrage + toutes les 4 h), bannière + « Redémarrer et mettre à jour »
-- **Server** : mêmes artefacts → `gs://eau-cascade-assets/installers/server/` (installateur magasin ; pas d’auto-update Electron côté Server)
-- Cache : le script `upload-desktop-installer.ps1` met `Cache-Control: no-cache` sur `latest.yml`
-- Alternative locale (si CI indisponible) : `npm run dist:win:remote|server` puis `infra/scripts/upload-desktop-installer.ps1 -Edition …` **après** assert GCP Eau Cascade
+- **Remote** : CI GitHub Windows OK (retry intégré pour flakes NSIS). Feed → notifications auto-update.
+- **Server** : le runner GitHub **n’a pas Docker** — buildez en **local** (Docker requis pour les images offline) puis upload :
+  ```powershell
+  cd apps/desktop
+  npm run dist:win:server
+  powershell -ExecutionPolicy Bypass -File ../../infra/scripts/upload-desktop-installer.ps1 -Edition server
+  ```
+- Cache : `upload-desktop-installer.ps1` met `Cache-Control: no-cache` sur `latest.yml`
+- Alternative locale Remote : `npm run dist:win:remote` puis upload `-Edition remote` **après** assert GCP Eau Cascade
 
 ### 5. Vérifications de fin
 

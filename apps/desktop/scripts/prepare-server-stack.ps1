@@ -22,7 +22,7 @@ New-Item -ItemType Directory -Path $ImagesDir -Force | Out-Null
 
 # Injecter SYNC_API_KEY connue (alignée GCP) dans defaults.env pour la machine mère
 $defaults = @(
-  'REMOTE_API_URL=http://35.203.0.140',
+  'REMOTE_API_URL=http://35.203.5.250',
   'SYNC_INTERVAL_MS=45000',
   'GCS_ASSETS_URI=gs://eau-cascade-assets/sync-assets'
 )
@@ -33,9 +33,18 @@ if (Test-Path -LiteralPath $EnvServer) {
 Set-Content -LiteralPath $DefaultsFile -Value ($defaults -join "`n") -Encoding UTF8
 Write-Host "defaults.env mis à jour"
 
-docker info 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$dockerOk = $false
+try {
+  & docker info 1>$null 2>$null
+  if ($LASTEXITCODE -eq 0) { $dockerOk = $true }
+} catch {
+  $dockerOk = $false
+}
+if (-not $dockerOk) {
   Write-Warning 'Docker indisponible — images .tar non exportées. Le build Server nécessite Docker sur la machine de build.'
+  if ($env:GITHUB_ACTIONS -eq 'true') {
+    throw 'Docker requis pour dist:win:server en CI (images offline machine mère). Buildez Server en local ou utilisez un runner avec Docker.'
+  }
   exit 0
 }
 
