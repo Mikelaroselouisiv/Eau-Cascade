@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { BrandLogo } from '../components/BrandLogo';
 import { UpdateBanner } from '../components/UpdateBanner';
+import { UpdateControls } from '../components/UpdateControls';
 import { BRAND_NAME } from '../config/brand';
 import { useAuth } from '../context/AuthContext';
 import { useAppUpdater } from '../hooks/useAppUpdater';
@@ -152,35 +153,16 @@ export function AppLayout() {
             <div className="app-user-email">{user?.phone}</div>
             <div className="app-user-role">{formatRoleLabel(user?.role, user?.roleLabel)}</div>
           </div>
-          {appVersion ? (
-            <div className="app-version-block">
-              <div className="app-version-row">
-                <span className="app-version-label">v{appVersion}</span>
-                {updaterAvailable && status.state !== 'disabled' ? (
-                  status.state === 'downloaded' ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary app-update-check-btn"
-                      onClick={() => void quitAndInstall()}
-                    >
-                      Installer
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn btn-ghost app-update-check-btn"
-                      onClick={() => void onCheckUpdates()}
-                      disabled={updateChecking || status.state === 'downloading'}
-                    >
-                      {updateChecking || status.state === 'checking'
-                        ? 'Vérification…'
-                        : 'Mettre à jour'}
-                    </button>
-                  )
-                ) : null}
-              </div>
-              {checkHint ? <div className="app-version-hint">{checkHint}</div> : null}
-            </div>
+          {updaterAvailable || appVersion ? (
+            <UpdateControls
+              status={status}
+              appVersion={appVersion}
+              checking={updateChecking}
+              hint={checkHint}
+              onCheck={() => void onCheckUpdates()}
+              onInstall={() => void quitAndInstall()}
+              variant="sidebar"
+            />
           ) : null}
           <button
             type="button"

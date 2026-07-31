@@ -6,7 +6,10 @@ import { useAuth } from '../context/AuthContext';
 import { getAuthSetupStatus, getToken } from '../services/api';
 import { BrandLogo } from '../components/BrandLogo';
 import { PasswordField } from '../components/PasswordField';
+import { UpdateBanner } from '../components/UpdateBanner';
+import { UpdateControls } from '../components/UpdateControls';
 import { BRAND_NAME } from '../config/brand';
+import { useAppUpdater } from '../hooks/useAppUpdater';
 
 function setupStatusErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
@@ -43,6 +46,62 @@ export function LoginPage() {
   const [bPassword2, setBPassword2] = useState('');
   const [bFullName, setBFullName] = useState('');
   const [bEmail, setBEmail] = useState('');
+
+  const { available: updaterAvailable, status, appVersion, checkForUpdates, quitAndInstall } =
+    useAppUpdater();
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [checkHint, setCheckHint] = useState('');
+
+  useEffect(() => {
+    setUpdateDismissed(false);
+  }, [status.state, status.version]);
+
+  async function onCheckUpdates() {
+    if (!updaterAvailable || updateChecking) return;
+    setUpdateChecking(true);
+    setUpdateDismissed(false);
+    setCheckHint('');
+    try {
+      const next = await checkForUpdates();
+      if (next?.state === 'not-available') setCheckHint('Déjà à jour');
+      else if (next?.state === 'error') setCheckHint(next.message || 'Erreur');
+    } finally {
+      setUpdateChecking(false);
+    }
+  }
+
+  const showUpdateBanner =
+    updaterAvailable &&
+    !updateDismissed &&
+    (status.state === 'available' ||
+      status.state === 'downloading' ||
+      status.state === 'downloaded' ||
+      status.state === 'error');
+
+  const updateFooter =
+    updaterAvailable || appVersion ? (
+      <div className="login-update-footer">
+        {showUpdateBanner ? (
+          <UpdateBanner
+            status={status}
+            checking={updateChecking}
+            onCheck={() => void onCheckUpdates()}
+            onInstall={() => void quitAndInstall()}
+            onDismiss={() => setUpdateDismissed(true)}
+          />
+        ) : null}
+        <UpdateControls
+          status={status}
+          appVersion={appVersion}
+          checking={updateChecking}
+          hint={checkHint}
+          onCheck={() => void onCheckUpdates()}
+          onInstall={() => void quitAndInstall()}
+          variant="login"
+        />
+      </div>
+    ) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +227,7 @@ export function LoginPage() {
               {loading ? 'Création…' : 'Créer l’administrateur'}
             </button>
           </form>
+          {updateFooter}
         </div>
       </main>
     );
@@ -207,6 +267,7 @@ export function LoginPage() {
             {loading ? 'Connexion…' : 'Se connecter'}
           </button>
         </form>
+        {updateFooter}
       </div>
     </main>
   );

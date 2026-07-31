@@ -243,6 +243,25 @@ select {
   min-width: 0;
 }
 
+.app-version-block--login {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.app-version-block--login .app-version-label,
+.app-version-block--login .app-version-hint {
+  color: #64748b;
+}
+
+.login-update-footer {
+  margin-top: 0.5rem;
+}
+
+.login-update-footer .app-update-banner {
+  margin-bottom: 0.5rem;
+}
+
 .app-version-row {
   display: flex;
   align-items: center;
@@ -267,6 +286,10 @@ select {
   padding: 0.2rem 0.45rem !important;
   min-height: 0 !important;
   white-space: nowrap;
+}
+
+.app-update-progress--inline {
+  margin-top: 0.25rem;
 }
 
 .app-update-banner {

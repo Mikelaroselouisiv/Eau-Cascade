@@ -72,11 +72,19 @@ function initUpdater(win) {
   if (initialized) return;
   initialized = true;
 
+  const feedUrl = getUpdateFeedUrl();
+  const edition = getAppEdition();
+  console.log(`[updater] edition=${edition} feed=${feedUrl}`);
+
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  // Server embarque Docker (~400 Mo) : le diff/blockmap est fragile → téléchargement complet.
+  if (edition === 'server') {
+    autoUpdater.disableDifferentialDownload = true;
+  }
   autoUpdater.setFeedURL({
     provider: 'generic',
-    url: getUpdateFeedUrl(),
+    url: feedUrl,
   });
 
   autoUpdater.on('checking-for-update', () => {
