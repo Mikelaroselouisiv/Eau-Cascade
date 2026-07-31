@@ -1,8 +1,8 @@
 #Requires -Version 5.1
 <#
-  Prépare server-stack/ avant dist:win:server :
-  - exporte images Docker backend + sync-agent (machine vierge = pas de pull GCP)
-  - injecte SYNC_API_KEY depuis infra/docker/.env.server si présent
+  Prepare server-stack/ before dist:win:server:
+  - export Docker images backend + sync-agent (offline mother machine)
+  - inject SYNC_API_KEY from infra/docker/.env.server into defaults.env (bundled in exe)
 #>
 $ErrorActionPreference = 'Stop'
 
@@ -20,18 +20,31 @@ $SyncAgentContext = Join-Path $RepoRoot 'apps\sync-agent'
 
 New-Item -ItemType Directory -Path $ImagesDir -Force | Out-Null
 
-# Injecter SYNC_API_KEY connue (alignée GCP) dans defaults.env pour la machine mère
+function Test-IsPlaceholderKey([string] $Value) {
+  if ([string]::IsNullOrWhiteSpace($Value)) { return $true }
+  if ($Value.Length -lt 24) { return $true }
+  return $Value -match 'remplace|change.?me|your.?key|xxx+|TODO|INSERT|example|placeholder'
+}
+
 $defaults = @(
   'REMOTE_API_URL=http://35.203.5.250',
   'SYNC_INTERVAL_MS=45000',
   'GCS_ASSETS_URI=gs://eau-cascade-assets/sync-assets'
 )
-if (Test-Path -LiteralPath $EnvServer) {
-  $syncLine = Get-Content $EnvServer | Where-Object { $_ -match '^\s*SYNC_API_KEY=' } | Select-Object -First 1
-  if ($syncLine) { $defaults += $syncLine.Trim() }
+if (-not (Test-Path -LiteralPath $EnvServer)) {
+  throw 'infra/docker/.env.server manquant. Lancez d''abord: infra/scripts/gcp-provision-sync.ps1'
 }
+$syncLine = Get-Content $EnvServer | Where-Object { $_ -match '^\s*SYNC_API_KEY=\S+' } | Select-Object -First 1
+if (-not $syncLine) {
+  throw 'SYNC_API_KEY absente de infra/docker/.env.server (requis pour sync Remote).'
+}
+$syncKey = ($syncLine -split '=', 2)[1].Trim().Trim('"')
+if (Test-IsPlaceholderKey $syncKey) {
+  throw 'SYNC_API_KEY placeholder dans .env.server. Relancez: infra/scripts/gcp-provision-sync.ps1'
+}
+$defaults += "SYNC_API_KEY=$syncKey"
 Set-Content -LiteralPath $DefaultsFile -Value ($defaults -join "`n") -Encoding UTF8
-Write-Host "defaults.env mis à jour"
+Write-Host 'defaults.env pret - SYNC_API_KEY sera dans l''exe Server (extraResources)'
 
 $dockerOk = $false
 try {
@@ -41,30 +54,30 @@ try {
   $dockerOk = $false
 }
 if (-not $dockerOk) {
-  Write-Warning 'Docker indisponible — images .tar non exportées. Le build Server nécessite Docker sur la machine de build.'
+  Write-Warning 'Docker indisponible - images .tar non exportees. Le build Server necessite Docker.'
   if ($env:GITHUB_ACTIONS -eq 'true') {
-    throw 'Docker requis pour dist:win:server en CI (images offline machine mère). Buildez Server en local ou utilisez un runner avec Docker.'
+    throw 'Docker requis pour dist:win:server en CI (images offline machine mere).'
   }
   exit 0
 }
 
 Write-Host "Pull backend $BackendImage ..."
 docker pull $BackendImage
-if ($LASTEXITCODE -ne 0) { throw 'docker pull backend a échoué' }
+if ($LASTEXITCODE -ne 0) { throw 'docker pull backend a echoue' }
 docker tag $BackendImage $BackendBundle
 docker save -o (Join-Path $ImagesDir 'backend.tar') $BackendBundle
-Write-Host 'backend.tar exporté'
+Write-Host 'backend.tar exporte'
 
-Write-Host 'Pull postgres:16 (offline machine mère)...'
+Write-Host 'Pull postgres:16 (offline machine mere)...'
 docker pull postgres:16
-if ($LASTEXITCODE -ne 0) { throw 'docker pull postgres:16 a échoué' }
+if ($LASTEXITCODE -ne 0) { throw 'docker pull postgres:16 a echoue' }
 docker save -o (Join-Path $ImagesDir 'postgres.tar') postgres:16
-Write-Host 'postgres.tar exporté'
+Write-Host 'postgres.tar exporte'
 
 Write-Host 'Build sync-agent...'
 docker build -t $SyncAgentBundle $SyncAgentContext
-if ($LASTEXITCODE -ne 0) { throw 'docker build sync-agent a échoué' }
+if ($LASTEXITCODE -ne 0) { throw 'docker build sync-agent a echoue' }
 docker save -o (Join-Path $ImagesDir 'sync-agent.tar') $SyncAgentBundle
-Write-Host 'sync-agent.tar exporté'
+Write-Host 'sync-agent.tar exporte'
 
-Write-Host 'server-stack prêt pour dist:win:server'
+Write-Host 'server-stack pret pour dist:win:server'

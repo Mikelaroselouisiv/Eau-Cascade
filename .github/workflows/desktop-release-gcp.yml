@@ -2,6 +2,7 @@
 # EAU CASCADE ONLY — never point this workflow at Israel or Frères Baziles.
 #
 # Secrets: GCP_PROJECT_ID, GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT
+# Server builds also require: SYNC_API_KEY (same value as GCP VM .env.prod)
 # Variables: GCP_REGION
 
 name: Desktop - release to GCS
@@ -50,6 +51,22 @@ jobs:
           else
             echo "edition=remote" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Inject SYNC_API_KEY for Server installer
+        if: steps.meta.outputs.edition == 'server'
+        shell: pwsh
+        env:
+          SYNC_API_KEY: ${{ secrets.SYNC_API_KEY }}
+        run: |
+          $key = $env:SYNC_API_KEY
+          if ([string]::IsNullOrWhiteSpace($key) -or $key.Length -lt 24 -or $key -match 'remplace|change.?me|placeholder') {
+            throw 'Secret GitHub SYNC_API_KEY manquant/invalide. Alignez-le avec GCP (.env.prod) via gcp-provision-sync.ps1.'
+          }
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'infra/docker'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $envPath = Join-Path $dir '.env.server'
+          Set-Content -LiteralPath $envPath -Value "SYNC_API_KEY=$key" -Encoding UTF8
+          Write-Host 'infra/docker/.env.server prêt pour prepare-server-stack (clé embarquée dans l''exe)'
 
       - name: Build Windows installer
         working-directory: apps/desktop

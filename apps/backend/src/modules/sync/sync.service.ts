@@ -451,6 +451,7 @@ export class SyncService {
       ProductRecipe: this.prisma.productRecipe as unknown as Delegate,
       RecipeComponent: this.prisma.recipeComponent as unknown as Delegate,
       User: this.prisma.user as unknown as Delegate,
+      AppRole: this.prisma.appRole as unknown as Delegate,
       ExpenseCategory: this.prisma.expenseCategory as unknown as Delegate,
       CreditCustomer: this.prisma.creditCustomer as unknown as Delegate,
       Sale: this.prisma.sale as unknown as Delegate,

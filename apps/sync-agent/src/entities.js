@@ -10,6 +10,7 @@ export const ENTITY_ORDER = [
   'PackagingUnit',
   'Store',
   'Register',
+  // AppRole: seulement quand local ET GCP exposent l'entité via /sync/entities
   'User',
   'ExpenseCategory',
   'CreditCustomer',

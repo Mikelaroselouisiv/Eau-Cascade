@@ -2,7 +2,7 @@ import { createApiClient, replicateDirection } from './replicate.js';
 import { resolveDefaultAssetsDir, syncAssets } from './assets.js';
 
 const LOCAL_API_URL = process.env.LOCAL_API_URL || 'http://127.0.0.1:3000';
-const REMOTE_API_URL = process.env.REMOTE_API_URL || 'http://35.203.0.140';
+const REMOTE_API_URL = process.env.REMOTE_API_URL || 'http://35.203.5.250';
 const SYNC_API_KEY = process.env.SYNC_API_KEY || '';
 const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS || 45_000);
 const NODE_ID = process.env.SYNC_NODE_ID || 'local-mother';

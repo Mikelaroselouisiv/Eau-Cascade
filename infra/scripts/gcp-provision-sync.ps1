@@ -2,6 +2,7 @@
 <#
 .SYNOPSIS
   Aligne SYNC_API_KEY (local Server + GCP) et redéploie la stack GCP.
+  Remplace les placeholders (remplace_par_…) par une vraie clé.
 #>
 param(
   [string] $MonorepoRoot = '',
@@ -9,7 +10,8 @@ param(
   [string] $VmZone = 'northamerica-northeast1-a',
   [string] $ProjectId = 'eau-cascade',
   [string] $RemoteDir = '/opt/pos',
-  [switch] $SkipDeploy
+  [switch] $SkipDeploy,
+  [switch] $ForceNewKey
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,10 +23,16 @@ $RepoRoot = if ($MonorepoRoot) {
   (Resolve-Path -LiteralPath (Join-Path $ScriptDir '..\..')).Path
 }
 
+$AssertScript = Join-Path $ScriptDir 'assert-eau-cascade-gcp.ps1'
+if (Test-Path -LiteralPath $AssertScript) {
+  & $AssertScript
+}
+
 $DockerDir = Join-Path $RepoRoot 'infra\docker'
 $EnvExample = Join-Path $DockerDir '.env.server.example'
 $EnvServer = Join-Path $DockerDir '.env.server'
 $ComposeGcp = Join-Path $DockerDir 'docker-compose.gcp.yml'
+$DefaultsFile = Join-Path $RepoRoot 'apps\desktop\server-stack\defaults.env'
 
 function New-RandomSecret {
   param([int] $ByteLength = 32)
@@ -33,25 +41,66 @@ function New-RandomSecret {
   -join ($bytes | ForEach-Object { '{0:x2}' -f $_ })
 }
 
-function Ensure-EnvKey {
-  param([string] $FilePath, [string] $Key, [string] $DefaultValue)
+function Test-IsPlaceholderKey([string] $Value) {
+  if ([string]::IsNullOrWhiteSpace($Value)) { return $true }
+  if ($Value.Length -lt 24) { return $true }
+  return $Value -match 'remplace|change.?me|your.?key|xxx+|TODO|INSERT|example|placeholder'
+}
+
+function Set-EnvKey {
+  param([string] $FilePath, [string] $Key, [string] $Value)
   $lines = if (Test-Path $FilePath) { @(Get-Content -LiteralPath $FilePath) } else { @() }
   $pattern = "^\s*$([regex]::Escape($Key))\s*="
-  $existing = $lines | Where-Object { $_ -match $pattern } | Select-Object -First 1
-  if ($existing) {
-    return ($existing -split '=', 2)[1].Trim().Trim('"')
+  $found = $false
+  $out = foreach ($line in $lines) {
+    if ($line -match $pattern) {
+      $found = $true
+      "$Key=$Value"
+    } else {
+      $line
+    }
   }
-  $lines += "$Key=$DefaultValue"
-  Set-Content -LiteralPath $FilePath -Value ($lines -join "`n") -Encoding UTF8
-  return $DefaultValue
+  if (-not $found) { $out += "$Key=$Value" }
+  Set-Content -LiteralPath $FilePath -Value ($out -join "`n") -Encoding UTF8
+}
+
+function Get-EnvKey {
+  param([string] $FilePath, [string] $Key)
+  if (-not (Test-Path $FilePath)) { return $null }
+  $line = Get-Content -LiteralPath $FilePath | Where-Object { $_ -match "^\s*$([regex]::Escape($Key))\s*=" } | Select-Object -First 1
+  if (-not $line) { return $null }
+  return ($line -split '=', 2)[1].Trim().Trim('"')
 }
 
 Write-Host '==> SYNC_API_KEY locale (.env.server)' -ForegroundColor Cyan
 if (-not (Test-Path $EnvServer)) {
+  if (-not (Test-Path $EnvExample)) {
+    throw "Fichier manquant: $EnvExample"
+  }
   Copy-Item -LiteralPath $EnvExample -Destination $EnvServer
 }
-$syncKey = Ensure-EnvKey -FilePath $EnvServer -Key 'SYNC_API_KEY' -DefaultValue (New-RandomSecret)
-Write-Host 'SYNC_API_KEY prête dans .env.server'
+
+$existing = Get-EnvKey -FilePath $EnvServer -Key 'SYNC_API_KEY'
+if ($ForceNewKey -or (Test-IsPlaceholderKey $existing)) {
+  $syncKey = New-RandomSecret -ByteLength 32
+  Set-EnvKey -FilePath $EnvServer -Key 'SYNC_API_KEY' -Value $syncKey
+  Write-Host 'Nouvelle SYNC_API_KEY generee (placeholder / ForceNewKey)'
+} else {
+  $syncKey = $existing
+  Write-Host 'SYNC_API_KEY existante reutilisee'
+}
+
+# Embarquer immédiatement dans defaults.env (installateur Server)
+$defaults = @(
+  'REMOTE_API_URL=http://35.203.5.250',
+  'SYNC_INTERVAL_MS=45000',
+  'GCS_ASSETS_URI=gs://eau-cascade-assets/sync-assets',
+  "SYNC_API_KEY=$syncKey"
+)
+$defaultsDir = Split-Path -Parent $DefaultsFile
+New-Item -ItemType Directory -Path $defaultsDir -Force | Out-Null
+Set-Content -LiteralPath $DefaultsFile -Value ($defaults -join "`n") -Encoding UTF8
+Write-Host "defaults.env prêt pour dist:win:server ($DefaultsFile)"
 
 Write-Host '==> SYNC_API_KEY GCP' -ForegroundColor Cyan
 $remoteSh = @"
@@ -77,7 +126,6 @@ Write-Host 'SYNC_API_KEY alignée sur la VM GCP'
 if ($SkipDeploy) { exit 0 }
 
 Write-Host '==> Déploiement GCP' -ForegroundColor Cyan
-# Avoid leftover root-owned /tmp files blocking pscp overwrite
 gcloud compute ssh $VmName --zone=$VmZone --project=$ProjectId --command="sudo rm -f /tmp/docker-compose.gcp.yml /tmp/pos-deploy.sh"
 $remoteCompose = '/tmp/docker-compose.gcp.yml'
 gcloud compute scp $ComposeGcp "${VmName}:${remoteCompose}" --zone=$VmZone --project=$ProjectId
@@ -91,7 +139,6 @@ cd "$REMOTE_DIR"
 if command -v gcloud >/dev/null 2>&1; then
   gcloud auth configure-docker northamerica-northeast1-docker.pkg.dev --quiet || true
 fi
-# Prefer Compose V2 — legacy docker-compose 1.29 hits ContainerConfig KeyError
 if docker compose version >/dev/null 2>&1; then
   COMPOSE=(docker compose)
 elif command -v docker-compose >/dev/null 2>&1; then
@@ -112,4 +159,4 @@ gcloud compute scp $deploySh "${VmName}:/tmp/pos-deploy.sh" --zone=$VmZone --pro
 gcloud compute ssh $VmName --zone=$VmZone --project=$ProjectId --command="sudo bash /tmp/pos-deploy.sh && sudo rm -f /tmp/pos-deploy.sh"
 Remove-Item -LiteralPath $deploySh -Force -ErrorAction SilentlyContinue
 
-Write-Host '==> Terminé' -ForegroundColor Green
+Write-Host '==> Terminé — rebuild Server (npm run dist:win:server) pour embarquer la clé dans l''exe' -ForegroundColor Green
