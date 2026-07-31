@@ -4,8 +4,8 @@
   Publie les artefacts desktop (exe, latest.yml, blockmap) vers GCS.
 
 .PARAMETER Edition
-  server → gs://eau-cascade-assets/installers/server/
-  remote → gs://eau-cascade-assets/installers/remote/
+  server -> gs://eau-cascade-assets/installers/server/
+  remote -> gs://eau-cascade-assets/installers/remote/
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File infra/scripts/upload-desktop-installer.ps1 -Edition remote
@@ -37,23 +37,45 @@ if (-not (Get-Command gsutil -ErrorAction SilentlyContinue)) {
   Write-Error 'gsutil requis (Google Cloud SDK). Installez gcloud puis relancez.'
 }
 
+$editionToken = if ($Edition -eq 'remote') { 'Remote' } else { 'Server' }
 $dest = "gs://$Bucket/installers/$Edition/"
-$patterns = @('*.exe', 'latest.yml', '*.blockmap')
 
-Write-Host "Upload $ResolvedReleaseDir -> $dest"
+$latest = Join-Path $ResolvedReleaseDir 'latest.yml'
+if (-not (Test-Path -LiteralPath $latest)) {
+  Write-Error "latest.yml introuvable dans $ResolvedReleaseDir - lancez dist:win:$Edition d'abord."
+}
+$latestText = Get-Content -LiteralPath $latest -Raw
+if ($latestText -notmatch [regex]::Escape("POS-Eau-Cascade-$editionToken-")) {
+  Write-Error "latest.yml ne correspond pas a l'edition $Edition. Relancez dist:win:$Edition avant upload."
+}
+if ($latestText -notmatch "path:\s*(POS-Eau-Cascade-$editionToken-[\d.]+\.exe)") {
+  Write-Error "Impossible de lire le path exe dans latest.yml"
+}
+$exeName = $Matches[1]
+$exePath = Join-Path $ResolvedReleaseDir $exeName
+$blockmapPath = "$exePath.blockmap"
+if (-not (Test-Path -LiteralPath $exePath)) {
+  Write-Error "Exe manquant: $exePath"
+}
 
-foreach ($pattern in $patterns) {
-  $files = Get-ChildItem -LiteralPath $ResolvedReleaseDir -Filter $pattern -File -ErrorAction SilentlyContinue
-  foreach ($file in $files) {
-    Write-Host "  -> $($file.Name)"
-    & gsutil cp $file.FullName $dest
-    if ($LASTEXITCODE -ne 0) {
-      throw "gsutil cp a echoue pour $($file.Name)"
-    }
+# Only the version referenced by latest.yml (release/ may contain older builds + both editions).
+$files = @(
+  (Get-Item -LiteralPath $exePath),
+  (Get-Item -LiteralPath $latest)
+)
+if (Test-Path -LiteralPath $blockmapPath) {
+  $files += Get-Item -LiteralPath $blockmapPath
+}
+
+Write-Host "Upload $Edition ($editionToken) -> $dest"
+foreach ($file in $files) {
+  Write-Host "  -> $($file.Name)"
+  & gsutil cp $file.FullName $dest
+  if ($LASTEXITCODE -ne 0) {
+    throw "gsutil cp a echoue pour $($file.Name)"
   }
 }
 
-# latest.yml doit etre revalide immediatement (sinon cache GCS ~1 h -> detection retardee).
 $latestRemote = "${dest}latest.yml"
 Write-Host 'Cache-Control: no-cache sur latest.yml'
 & gsutil setmeta -h 'Cache-Control:no-cache,max-age=0' $latestRemote
@@ -61,4 +83,4 @@ if ($LASTEXITCODE -ne 0) {
   Write-Warning 'Impossible de fixer Cache-Control sur latest.yml (objet absent ?).'
 }
 
-Write-Host "Termine. URL publique (Remote updater) : https://storage.googleapis.com/$Bucket/installers/$Edition/"
+Write-Host "Termine. URL publique: https://storage.googleapis.com/$Bucket/installers/$Edition/"
