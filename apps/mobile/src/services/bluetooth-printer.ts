@@ -21,25 +21,37 @@ export interface SavedPrinter {
 }
 
 export async function requestBluetoothPermissions(): Promise<boolean> {
-  if (Platform.OS !== 'android') {
-    if (!isThermalPrinterNativeAvailable()) return false;
-    try {
-      return await getNativePrinter().requestPermissions();
-    } catch {
-      return false;
-    }
+  if (!isThermalPrinterNativeAvailable()) {
+    throw new Error(
+      "Module imprimante absent. Reconstruisez l’application native (pas Expo Go).",
+    );
   }
 
-  const permissions =
-    typeof Platform.Version === 'number' && Platform.Version >= 31
+  if (Platform.OS !== 'android') {
+    return getNativePrinter().requestPermissions();
+  }
+
+  const api = typeof Platform.Version === 'number' ? Platform.Version : 0;
+  const needed =
+    api >= 31
       ? [
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-        ]
-      : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
+        ].filter(Boolean)
+      : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION].filter(Boolean);
 
-  const granted = await PermissionsAndroid.requestMultiple(permissions);
-  return Object.values(granted).every((v) => v === PermissionsAndroid.RESULTS.GRANTED);
+  if (needed.length === 0) {
+    return getNativePrinter().requestPermissions();
+  }
+
+  const granted = await PermissionsAndroid.requestMultiple(needed);
+  const ok = needed.every((key) => granted[key] === PermissionsAndroid.RESULTS.GRANTED);
+  if (!ok) {
+    throw new Error(
+      'Bluetooth refusé. Android : Réglages → Applications → POS Eau Cascade → Autorisations → Appareils à proximité.',
+    );
+  }
+  return getNativePrinter().requestPermissions();
 }
 
 export function subscribePrinterScan(
@@ -84,7 +96,7 @@ export async function getSavedPrinter(): Promise<SavedPrinter | null> {
   return {
     address: row.device_address,
     name: row.device_name,
-    paperWidth: row.paper_width === 80 ? 80 : 58,
+    paperWidth: 80,
     transport: row.transport === 'ble' ? 'ble' : 'classic',
   };
 }
@@ -94,21 +106,17 @@ export async function saveSelectedPrinter(device: {
   name: string | null;
   transport?: PrinterTransport;
 }): Promise<void> {
-  const existing = await getSavedPrinter();
   await getDb().runAsync(
     'INSERT OR REPLACE INTO printer_settings (id, device_address, device_name, paper_width, transport) VALUES (1, ?, ?, ?, ?)',
     device.address,
     device.name,
-    existing?.paperWidth ?? 58,
+    80,
     device.transport ?? getPlatformTransport(),
   );
 }
 
 export async function getLocalPaperWidth(): Promise<58 | 80> {
-  const row = await getDb().getFirstAsync<{ paper_width: number }>(
-    'SELECT paper_width FROM printer_settings WHERE id = 1',
-  );
-  return row?.paper_width === 80 ? 80 : 58;
+  return 80;
 }
 
 export async function savePaperWidth(paperWidth: 58 | 80): Promise<void> {
@@ -130,7 +138,7 @@ export async function clearSavedPrinter(): Promise<void> {
   const existing = await getSavedPrinter();
   await getDb().runAsync(
     'INSERT OR REPLACE INTO printer_settings (id, device_address, device_name, paper_width, transport) VALUES (1, NULL, NULL, ?, ?)',
-    existing?.paperWidth ?? 58,
+    80,
     existing?.transport ?? getPlatformTransport(),
   );
 }
@@ -140,7 +148,7 @@ export async function printReceipt(saleData: SaleReceiptData): Promise<void> {
   const saved = await getSavedPrinter();
   if (!saved) throw new Error('Aucune imprimante Bluetooth configurée');
 
-  const payload = await buildEscPosPayload({ ...saleData, paperWidth: saved.paperWidth });
+  const payload = await buildEscPosPayload({ ...saleData, paperWidth: 80 });
   const base64 = Buffer.from(payload).toString('base64');
   await getNativePrinter().print(saved.address, base64);
 }

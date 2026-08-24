@@ -2,8 +2,8 @@ import { Buffer } from 'buffer';
 import jpeg from 'jpeg-js';
 import UPNG from 'upng-js';
 
-const RASTER_DOTS_58 = 384;
-const RASTER_DOTS_80 = 576;
+/** 80 mm papier (V-WRP-A1) : zone utile ~72 mm. 576 pts casse souvent GS v 0 ; 512 reste lisible. */
+const RASTER_DOTS_80 = 512;
 const MAX_HEIGHT = 192;
 
 type RgbaImage = { width: number; height: number; data: Uint8Array };
@@ -94,7 +94,7 @@ function toEscPosRaster(img: RgbaImage): Uint8Array {
 /** Bitmap ESC/POS (GS v 0) depuis une data URL ou une URL http(s). */
 export async function escPosRasterFromUrl(
   url: string | null | undefined,
-  paperWidth: 58 | 80,
+  _paperWidth?: 58 | 80,
 ): Promise<Uint8Array | null> {
   if (!url?.trim()) return null;
   const bytes = await loadImageBytes(url);
@@ -102,7 +102,7 @@ export async function escPosRasterFromUrl(
   const decoded = decodeImage(bytes);
   if (!decoded) return null;
 
-  const maxDots = paperWidth === 80 ? RASTER_DOTS_80 : RASTER_DOTS_58;
+  const maxDots = RASTER_DOTS_80;
   let targetW = Math.min(maxDots, decoded.width);
   let targetH = Math.max(1, Math.round((decoded.height * targetW) / decoded.width));
   if (targetH > MAX_HEIGHT) {

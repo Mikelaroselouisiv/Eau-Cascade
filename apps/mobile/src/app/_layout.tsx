@@ -3,6 +3,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 
 import { AndroidUpdatePrompt } from '@/components/AndroidUpdatePrompt';
+import { WaterBackground } from '@/components/WaterBackground';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { onReconnect } from '@/services/net';
 import { syncSalesQueue } from '@/services/offline-queue';
@@ -15,7 +16,7 @@ const LightTheme = {
   colors: {
     ...DefaultTheme.colors,
     primary: '#0F4C81',
-    background: '#E8F4F2',
+    background: 'transparent',
     card: '#FFFFFF',
     text: '#0A2540',
     border: '#C5DDE0',
@@ -43,7 +44,7 @@ function RootNavigator() {
   return (
     <>
       <AndroidUpdatePrompt />
-      <Stack screenOptions={{ headerShown: false }}>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
         <Stack.Screen name="login" />
         <Stack.Screen name="(app)" />
       </Stack>
@@ -55,7 +56,9 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={LightTheme}>
       <AuthProvider>
-        <RootNavigator />
+        <WaterBackground>
+          <RootNavigator />
+        </WaterBackground>
       </AuthProvider>
     </ThemeProvider>
   );

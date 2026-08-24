@@ -29,7 +29,7 @@ function AppStack() {
           const title = SECTION_TITLES[root] ?? SECTION_TITLES[route.name] ?? 'POS';
           return {
             header: () => <AppHeader title={title} />,
-            contentStyle: { backgroundColor: BrandColors.bg },
+            contentStyle: { backgroundColor: 'transparent' },
             animation: 'fade',
           };
         }}>
@@ -57,11 +57,11 @@ export default function AppLayout() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BrandColors.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   loading: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: BrandColors.bg,
+    backgroundColor: 'transparent',
   },
 });

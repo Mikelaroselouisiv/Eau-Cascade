@@ -80,7 +80,7 @@ export async function buildSaleReceiptData(params: {
     total: params.total,
     paymentMode: params.paymentMode,
     receiptFooterText: printer?.receiptFooterText,
-    paperWidth: printer?.paperWidth === 80 ? 80 : 58,
+    paperWidth: 80,
     autoCut: printer?.autoCut,
   };
 }

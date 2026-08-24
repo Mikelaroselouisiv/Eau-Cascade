@@ -61,26 +61,26 @@ export function Screen({
     keyboardOffset ??
     (Platform.OS === 'ios' ? Math.max(insets.top > 50 ? 8 : 0, 0) : 0);
 
+  const useWater = backgroundColor === BrandColors.bg;
+  const fillColor = useWater ? 'transparent' : backgroundColor;
   const body = (
-    <SafeAreaView edges={resolved} style={[styles.flex, { backgroundColor }, style]}>
+    <SafeAreaView edges={resolved} style={[styles.flex, { backgroundColor: fillColor }, style]}>
       {children}
     </SafeAreaView>
   );
 
-  if (!keyboard) {
-    return <View style={[styles.flex, { backgroundColor }]}>{body}</View>;
-  }
-
-  return (
-    <View style={[styles.flex, { backgroundColor }]}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={offset}>
-        {body}
-      </KeyboardAvoidingView>
-    </View>
+  const framed = keyboard ? (
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={offset}>
+      {body}
+    </KeyboardAvoidingView>
+  ) : (
+    body
   );
+
+  return <View style={[styles.flex, { backgroundColor: fillColor }]}>{framed}</View>;
 }
 
 const styles = StyleSheet.create({

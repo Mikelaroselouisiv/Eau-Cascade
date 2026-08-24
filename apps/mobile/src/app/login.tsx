@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Redirect } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -21,6 +22,7 @@ export default function LoginScreen() {
   const { user, loading, login } = useAuth();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,11 +60,6 @@ export default function LoginScreen() {
 
   return (
     <Screen edges="full" keyboard backgroundColor={BrandColors.bg}>
-      <View style={styles.atmosphere} pointerEvents="none">
-        <View style={styles.glowTop} />
-        <View style={styles.glowBottom} />
-      </View>
-
       <AppScrollView contentStyle={styles.scrollContent}>
         <View style={styles.card}>
           <View style={styles.brand}>
@@ -81,16 +78,32 @@ export default function LoginScreen() {
             value={phone}
             onChangeText={setPhone}
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Mot de passe"
-            placeholderTextColor={BrandColors.textMuted}
-            secureTextEntry
-            returnKeyType="done"
-            onSubmitEditing={handleSubmit}
-            value={password}
-            onChangeText={setPassword}
-          />
+          <View style={styles.passwordRow}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Mot de passe"
+              placeholderTextColor={BrandColors.textMuted}
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="done"
+              onSubmitEditing={handleSubmit}
+              value={password}
+              onChangeText={setPassword}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+              hitSlop={8}
+              onPress={() => setShowPassword((v) => !v)}
+              style={({ pressed }) => [styles.eyeBtn, pressed && styles.eyeBtnPressed]}>
+              <Ionicons
+                name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                size={22}
+                color={BrandColors.textMuted}
+              />
+            </Pressable>
+          </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -119,27 +132,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  atmosphere: {
-    ...StyleSheet.absoluteFill,
-  },
-  glowTop: {
-    position: 'absolute',
-    top: -60,
-    left: -40,
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    backgroundColor: 'rgba(255, 140, 0, 0.14)',
-  },
-  glowBottom: {
-    position: 'absolute',
-    right: -70,
-    bottom: 80,
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    backgroundColor: 'rgba(230, 126, 0, 0.1)',
   },
   scrollContent: {
     flexGrow: 1,
@@ -186,6 +178,27 @@ const styles = StyleSheet.create({
     color: BrandColors.text,
     backgroundColor: BrandColors.surfaceSoft,
   },
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    borderRadius: 12,
+    backgroundColor: BrandColors.surfaceSoft,
+    paddingRight: 4,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: BrandColors.text,
+  },
+  eyeBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  eyeBtnPressed: { opacity: 0.6 },
   error: { color: BrandColors.danger, fontSize: 14 },
   button: {
     backgroundColor: BrandColors.primary,

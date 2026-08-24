@@ -45,7 +45,7 @@ export const MENU_ITEMS: MenuItem[] = [
     key: 'deliveries',
     label: 'Livraisons',
     href: '/(app)/deliveries',
-    icon: 'bicycle-outline',
+    icon: 'bag-check-outline',
     roles: ['ADMIN', 'MANAGER', 'CASHIER', 'LIVREUR', 'ACCOUNTANT'],
     permission: 'deliveries.view',
   },

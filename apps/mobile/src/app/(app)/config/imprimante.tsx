@@ -10,11 +10,9 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import {
   clearSavedPrinter,
-  getLocalPaperWidth,
   getSavedPrinter,
   printReceipt,
   requestBluetoothPermissions,
-  savePaperWidth,
   saveSelectedPrinter,
   startPrinterScan,
   stopPrinterScan,
@@ -32,14 +30,12 @@ export default function PrinterSettingsScreen() {
 
   const [devices, setDevices] = useState<ThermalPrinterDevice[]>([]);
   const [saved, setSaved] = useState<SavedPrinter | null>(null);
-  const [paperWidth, setPaperWidthState] = useState<58 | 80>(58);
   const [scanning, setScanning] = useState(false);
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
   const refreshSaved = useCallback(() => {
     getSavedPrinter().then(setSaved).catch(() => undefined);
-    getLocalPaperWidth().then(setPaperWidthState).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -78,7 +74,7 @@ export default function PrinterSettingsScreen() {
       const granted = await requestBluetoothPermissions();
       if (!granted) {
         setScanning(false);
-        setStatus('Permissions Bluetooth refusées');
+        setStatus('Bluetooth non prêt. Activez-le et autorisez l’app.');
         return;
       }
       await startPrinterScan(SCAN_MS);
@@ -114,16 +110,6 @@ export default function PrinterSettingsScreen() {
     });
     refreshSaved();
     setStatus(`Imprimante enregistrée : ${device.name ?? device.id}`);
-  }
-
-  async function setPaperWidth(width: 58 | 80) {
-    setPaperWidthState(width);
-    try {
-      await savePaperWidth(width);
-      setStatus(`Largeur papier : ${width} mm`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Impossible d’enregistrer la largeur papier');
-    }
   }
 
   async function forgetPrinter() {
@@ -179,21 +165,9 @@ export default function PrinterSettingsScreen() {
           ) : null}
         </View>
 
-        <View style={styles.section}>
-          <ThemedText type="smallBold" style={styles.sectionTitle}>
-            Largeur papier
-          </ThemedText>
-          <View style={styles.row}>
-            {([58, 80] as const).map((width) => (
-              <Pressable
-                key={width}
-                onPress={() => setPaperWidth(width)}
-                style={[styles.widthButton, paperWidth === width && styles.widthButtonActive]}>
-                <ThemedText>{width}mm</ThemedText>
-              </Pressable>
-            ))}
-          </View>
-        </View>
+        <ThemedText type="small" themeColor="textSecondary">
+          Impression 80 mm (largeur de l’imprimante V-WRP-A1). Pas de choix 58/80.
+        </ThemedText>
 
         <ThemedText type="small" themeColor="textSecondary">
           {Platform.OS === 'ios'
@@ -252,20 +226,6 @@ const styles = StyleSheet.create({
   content: { gap: Spacing.three, paddingBottom: Spacing.six },
   status: { padding: Spacing.two, borderRadius: Spacing.two },
   section: { gap: Spacing.one },
-  sectionTitle: { marginBottom: Spacing.one },
-  row: { flexDirection: 'row', gap: Spacing.two },
-  widthButton: {
-    flex: 1,
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.two,
-    borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-    alignItems: 'center',
-  },
-  widthButtonActive: {
-    backgroundColor: BrandColors.primarySoft,
-    borderColor: BrandColors.primary,
-  },
   button: {
     backgroundColor: BrandColors.primary,
     paddingVertical: Spacing.three,

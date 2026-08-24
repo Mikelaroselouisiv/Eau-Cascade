@@ -1,7 +1,31 @@
 import Constants from 'expo-constants';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as IntentLauncher from 'expo-intent-launcher';
 import { Platform } from 'react-native';
+
+type FileSystemModule = typeof import('expo-file-system/legacy');
+type IntentLauncherModule = typeof import('expo-intent-launcher');
+
+function loadFileSystem(): FileSystemModule {
+  try {
+    // Chargé à la demande : un ancien APK/dev client n’a pas toujours le natif.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-file-system/legacy') as FileSystemModule;
+  } catch {
+    throw new Error(
+      'Modules natifs de mise à jour absents. Réinstallez l’application (npx expo run:android).',
+    );
+  }
+}
+
+function loadIntentLauncher(): IntentLauncherModule {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-intent-launcher') as IntentLauncherModule;
+  } catch {
+    throw new Error(
+      'Modules natifs de mise à jour absents. Réinstallez l’application (npx expo run:android).',
+    );
+  }
+}
 
 const UPDATE_BASE_URL =
   'https://storage.googleapis.com/eau-cascade-assets/installers/mobile/android';
@@ -81,6 +105,7 @@ function androidPackageName(): string {
 }
 
 function localApkUri(): string {
+  const FileSystem = loadFileSystem();
   const cache = FileSystem.cacheDirectory;
   if (!cache) throw new Error('Stockage local indisponible');
   return `${cache}${LOCAL_APK_NAME}`;
@@ -155,12 +180,15 @@ export function isUnknownSourcesError(err: unknown): boolean {
 
 export async function openUnknownSourcesSettings(): Promise<void> {
   if (Platform.OS !== 'android') return;
+  const IntentLauncher = loadIntentLauncher();
   await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.MANAGE_UNKNOWN_APP_SOURCES, {
     data: `package:${androidPackageName()}`,
   });
 }
 
 export async function installLocalAndroidApk(): Promise<void> {
+  const FileSystem = loadFileSystem();
+  const IntentLauncher = loadIntentLauncher();
   const uri = localApkUri();
   const info = await FileSystem.getInfoAsync(uri);
   if (!info.exists) throw new Error('Fichier de mise à jour introuvable');
@@ -179,6 +207,8 @@ export async function downloadAndInstallAndroidUpdate(
   if (Platform.OS !== 'android') throw new Error('Mise à jour APK réservée à Android');
   if (!isTrustedApkUrl(manifest.apkUrl)) throw new Error('URL APK non autorisée');
 
+  const FileSystem = loadFileSystem();
+  const IntentLauncher = loadIntentLauncher();
   const dest = localApkUri();
   await FileSystem.deleteAsync(dest, { idempotent: true });
 

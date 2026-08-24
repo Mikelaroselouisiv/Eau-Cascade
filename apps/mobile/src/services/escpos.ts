@@ -61,8 +61,8 @@ function clipLine(text: unknown, lineWidth: number): string {
   return t.length <= lineWidth ? t : `${t.slice(0, lineWidth - 3)}...`;
 }
 
-export function buildTicketText(saleData: SaleReceiptData, width: 58 | 80 = 58): string {
-  const lineWidth = width === 80 ? 48 : 32;
+export function buildTicketText(saleData: SaleReceiptData, _width: 58 | 80 = 80): string {
+  const lineWidth = 48;
   const separator = '-'.repeat(lineWidth);
   const date = saleData.dateTime ?? formatDateTimePap(new Date());
   const lines: string[] = [];
@@ -138,7 +138,7 @@ export function buildTicketText(saleData: SaleReceiptData, width: 58 | 80 = 58):
 
 /** Construit le buffer ESC/POS (PC850 + logo raster si disponible). */
 export async function buildEscPosPayload(saleData: SaleReceiptData): Promise<Uint8Array> {
-  const width: 58 | 80 = saleData.paperWidth === 80 ? 80 : 58;
+  const width: 58 | 80 = 80;
   const text = buildTicketText(saleData, width);
   const doCut = saleData.autoCut !== false;
 

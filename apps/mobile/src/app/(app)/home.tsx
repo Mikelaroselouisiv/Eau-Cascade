@@ -11,7 +11,7 @@ import Animated, {
 import { AppScrollView } from '@/components/AppScrollView';
 import { BrandLogo } from '@/components/BrandLogo';
 import { Screen } from '@/components/Screen';
-import { BRAND_NAME, BrandColors } from '@/constants/brand';
+import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { usePendingSalesCount } from '@/hooks/usePendingSalesCount';
@@ -45,18 +45,12 @@ export default function HomeScreen() {
 
   return (
     <Screen edges="tabs" style={styles.screen}>
-      <View style={styles.atmosphere} pointerEvents="none">
-        <View style={styles.glowTop} />
-        <View style={styles.glowBottom} />
-      </View>
-
       <AppScrollView contentStyle={styles.composition}>
         <Animated.View entering={reduceMotion ? undefined : FadeIn.duration(700)} style={styles.brandBlock}>
           <BrandLogo height={88} />
         </Animated.View>
 
         <Animated.View entering={enter(120)} style={styles.copyBlock}>
-          <Text style={styles.brandMark}>{BRAND_NAME.toUpperCase()}</Text>
           <Text style={styles.headline}>
             Bonjour{displayName ? `, ${displayName}` : ''}
           </Text>
@@ -105,29 +99,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: BrandColors.bg,
-  },
-  atmosphere: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: BrandColors.bg,
-  },
-  glowTop: {
-    position: 'absolute',
-    top: -80,
-    left: -60,
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-    backgroundColor: 'rgba(255, 140, 0, 0.16)',
-  },
-  glowBottom: {
-    position: 'absolute',
-    right: -90,
-    bottom: 40,
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    backgroundColor: 'rgba(230, 126, 0, 0.12)',
+    backgroundColor: 'transparent',
   },
   composition: {
     flexGrow: 1,
@@ -144,13 +116,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     paddingHorizontal: Spacing.two,
-  },
-  brandMark: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 2.4,
-    color: BrandColors.primary,
-    textAlign: 'center',
   },
   headline: {
     fontSize: 30,
