@@ -1,5 +1,5 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { AuditService } from './audit.service';
@@ -10,7 +10,7 @@ export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 
   @Get()
-  @Roles('ADMIN', 'MANAGER', 'ACCOUNTANT')
+  @Permissions('audit.view')
   list(
     @Query('skip') skipRaw?: string,
     @Query('take') takeRaw?: string,

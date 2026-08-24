@@ -2,6 +2,7 @@ import { Redirect } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 
 export default function Index() {
-  const { user } = useAuth();
-  return <Redirect href={user ? '/(tabs)/home' : '/login'} />;
+  const { user, loading } = useAuth();
+  if (loading) return null;
+  return <Redirect href={user ? '/(app)' : '/login'} />;
 }

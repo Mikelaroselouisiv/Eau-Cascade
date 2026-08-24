@@ -1,6 +1,6 @@
 // Logique de panier portée de apps/desktop/src/renderer/pages/PosPage.tsx (fonctions pures).
 import type { Product, ProductSaleUnit } from '@/types/api';
-import { resolveVolumeUnitPrice } from './volumeUnitPrice';
+import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from './volumeUnitPrice';
 
 /** Quantité décimale dans l'unité choisie (caisse, bouteille…) ; le stock est dans la même unité. */
 export const QTY_DECIMALS = 4;
@@ -13,6 +13,8 @@ export type CartLine = {
   quantity: number;
   /** Facteur stock (1 = 1 unité vendue = 1 unité de stock) */
   unitsPerPackage: number;
+  /** Prix unitaire saisi (vente spéciale) — null = non renseigné */
+  manualUnitPrice?: number | null;
 };
 
 export function defaultSaleUnit(p: Product): ProductSaleUnit | undefined {
@@ -41,15 +43,52 @@ export function clampQty(q: number, maxQ: number | undefined): number {
   return roundQty(x);
 }
 
-export function effectiveUnitPrice(product: Product | undefined, line: CartLine): number {
+export function familyQtyByProduct(
+  cart: CartLine[],
+  productsById: Map<number, Product>,
+): Map<number, number> {
+  const quantities = new Map<number, number>();
+  for (const line of cart) {
+    const product = productsById.get(line.productId);
+    const familyId = product?.productFamilyId ?? product?.productFamily?.id;
+    if (familyId == null) continue;
+    quantities.set(familyId, (quantities.get(familyId) ?? 0) + Number(line.quantity));
+  }
+  return quantities;
+}
+
+export function effectiveUnitPrice(
+  product: Product | undefined,
+  line: CartLine,
+  familyQty?: Map<number, number>,
+): number {
+  if (line.manualUnitPrice != null && Number.isFinite(line.manualUnitPrice)) {
+    return line.manualUnitPrice;
+  }
   if (!product) return 0;
   const su = product.saleUnits?.find((s) => s.id === line.productSaleUnitId);
   if (!su) return 0;
+  const familyId = product.productFamilyId ?? product.productFamily?.id;
+  if (familyId != null && familyQty) {
+    const tiers = (product.productFamily?.tiers ?? []).map((tier) => ({
+      minQuantity: Number(tier.minQuantity),
+      unitPrice: Number(tier.unitPrice),
+    }));
+    const familyPrice = resolveFamilyUnitPrice(tiers, familyQty.get(familyId) ?? 0);
+    if (familyPrice != null) return familyPrice;
+  }
   const tiers = (su.volumePrices ?? []).map((v) => ({
     minQuantity: Number(v.minQuantity),
     unitPrice: Number(v.unitPrice),
   }));
   return resolveVolumeUnitPrice(Number(su.salePrice), tiers, line.quantity);
+}
+
+export function productSellable(product: Product): boolean {
+  const su = defaultSaleUnit(product);
+  if (!su) return false;
+  const maxQ = maxQtyInSaleUnit(product, Number(su.unitsPerPackage));
+  return maxQ === undefined || maxQ >= MIN_SALE_QTY;
 }
 
 export function addLineToCart(
@@ -90,6 +129,7 @@ export function addLineToCart(
         label,
         quantity: firstQty,
         unitsPerPackage: up,
+        manualUnitPrice: null,
       },
     ],
   };
@@ -109,4 +149,48 @@ export function bumpCartLine(
       return { ...l, quantity: clampQty(l.quantity + delta, maxQ) };
     })
     .filter((l) => l.quantity >= MIN_SALE_QTY);
+}
+
+export function setCartLineQty(
+  cart: CartLine[],
+  products: Product[],
+  productSaleUnitId: number,
+  rawQty: number,
+): CartLine[] {
+  if (!Number.isFinite(rawQty) || rawQty < MIN_SALE_QTY) {
+    return cart.filter((l) => l.productSaleUnitId !== productSaleUnitId);
+  }
+  return cart
+    .map((l) => {
+      if (l.productSaleUnitId !== productSaleUnitId) return l;
+      const p = products.find((x) => x.id === l.productId);
+      const maxQ = p ? maxQtyInSaleUnit(p, l.unitsPerPackage) : undefined;
+      return { ...l, quantity: clampQty(rawQty, maxQ) };
+    })
+    .filter((l) => l.quantity >= MIN_SALE_QTY);
+}
+
+export function setCartLineManualPrice(
+  cart: CartLine[],
+  productSaleUnitId: number,
+  raw: string,
+): CartLine[] {
+  const trimmed = raw.trim().replace(',', '.');
+  if (trimmed === '') {
+    return cart.map((l) =>
+      l.productSaleUnitId === productSaleUnitId ? { ...l, manualUnitPrice: null } : l,
+    );
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) return cart;
+  return cart.map((l) =>
+    l.productSaleUnitId === productSaleUnitId ? { ...l, manualUnitPrice: parsed } : l,
+  );
+}
+
+export function specialPricesReady(cart: CartLine[]): boolean {
+  return (
+    cart.length > 0 &&
+    cart.every((l) => l.manualUnitPrice != null && Number.isFinite(l.manualUnitPrice))
+  );
 }

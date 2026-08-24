@@ -1,5 +1,5 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { StoresService } from './stores.service';
@@ -10,7 +10,7 @@ export class StoresController {
   constructor(private readonly storesService: StoresService) {}
 
   @Get()
-  @Roles('ADMIN', 'MANAGER')
+  @Permissions('stores.manage')
   findAll() {
     return this.storesService.findAll();
   }

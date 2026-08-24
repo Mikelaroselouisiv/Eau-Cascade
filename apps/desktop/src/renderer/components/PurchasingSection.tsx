@@ -21,7 +21,7 @@ import type {
 import { MoneyField } from './MoneyField';
 import { stockPackagingLabel } from '../utils/packagingDisplay';
 import { formatQuantity } from '../utils/formatQuantity';
-import { defaultMonthStartYmd, formatDateTime, formatYmd } from '../utils/datetime';
+import { formatDateTime } from '../utils/datetime';
 import { formatUserLabel } from '../utils/userAttribution';
 import { formatMoney } from '../utils/currency';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
@@ -83,15 +83,12 @@ export function PurchasingSection({ visible, companyId, departments, products, o
   const isAdmin = can(['ADMIN']);
   const [orders, setOrders] = useState<PurchaseOrderListItem[]>([]);
   const [amountSummary, setAmountSummary] = useState<PurchaseOrdersAmountSummary | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
   const [loadErr, setLoadErr] = useState('');
   const [msg, setMsg] = useAutoClearMessage();
   const [busy, setBusy] = useState(false);
 
   const [filterDeptId, setFilterDeptId] = useState<number | ''>('');
   const [filterReception, setFilterReception] = useState<ReceptionStatus | ''>('');
-  const [filterDateFrom, setFilterDateFrom] = useState(defaultMonthStartYmd);
-  const [filterDateTo, setFilterDateTo] = useState(() => formatYmd(new Date()));
   const [search, setSearch] = useState('');
 
   const [showOrderForm, setShowOrderForm] = useState(false);
@@ -106,57 +103,30 @@ export function PurchasingSection({ visible, companyId, departments, products, o
   const [receiveCost, setReceiveCost] = useState<Record<number, string>>({});
   const [receiveNote, setReceiveNote] = useState('');
 
-  const loadOrders = useCallback(async () => {
+  const load = useCallback(async () => {
     if (typeof companyId !== 'number') return;
     setLoadErr('');
     try {
-      setOrders(await listPurchaseOrders(companyId));
+      const list = await listPurchaseOrders(companyId);
+      setOrders(list);
+      if (isAdmin) {
+        try {
+          setAmountSummary(await getPurchaseOrdersAmountSummary(companyId));
+        } catch {
+          setAmountSummary(null);
+        }
+      } else {
+        setAmountSummary(null);
+      }
     } catch (err) {
       setLoadErr(formatApiError(err, 'Chargement impossible.'));
     }
-  }, [companyId]);
-
-  const loadSummary = useCallback(async () => {
-    if (typeof companyId !== 'number' || !isAdmin) {
-      setAmountSummary(null);
-      return;
-    }
-    if (!filterDateFrom || !filterDateTo || filterDateFrom > filterDateTo) {
-      setAmountSummary(null);
-      return;
-    }
-    setSummaryLoading(true);
-    try {
-      setAmountSummary(
-        await getPurchaseOrdersAmountSummary({
-          companyId,
-          dateFrom: filterDateFrom,
-          dateTo: filterDateTo,
-          departmentId: filterDeptId === '' ? undefined : filterDeptId,
-          receptionStatus: filterReception || undefined,
-        }),
-      );
-    } catch {
-      setAmountSummary(null);
-    } finally {
-      setSummaryLoading(false);
-    }
-  }, [companyId, isAdmin, filterDateFrom, filterDateTo, filterDeptId, filterReception]);
-
-  const load = useCallback(async () => {
-    await loadOrders();
-    await loadSummary();
-  }, [loadOrders, loadSummary]);
+  }, [companyId, isAdmin]);
 
   useEffect(() => {
     if (!visible) return;
-    void loadOrders();
-  }, [visible, loadOrders]);
-
-  useEffect(() => {
-    if (!visible) return;
-    void loadSummary();
-  }, [visible, loadSummary]);
+    void load();
+  }, [visible, load]);
 
   useEffect(() => {
     if (departments.length && poDeptId === '') setPoDeptId(departments[0].id);
@@ -174,15 +144,32 @@ export function PurchasingSection({ visible, companyId, departments, products, o
     return orders.filter((o) => {
       if (filterDeptId !== '' && o.department.id !== filterDeptId) return false;
       if (filterReception !== '' && o.receptionStatus !== filterReception) return false;
-      const ymd = formatYmd(o.createdAt);
-      if (filterDateFrom && ymd < filterDateFrom) return false;
-      if (filterDateTo && ymd > filterDateTo) return false;
       if (!q) return true;
       const ref = (o.reference ?? '').toLowerCase();
       const supplier = (o.supplierName ?? '').toLowerCase();
       return ref.includes(q) || supplier.includes(q);
     });
-  }, [orders, filterDeptId, filterReception, filterDateFrom, filterDateTo, search]);
+  }, [orders, filterDeptId, filterReception, search]);
+
+  const filteredAmountTotals = useMemo(() => {
+    if (!isAdmin) return null;
+    let amountOrderedEst = 0;
+    let amountReceived = 0;
+    let amountPendingEst = 0;
+    for (const o of ordersFiltered) {
+      if (o.status === 'CANCELLED') continue;
+      amountOrderedEst += Number(o.amountOrderedEst ?? 0);
+      amountReceived += Number(o.amountReceived ?? 0);
+      amountPendingEst += Number(o.amountPendingEst ?? 0);
+    }
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    return {
+      count: ordersFiltered.filter((o) => o.status !== 'CANCELLED').length,
+      amountOrderedEst: round2(amountOrderedEst),
+      amountReceived: round2(amountReceived),
+      amountPendingEst: round2(amountPendingEst),
+    };
+  }, [isAdmin, ordersFiltered]);
 
   const draftOrderTotal = useMemo(() => {
     if (!isAdmin) return 0;
@@ -442,159 +429,80 @@ export function PurchasingSection({ visible, companyId, departments, products, o
       {loadErr ? <p className="error-text">{loadErr}</p> : null}
       {msg ? <p className={/créée|enregistrée|complète|supprimée/i.test(msg) ? 'info-text' : 'error-text'}>{msg}</p> : null}
 
-      {isAdmin ? (
+      {isAdmin && amountSummary ? (
         <div className="po-amount-monitor" aria-label="Suivi des montants de commandes">
           <div className="po-amount-monitor-head">
             <h3 className="po-amount-monitor-title">Suivi montants commandes</h3>
-            <p className="po-amount-monitor-hint">
-              Totaux filtrés par période, département et réception (fuseau Port-au-Prince).
+          </div>
+          <div className="po-amount-monitor-grid">
+            <div className="po-amount-stat po-amount-stat--global">
+              <span className="po-amount-stat-label">Total commandé (estimé)</span>
+              <strong className="po-amount-stat-value">{formatMoney(amountSummary.amountOrderedEst)}</strong>
+              <span className="po-amount-stat-meta">{amountSummary.orderCount} commande(s)</span>
+            </div>
+            <div className="po-amount-stat">
+              <span className="po-amount-stat-label">Déjà reçu</span>
+              <strong className="po-amount-stat-value">{formatMoney(amountSummary.amountReceived)}</strong>
+              <span className="po-amount-stat-meta">{amountSummary.completeCount} complète(s)</span>
+            </div>
+            <div className="po-amount-stat">
+              <span className="po-amount-stat-label">Reste estimé</span>
+              <strong className="po-amount-stat-value">{formatMoney(amountSummary.amountPendingEst)}</strong>
+              <span className="po-amount-stat-meta">
+                {amountSummary.pendingCount} en attente · {amountSummary.partialCount} partielle(s)
+              </span>
+            </div>
+          </div>
+          {amountSummary.ordersMissingPrice > 0 ? (
+            <p className="po-amount-monitor-warn">
+              {amountSummary.ordersMissingPrice} commande(s) avec ligne(s) sans prix unitaire —
+              les totaux peuvent être incomplets.
             </p>
-          </div>
-          <div className="purchasing-toolbar po-amount-filters">
-            <label>
-              Date début
-              <input
-                type="date"
-                value={filterDateFrom}
-                onChange={(e) => setFilterDateFrom(e.target.value)}
-              />
-            </label>
-            <label>
-              Date fin
-              <input
-                type="date"
-                value={filterDateTo}
-                onChange={(e) => setFilterDateTo(e.target.value)}
-              />
-            </label>
-            <label>
-              Département
-              <select
-                value={filterDeptId === '' ? '' : String(filterDeptId)}
-                onChange={(e) => setFilterDeptId(e.target.value ? Number(e.target.value) : '')}
-              >
-                <option value="">Tous</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {deptLabel(d)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Réception
-              <select
-                value={filterReception}
-                onChange={(e) =>
-                  setFilterReception(e.target.value ? (e.target.value as ReceptionStatus) : '')
-                }
-              >
-                <option value="">Toutes</option>
-                <option value="pending">En attente</option>
-                <option value="partial">Partiel</option>
-                <option value="complete">Complet</option>
-              </select>
-            </label>
-          </div>
-          {filterDateFrom > filterDateTo ? (
-            <p className="error-text">La date de début doit être ≤ date de fin.</p>
-          ) : summaryLoading || !amountSummary ? (
-            <p className="muted">{summaryLoading ? 'Calcul des totaux…' : 'Aucun total à afficher.'}</p>
-          ) : (
-            <>
-              <div className="po-amount-monitor-grid">
-                <div className="po-amount-stat po-amount-stat--global">
-                  <span className="po-amount-stat-label">Total commandé (estimé)</span>
-                  <strong className="po-amount-stat-value">
-                    {formatMoney(amountSummary.amountOrderedEst)}
-                  </strong>
-                  <span className="po-amount-stat-meta">
-                    {amountSummary.orderCount} commande(s)
-                  </span>
-                </div>
-                <div className="po-amount-stat">
-                  <span className="po-amount-stat-label">Déjà reçu</span>
-                  <strong className="po-amount-stat-value">
-                    {formatMoney(amountSummary.amountReceived)}
-                  </strong>
-                  <span className="po-amount-stat-meta">
-                    {amountSummary.completeCount} complète(s)
-                  </span>
-                </div>
-                <div className="po-amount-stat">
-                  <span className="po-amount-stat-label">Reste estimé</span>
-                  <strong className="po-amount-stat-value">
-                    {formatMoney(amountSummary.amountPendingEst)}
-                  </strong>
-                  <span className="po-amount-stat-meta">
-                    {amountSummary.pendingCount} en attente · {amountSummary.partialCount}{' '}
-                    partielle(s)
-                  </span>
-                </div>
-              </div>
-              {amountSummary.ordersMissingPrice > 0 ? (
-                <p className="po-amount-monitor-warn">
-                  {amountSummary.ordersMissingPrice} commande(s) avec ligne(s) sans prix unitaire —
-                  les totaux peuvent être incomplets.
-                </p>
-              ) : null}
-            </>
-          )}
+          ) : null}
+          {filteredAmountTotals &&
+          (filterDeptId !== '' || filterReception !== '' || search.trim() !== '') ? (
+            <p className="po-amount-monitor-filter">
+              Filtre actuel ({filteredAmountTotals.count}) : commandé{' '}
+              <strong>{formatMoney(filteredAmountTotals.amountOrderedEst)}</strong>
+              {' · '}reçu <strong>{formatMoney(filteredAmountTotals.amountReceived)}</strong>
+              {' · '}reste <strong>{formatMoney(filteredAmountTotals.amountPendingEst)}</strong>
+            </p>
+          ) : null}
         </div>
       ) : null}
 
       <div className="purchasing-toolbar">
-        {!isAdmin ? (
-          <>
-            <label>
-              Date début
-              <input
-                type="date"
-                value={filterDateFrom}
-                onChange={(e) => setFilterDateFrom(e.target.value)}
-              />
-            </label>
-            <label>
-              Date fin
-              <input
-                type="date"
-                value={filterDateTo}
-                onChange={(e) => setFilterDateTo(e.target.value)}
-              />
-            </label>
-            <label>
-              Département
-              <select
-                value={filterDeptId === '' ? '' : String(filterDeptId)}
-                onChange={(e) => setFilterDeptId(e.target.value ? Number(e.target.value) : '')}
-              >
-                <option value="">Tous</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {deptLabel(d)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Réception
-              <select
-                value={filterReception}
-                onChange={(e) =>
-                  setFilterReception(e.target.value ? (e.target.value as ReceptionStatus) : '')
-                }
-              >
-                <option value="">Toutes</option>
-                <option value="pending">En attente</option>
-                <option value="partial">Partiel</option>
-                <option value="complete">Complet</option>
-              </select>
-            </label>
-          </>
-        ) : null}
+        <label>
+          Département
+          <select
+            value={filterDeptId === '' ? '' : String(filterDeptId)}
+            onChange={(e) => setFilterDeptId(e.target.value ? Number(e.target.value) : '')}
+          >
+            <option value="">Tous</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                {deptLabel(d)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Réception
+          <select
+            value={filterReception}
+            onChange={(e) =>
+              setFilterReception(e.target.value ? (e.target.value as ReceptionStatus) : '')
+            }
+          >
+            <option value="">Toutes</option>
+            <option value="pending">En attente</option>
+            <option value="partial">Partiel</option>
+            <option value="complete">Complet</option>
+          </select>
+        </label>
         <label className="purchasing-toolbar-search">
           Recherche
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Réf. / fournisseur" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} />
         </label>
       </div>
 

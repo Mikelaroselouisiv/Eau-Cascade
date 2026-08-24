@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import axios from 'axios';
 import { MoneyField } from '../components/MoneyField';
+import { saleTxnNumber } from '../utils/saleTxnNumber';
 import { useAuth } from '../context/AuthContext';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
-import { isLikelyNetworkError } from '../services/api-errors';
 import {
   createCreditCustomer,
   createCreditSale,
@@ -15,12 +15,13 @@ import {
   getDepartments,
   getPrinterSettings,
   getProducts,
+  listBanks,
   listCreditCustomers,
   recordCreditPayment,
   updateCreditCustomer,
 } from '../services/api';
-import { enqueueCreditPayment, enqueueCreditSale } from '../services/offline-queue';
 import type {
+  BankRow,
   CompanyListItem,
   CreditCustomerDetail,
   CreditCustomerListItem,
@@ -31,7 +32,7 @@ import type {
 } from '../types/api';
 import { formatMoney } from '../utils/currency';
 import { formatDateTime } from '../utils/datetime';
-import { saleTicketLabel, saleTicketNo } from '../utils/saleTicketNo';
+import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../utils/volumeUnitPrice';
 
 function formatApiError(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -61,10 +62,54 @@ const STATUS_LABEL: Record<CreditCustomerStatus, string> = {
 };
 
 type PanelMode = 'overview' | 'new-customer' | 'fiche';
-type CartLine = { productSaleUnitId: number; productName: string; unitLabel: string; unitPrice: number; quantity: number };
+type CartLine = {
+  productSaleUnitId: number;
+  productId: number;
+  productName: string;
+  unitLabel: string;
+  quantity: number;
+};
+
+function creditFamilyQty(
+  cart: CartLine[],
+  productsById: Map<number, Product>,
+): Map<number, number> {
+  const qty = new Map<number, number>();
+  for (const line of cart) {
+    const p = productsById.get(line.productId);
+    const fid = p?.productFamilyId ?? p?.productFamily?.id;
+    if (fid == null) continue;
+    qty.set(fid, (qty.get(fid) ?? 0) + Number(line.quantity));
+  }
+  return qty;
+}
+
+function creditLineUnitPrice(
+  product: Product | undefined,
+  line: CartLine,
+  familyQty: Map<number, number>,
+): number {
+  if (!product) return 0;
+  const su = product.saleUnits?.find((s) => s.id === line.productSaleUnitId);
+  if (!su) return 0;
+  const fid = product.productFamilyId ?? product.productFamily?.id;
+  if (fid != null) {
+    const familyTiers = (product.productFamily?.tiers ?? []).map((t) => ({
+      minQuantity: Number(t.minQuantity),
+      unitPrice: Number(t.unitPrice),
+    }));
+    const familyPrice = resolveFamilyUnitPrice(familyTiers, familyQty.get(fid) ?? 0);
+    if (familyPrice != null) return familyPrice;
+  }
+  const tiers = (su.volumePrices ?? []).map((v) => ({
+    minQuantity: Number(v.minQuantity),
+    unitPrice: Number(v.unitPrice),
+  }));
+  return resolveVolumeUnitPrice(Number(su.salePrice), tiers, line.quantity);
+}
 
 export function CreditPage() {
-  const { user, canPerm } = useAuth();
+  const { canPerm, user } = useAuth();
   const canManage = canPerm('credit.manage');
   const [message, setMessage] = useAutoClearMessage();
 
@@ -102,7 +147,11 @@ export function CreditPage() {
 
   const [payAmount, setPayAmount] = useState('');
   const [paySaleId, setPaySaleId] = useState<number | ''>('');
-  const [payMethod, setPayMethod] = useState<'CASH' | 'CARD' | 'MOBILE_MONEY'>('CASH');
+  type PayMethod = 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK';
+  const [payMethod, setPayMethod] = useState<PayMethod>('CASH');
+  const [payBankId, setPayBankId] = useState<number | ''>('');
+  const [payBankAccountId, setPayBankAccountId] = useState<number | ''>('');
+  const [banks, setBanks] = useState<BankRow[]>([]);
   const [payNote, setPayNote] = useState('');
   const [payBusy, setPayBusy] = useState(false);
 
@@ -127,6 +176,22 @@ export function CreditPage() {
       .then(setDepartments)
       .catch(() => setDepartments([]));
   }, [companyId]);
+
+  useEffect(() => {
+    if (typeof companyId !== 'number') {
+      setBanks([]);
+      return;
+    }
+    void listBanks({ companyId })
+      .then((rows) => setBanks(rows.filter((b) => b.isActive)))
+      .catch(() => setBanks([]));
+  }, [companyId]);
+
+  const payBankAccounts = useMemo(() => {
+    if (payBankId === '') return [];
+    const bank = banks.find((b) => b.id === payBankId);
+    return (bank?.accounts ?? []).filter((a) => a.isActive);
+  }, [banks, payBankId]);
 
   async function refreshList(cid = companyId) {
     if (typeof cid !== 'number') return;
@@ -172,9 +237,26 @@ export function CreditPage() {
     return customers.filter((c) => c.status === statusFilter);
   }, [customers, statusFilter]);
 
+  const productsById = useMemo(() => {
+    const m = new Map<number, Product>();
+    for (const p of products) m.set(p.id, p);
+    return m;
+  }, [products]);
+
+  const familyQtyMap = useMemo(
+    () => creditFamilyQty(cart, productsById),
+    [cart, productsById],
+  );
+
   const cartTotal = useMemo(
-    () => Math.round(cart.reduce((a, l) => a + l.unitPrice * l.quantity, 0) * 100) / 100,
-    [cart],
+    () =>
+      Math.round(
+        cart.reduce((a, l) => {
+          const p = productsById.get(l.productId);
+          return a + creditLineUnitPrice(p, l, familyQtyMap) * l.quantity;
+        }, 0) * 100,
+      ) / 100,
+    [cart, productsById, familyQtyMap],
   );
 
   const filteredProducts = useMemo(() => {
@@ -280,9 +362,9 @@ export function CreditPage() {
         ...prev,
         {
           productSaleUnitId: unit.id,
+          productId: p.id,
           productName: p.name,
           unitLabel: unit.labelOverride || unit.packagingUnit.label,
-          unitPrice: Number(unit.salePrice),
           quantity: 1,
         },
       ];
@@ -293,25 +375,16 @@ export function CreditPage() {
     e.preventDefault();
     if (!detail || !canManage || cart.length === 0) return;
     setSaleBusy(true);
-    const payload = {
-      creditCustomerId: detail.id,
-      items: cart.map((l) => ({ productSaleUnitId: l.productSaleUnitId, quantity: l.quantity })),
-      downPayment: Number(downPayment) > 0 ? Number(downPayment) : undefined,
-      downPaymentMethod: 'CASH' as const,
-      note: saleNote.trim() || undefined,
-    };
     try {
-      if (!navigator.onLine) {
-        await enqueueCreditSale(payload);
-        window.dispatchEvent(new Event('pos-pending-sales-changed'));
-        setMessage('Hors ligne : vente à crédit mise en file d’attente');
-        setShowSaleModal(false);
-        return;
-      }
-      const result = await createCreditSale(payload);
-      const ticketRef = result.ticketNo?.trim() || String(result.saleId);
+      const result = await createCreditSale({
+        creditCustomerId: detail.id,
+        items: cart.map((l) => ({ productSaleUnitId: l.productSaleUnitId, quantity: l.quantity })),
+        downPayment: Number(downPayment) > 0 ? Number(downPayment) : undefined,
+        downPaymentMethod: 'CASH',
+        note: saleNote.trim() || undefined,
+      });
       setMessage(
-        `Vente #${ticketRef} — total ${formatMoney(result.total)}, reste ${formatMoney(result.balanceDue)} (fiche livraison créée)`,
+        `Vente #${result.txnNumber ?? result.saleId} — total ${formatMoney(result.total)}, reste ${formatMoney(result.balanceDue)} (fiche livraison créée)`,
       );
 
       if (printTicket && window.desktopApp?.printReceipt) {
@@ -323,21 +396,23 @@ export function CreditPage() {
           const cashierLabel =
             user?.fullName?.trim() || user?.phone || 'Caissier';
           await window.desktopApp.printReceipt({
-            saleId: result.saleId,
-            ticketNo: ticketRef,
+            saleId: result.txnNumber ?? result.saleId,
             companyName: company?.name ?? 'Entreprise',
             companyPhone: company?.phone ?? null,
             address: [company?.address, company?.city].filter(Boolean).join(', ') || '',
             cashier: cashierLabel,
             dateTime: formatDateTime(new Date().toISOString()),
             receiptClientName: detail.name,
-            items: cart.map((l) => ({
-              name: `${l.productName} (${l.unitLabel})`,
-              qty: l.quantity,
-              price: l.unitPrice,
-            })),
+            items: cart.map((l) => {
+              const pr = productsById.get(l.productId);
+              return {
+                name: `${l.productName} (${l.unitLabel})`,
+                qty: l.quantity,
+                price: creditLineUnitPrice(pr, l, familyQtyMap),
+              };
+            }),
             total: result.total,
-            paymentMode: Number(downPayment) > 0 ? 'SPLIT' : 'CREDIT',
+            paymentMode: 'À crédit',
             paperWidth: printer?.paperWidth === 80 ? 80 : 58,
             printerName: printer?.deviceName ?? '',
             receiptHeaderText: printer?.receiptHeaderText ?? null,
@@ -348,7 +423,7 @@ export function CreditPage() {
           });
         } catch {
           setMessage(
-            `Vente #${ticketRef} enregistrée, mais l’impression a échoué`,
+            `Vente #${result.txnNumber ?? result.saleId} enregistrée, mais l’impression a échoué`,
             { persist: true },
           );
         }
@@ -358,13 +433,6 @@ export function CreditPage() {
       await openFiche(detail.id);
       await refreshList();
     } catch (err) {
-      if (isLikelyNetworkError(err) || !navigator.onLine) {
-        await enqueueCreditSale(payload);
-        window.dispatchEvent(new Event('pos-pending-sales-changed'));
-        setMessage('Réseau indisponible : vente à crédit mise en file d’attente');
-        setShowSaleModal(false);
-        return;
-      }
       setMessage(formatApiError(err, 'Vente à crédit impossible'), { persist: true });
     } finally {
       setSaleBusy(false);
@@ -379,48 +447,41 @@ export function CreditPage() {
       setMessage('Montant invalide');
       return;
     }
-    setPayBusy(true);
-    const payload = {
-      creditCustomerId: detail.id,
-      amount,
-      saleId: typeof paySaleId === 'number' ? paySaleId : undefined,
-      method: payMethod,
-      note: payNote.trim() || undefined,
-    };
-    try {
-      if (!navigator.onLine) {
-        await enqueueCreditPayment(payload);
-        window.dispatchEvent(new Event('pos-pending-sales-changed'));
-        setMessage('Hors ligne : encaissement crédit mis en file d’attente');
-        setShowPayModal(false);
-        setPayAmount('');
-        setPaySaleId('');
-        setPayNote('');
+    if (payMethod === 'BANK') {
+      if (payBankId === '' || payBankAccountId === '') {
+        setMessage('Choisissez la banque et le compte', { persist: true });
         return;
       }
-      const result = await recordCreditPayment(payload);
+    }
+    setPayBusy(true);
+    try {
+      const result = await recordCreditPayment({
+        creditCustomerId: detail.id,
+        amount,
+        saleId: typeof paySaleId === 'number' ? paySaleId : undefined,
+        method: payMethod,
+        ...(payMethod === 'BANK' && typeof payBankAccountId === 'number'
+          ? { bankAccountId: payBankAccountId }
+          : {}),
+        note: payNote.trim() || undefined,
+      });
       setMessage(
-        `Encaissement ${formatMoney(result.applied)} enregistré (finance entreprise)${
+        `Encaissement ${formatMoney(result.applied)} enregistré${
+          payMethod === 'BANK' ? ' (banque + finance entreprise)' : ' (finance entreprise)'
+        }${
           result.unused > 0.009 ? ` — surplus non affecté ${formatMoney(result.unused)}` : ''
         }`,
       );
       setShowPayModal(false);
       setPayAmount('');
       setPaySaleId('');
+      setPayMethod('CASH');
+      setPayBankId('');
+      setPayBankAccountId('');
       setPayNote('');
       await openFiche(detail.id);
       await refreshList();
     } catch (err) {
-      if (isLikelyNetworkError(err) || !navigator.onLine) {
-        await enqueueCreditPayment(payload);
-        window.dispatchEvent(new Event('pos-pending-sales-changed'));
-        setMessage('Réseau indisponible : encaissement crédit mis en file d’attente');
-        setShowPayModal(false);
-        setPayAmount('');
-        setPaySaleId('');
-        setPayNote('');
-        return;
-      }
       setMessage(formatApiError(err, 'Paiement impossible'), { persist: true });
     } finally {
       setPayBusy(false);
@@ -690,6 +751,10 @@ export function CreditPage() {
                       onClick={() => {
                         setPayAmount(detail.balance > 0 ? String(detail.balance) : '');
                         setPaySaleId('');
+                        setPayMethod('CASH');
+                        setPayBankId('');
+                        setPayBankAccountId('');
+                        setPayNote('');
                         setShowPayModal(true);
                       }}
                     >
@@ -744,7 +809,7 @@ export function CreditPage() {
                         <tbody>
                           {detail.sales.filter((s) => s.balanceDue > 0.009).map((s) => (
                             <tr key={s.id}>
-                              <td>{saleTicketNo(s)}</td>
+                              <td>{s.id}</td>
                               <td>{formatDateTime(s.createdAt)}</td>
                               <td>{formatMoney(s.total)}</td>
                               <td>{formatMoney(s.amountPaid)}</td>
@@ -791,8 +856,7 @@ export function CreditPage() {
                   {detail.sales.map((s) => (
                     <details key={s.id} className="credit-sale-details">
                       <summary>
-                        Vente {saleTicketLabel(s)} — {formatDateTime(s.createdAt)} —{' '}
-                        {formatMoney(s.total)}
+                        Vente #{saleTxnNumber(s)} — {formatDateTime(s.createdAt)} — {formatMoney(s.total)}
                         {s.balanceDue > 0.009 ? (
                           <span className="debt"> (reste {formatMoney(s.balanceDue)})</span>
                         ) : (
@@ -845,10 +909,16 @@ export function CreditPage() {
                 ))}
               </div>
               <div className="credit-cart">
-                {cart.map((l) => (
+                {cart.map((l) => {
+                  const pr = productsById.get(l.productId);
+                  const unitP = creditLineUnitPrice(pr, l, familyQtyMap);
+                  return (
                   <div key={l.productSaleUnitId} className="credit-cart-line">
                     <span>
                       {l.productName} ({l.unitLabel})
+                      <small className="muted" style={{ display: 'block' }}>
+                        {formatMoney(unitP)} / u
+                      </small>
                     </span>
                     <input
                       type="number"
@@ -864,7 +934,7 @@ export function CreditPage() {
                         );
                       }}
                     />
-                    <span>{formatMoney(l.unitPrice * l.quantity)}</span>
+                    <span>{formatMoney(unitP * l.quantity)}</span>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
@@ -875,19 +945,24 @@ export function CreditPage() {
                       ×
                     </button>
                   </div>
-                ))}
+                  );
+                })}
                 {cart.length === 0 ? <p className="muted">Panier vide — ajoutez des produits</p> : null}
               </div>
               <p className="credit-cart-total">
                 Total : <strong>{formatMoney(cartTotal)}</strong>
               </p>
               <MoneyField
-                label="Acompte (optionnel)"
+                label="Acompte (optionnel — board Crédit, hors caisse POS)"
                 value={downPayment}
                 onChange={(e) => setDownPayment(e.target.value)}
                 min={0}
                 step="0.01"
               />
+              <p className="credit-hint">
+                La vente crée une fiche livraison et compte dans les synthèses / journal d’entreprise.
+                Elle n’est pas encaissée sur la caisse classique — les remboursements se font ici.
+              </p>
               <label>
                 Note
                 <input value={saleNote} onChange={(e) => setSaleNote(e.target.value)} />
@@ -942,7 +1017,7 @@ export function CreditPage() {
                     .filter((s) => s.balanceDue > 0.009)
                     .map((s) => (
                       <option key={s.id} value={s.id}>
-                        {saleTicketLabel(s)} — reste {formatMoney(s.balanceDue)}
+                        #{s.id} — reste {formatMoney(s.balanceDue)}
                       </option>
                     ))}
                 </select>
@@ -951,26 +1026,87 @@ export function CreditPage() {
                 Mode
                 <select
                   value={payMethod}
-                  onChange={(e) => setPayMethod(e.target.value as 'CASH' | 'CARD' | 'MOBILE_MONEY')}
+                  onChange={(e) => {
+                    const m = e.target.value as PayMethod;
+                    setPayMethod(m);
+                    if (m !== 'BANK') {
+                      setPayBankId('');
+                      setPayBankAccountId('');
+                    }
+                  }}
                 >
                   <option value="CASH">Espèces</option>
                   <option value="CARD">Carte</option>
                   <option value="MOBILE_MONEY">Mobile money</option>
+                  <option value="BANK">Banque</option>
                 </select>
               </label>
+              {payMethod === 'BANK' ? (
+                <>
+                  <label>
+                    Banque
+                    <select
+                      value={payBankId === '' ? '' : String(payBankId)}
+                      onChange={(e) => {
+                        const bankId = e.target.value === '' ? '' : Number(e.target.value);
+                        setPayBankId(bankId);
+                        setPayBankAccountId('');
+                      }}
+                      required
+                    >
+                      <option value="">Choisir…</option>
+                      {banks.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Compte
+                    <select
+                      value={payBankAccountId === '' ? '' : String(payBankAccountId)}
+                      disabled={payBankId === ''}
+                      onChange={(e) => {
+                        setPayBankAccountId(
+                          e.target.value === '' ? '' : Number(e.target.value),
+                        );
+                      }}
+                      required
+                    >
+                      <option value="">Choisir…</option>
+                      {payBankAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                          {a.accountNumber ? ` (${a.accountNumber})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ) : null}
               <label>
                 Note
                 <input value={payNote} onChange={(e) => setPayNote(e.target.value)} />
               </label>
               <p className="credit-hint">
-                Cet encaissement crée une entrée INCOME « Encaissements crédit » dans les transactions
-                financières globales.
+                {payMethod === 'BANK'
+                  ? 'Cet encaissement crédite le compte banque choisi et crée une entrée INCOME « Encaissements crédit ».'
+                  : 'Cet encaissement crée une entrée INCOME « Encaissements crédit » dans les transactions financières globales.'}
               </p>
               <div className="credit-form-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowPayModal(false)}>
                   Annuler
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={payBusy}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={
+                    payBusy ||
+                    (payMethod === 'BANK' &&
+                      (payBankId === '' || payBankAccountId === ''))
+                  }
+                >
                   {payBusy ? 'Enregistrement…' : 'Encaisser'}
                 </button>
               </div>

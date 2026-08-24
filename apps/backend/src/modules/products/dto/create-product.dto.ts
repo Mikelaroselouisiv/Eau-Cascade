@@ -9,6 +9,7 @@ import {
   IsString,
   Matches,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { VolumePriceDto } from './volume-price.dto';
@@ -106,6 +107,14 @@ export class CreateProductDto {
   @IsNumber()
   @Min(0)
   stockMin?: number;
+
+  /** Famille de prix volume (comptage croisé à la caisse). null = aucune. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  productFamilyId?: number | null;
 
   @IsArray()
   @ArrayMinSize(1)

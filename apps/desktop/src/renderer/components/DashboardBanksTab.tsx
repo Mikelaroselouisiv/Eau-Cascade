@@ -39,7 +39,7 @@ type Props = {
 
 export function DashboardBanksTab({ companyId }: Props) {
   const { can, canPerm } = useAuth();
-  const isAdmin = can(['ADMIN']) || canPerm('*');
+  const isAdmin = can(['ADMIN']);
   const canManage = canPerm('banks.manage');
   const [msg, setMsg] = useAutoClearMessage();
 

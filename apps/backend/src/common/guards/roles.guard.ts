@@ -6,15 +6,13 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { permissionsSatisfy } from '../permissions';
-import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
+import {
+  PERMISSIONS_ANY_KEY,
+  PERMISSIONS_KEY,
+} from '../decorators/permissions.decorator';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { RolesService } from '../../modules/roles/roles.service';
 
-/**
- * Autorisation :
- * 1. Si `@Permissions(...)` → contrôle les droits AppRole (config admin). ADMIN `*` OK.
- * 2. Sinon si `@Roles(...)` → porte par code de rôle (+ rôles custom supersets).
- */
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(
@@ -23,7 +21,11 @@ export class RolesGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const requiredPermissions = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_KEY, [
+    const requiredAll = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    const requiredAny = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_ANY_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
@@ -32,10 +34,9 @@ export class RolesGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    if (
-      (!requiredPermissions || requiredPermissions.length === 0) &&
-      (!requiredRoles || requiredRoles.length === 0)
-    ) {
+    const hasPermMeta =
+      (requiredAll && requiredAll.length > 0) || (requiredAny && requiredAny.length > 0);
+    if (!hasPermMeta && (!requiredRoles || requiredRoles.length === 0)) {
       return true;
     }
 
@@ -46,16 +47,24 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Accès refusé pour votre rôle');
     }
 
-    // Permissions configurables : source de vérité quand déclarées.
-    if (requiredPermissions && requiredPermissions.length > 0) {
+    if (hasPermMeta) {
       const userPerms = await this.rolesService.getPermissionsForUserRole(user.role);
-      if (!permissionsSatisfy(userPerms, requiredPermissions)) {
-        throw new ForbiddenException('Accès refusé : autorisation manquante');
+      if (userPerms.includes('*')) return true;
+
+      if (requiredAll && requiredAll.length > 0) {
+        if (!permissionsSatisfy(userPerms, requiredAll)) {
+          throw new ForbiddenException('Accès refusé pour votre rôle');
+        }
+      }
+      if (requiredAny && requiredAny.length > 0) {
+        if (!requiredAny.some((p) => userPerms.includes(p))) {
+          throw new ForbiddenException('Accès refusé pour votre rôle');
+        }
       }
       return true;
     }
 
-    const allowed = await this.rolesService.userCanAccessRoleGate(user.role, requiredRoles ?? []);
+    const allowed = await this.rolesService.userCanAccessRoleGate(user.role, requiredRoles!);
     if (!allowed) {
       throw new ForbiddenException('Accès refusé pour votre rôle');
     }

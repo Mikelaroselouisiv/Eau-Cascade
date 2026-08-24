@@ -10,6 +10,7 @@ import {
   IsString,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { PaymentMethod } from '@prisma/client';
@@ -145,6 +146,13 @@ export class RecordCreditPaymentDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   method?: PaymentMethod;
+
+  /** Requis si method = BANK : compte à créditer. */
+  @ValidateIf((o: RecordCreditPaymentDto) => o.method === PaymentMethod.BANK)
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  bankAccountId?: number;
 
   @IsOptional()
   @IsString()

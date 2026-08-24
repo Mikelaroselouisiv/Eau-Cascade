@@ -1,21 +1,40 @@
 import { Redirect } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
+import { AppScrollView } from '@/components/AppScrollView';
+import { BrandLogo } from '@/components/BrandLogo';
 import { Screen } from '@/components/Screen';
-import { ThemedText } from '@/components/themed-text';
+import { BRAND_NAME, BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { isLikelyNetworkError } from '@/services/api-errors';
 
 export default function LoginScreen() {
-  const { user, login } = useAuth();
+  const { user, loading, login } = useAuth();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (user) return <Redirect href="/(tabs)/home" />;
+  if (loading) {
+    return (
+      <Screen edges="full" backgroundColor={BrandColors.bg}>
+        <View style={styles.loading}>
+          <ActivityIndicator color={BrandColors.primary} size="large" />
+        </View>
+      </Screen>
+    );
+  }
+
+  if (user) return <Redirect href="/(app)" />;
 
   async function handleSubmit() {
     if (!phone.trim() || !password) {
@@ -38,75 +57,144 @@ export default function LoginScreen() {
   }
 
   return (
-    <Screen edges={['top', 'bottom', 'left', 'right']} keyboardAvoiding>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}>
-        <ThemedText type="title" style={styles.title}>
-          POS Eau Cascade
-        </ThemedText>
+    <Screen edges="full" keyboard backgroundColor={BrandColors.bg}>
+      <View style={styles.atmosphere} pointerEvents="none">
+        <View style={styles.glowTop} />
+        <View style={styles.glowBottom} />
+      </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Téléphone"
-          keyboardType="phone-pad"
-          autoCapitalize="none"
-          returnKeyType="next"
-          value={phone}
-          onChangeText={setPhone}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Mot de passe"
-          secureTextEntry
-          returnKeyType="done"
-          onSubmitEditing={handleSubmit}
-          value={password}
-          onChangeText={setPassword}
-        />
+      <AppScrollView contentStyle={styles.scrollContent}>
+        <View style={styles.card}>
+          <View style={styles.brand}>
+            <BrandLogo height={64} />
+            <Text style={styles.brandName}>{BRAND_NAME.toUpperCase()}</Text>
+            <Text style={styles.subtitle}>Connexion au point de vente</Text>
+          </View>
 
-        {error && <ThemedText style={styles.error}>{error}</ThemedText>}
+          <TextInput
+            style={styles.input}
+            placeholder="Téléphone"
+            placeholderTextColor={BrandColors.textMuted}
+            keyboardType="phone-pad"
+            autoCapitalize="none"
+            returnKeyType="next"
+            value={phone}
+            onChangeText={setPhone}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Mot de passe"
+            placeholderTextColor={BrandColors.textMuted}
+            secureTextEntry
+            returnKeyType="done"
+            onSubmitEditing={handleSubmit}
+            value={password}
+            onChangeText={setPassword}
+          />
 
-        <Pressable
-          style={[styles.button, submitting && styles.buttonDisabled]}
-          onPress={handleSubmit}
-          disabled={submitting}>
-          {submitting ? (
-            <ActivityIndicator color="#ffffff" />
-          ) : (
-            <ThemedText style={styles.buttonText}>Se connecter</ThemedText>
-          )}
-        </Pressable>
-      </ScrollView>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.button,
+              submitting && styles.buttonDisabled,
+              pressed && !submitting && styles.buttonPressed,
+            ]}
+            onPress={handleSubmit}
+            disabled={submitting}>
+            {submitting ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text style={styles.buttonText}>Se connecter</Text>
+            )}
+          </Pressable>
+        </View>
+      </AppScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  atmosphere: {
+    ...StyleSheet.absoluteFill,
+  },
+  glowTop: {
+    position: 'absolute',
+    top: -60,
+    left: -40,
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: 'rgba(255, 140, 0, 0.14)',
+  },
+  glowBottom: {
+    position: 'absolute',
+    right: -70,
+    bottom: 80,
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: 'rgba(230, 126, 0, 0.1)',
+  },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: Spacing.four,
-    gap: Spacing.three,
+    paddingVertical: Spacing.five,
   },
-  title: { textAlign: 'center', fontSize: 28, marginBottom: Spacing.four },
+  card: {
+    backgroundColor: BrandColors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: BrandColors.border,
+    padding: Spacing.four,
+    gap: Spacing.three,
+    shadowColor: '#1C1917',
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 4,
+  },
+  brand: {
+    alignItems: 'center',
+    gap: Spacing.two,
+    marginBottom: Spacing.two,
+  },
+  brandName: {
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 1.8,
+    color: BrandColors.text,
+  },
+  subtitle: {
+    fontSize: 15,
+    color: BrandColors.textMuted,
+    textAlign: 'center',
+  },
   input: {
     borderWidth: 1,
-    borderColor: '#8886',
-    borderRadius: Spacing.two,
+    borderColor: BrandColors.borderStrong,
+    borderRadius: 12,
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
+    paddingVertical: 14,
     fontSize: 16,
+    color: BrandColors.text,
+    backgroundColor: BrandColors.surfaceSoft,
   },
-  error: { color: '#d32f2f' },
+  error: { color: BrandColors.danger, fontSize: 14 },
   button: {
-    backgroundColor: '#208AEF',
-    borderRadius: Spacing.two,
-    paddingVertical: Spacing.three,
+    backgroundColor: BrandColors.primary,
+    borderRadius: 12,
+    paddingVertical: 15,
     alignItems: 'center',
-    marginTop: Spacing.two,
+    marginTop: Spacing.one,
   },
+  buttonPressed: { backgroundColor: BrandColors.primaryHover },
   buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#ffffff', fontWeight: '600', fontSize: 16 },
+  buttonText: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
 });

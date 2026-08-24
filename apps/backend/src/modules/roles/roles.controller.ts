@@ -9,7 +9,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
@@ -21,31 +21,31 @@ export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   @Get('permissions')
-  @Roles('ADMIN', 'MANAGER')
+  @PermissionsAny('roles.manage', 'config.view')
   listPermissions() {
     return this.rolesService.listPermissions();
   }
 
   @Get()
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'ACCOUNTANT', 'CASHIER')
+  @PermissionsAny('roles.manage', 'config.view', 'pos.use', 'stock.view', 'finance.view')
   findAll() {
     return this.rolesService.findAll();
   }
 
   @Post()
-  @Roles('ADMIN')
+  @Permissions('roles.manage')
   create(@Body() dto: CreateRoleDto) {
     return this.rolesService.create(dto);
   }
 
   @Patch(':id')
-  @Roles('ADMIN')
+  @Permissions('roles.manage')
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateRoleDto) {
     return this.rolesService.update(id, dto);
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @Permissions('roles.manage')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.rolesService.remove(id);
   }

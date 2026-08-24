@@ -75,6 +75,14 @@ export class UpdateProductDto {
   @Min(0)
   stockMin?: number;
 
+  /** Famille de prix volume. null = détacher. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  productFamilyId?: number | null;
+
   /** Met à jour le prix de base de l’unité de vente par défaut. */
   @IsOptional()
   @Type(() => Number)

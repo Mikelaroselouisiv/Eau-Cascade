@@ -5,8 +5,9 @@ export class SyncPullQueryDto {
   @IsString()
   entity!: string;
 
+  /** ISO8601 ou curseur composite `ISO8601|uuid`. */
   @IsOptional()
-  @IsISO8601()
+  @IsString()
   since?: string;
 
   @IsOptional()

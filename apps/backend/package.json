@@ -15,6 +15,7 @@
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:seed:demo": "ts-node prisma/seed-demo-dev.ts",
     "test": "jest",
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },

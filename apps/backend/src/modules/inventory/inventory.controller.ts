@@ -24,7 +24,7 @@ import {
   generatedMetaLine,
 } from '../../common/pdf/pdf-document';
 import { formatDateFr, formatDateTimeFr, formatQty } from '../../common/pdf/pdf-format';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { InventoryService } from './inventory.service';
@@ -40,7 +40,7 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Post('sessions')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('inventory.physical')
   createSession(
     @Body() dto: CreateInventorySessionDto,
     @GetUser() user?: { id?: number },
@@ -56,7 +56,7 @@ export class InventoryController {
   }
 
   @Get('sessions')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('inventory.physical')
   listSessions(
     @Query('departmentId') departmentId?: string,
     @Query('companyId') companyId?: string,
@@ -67,7 +67,7 @@ export class InventoryController {
   }
 
   @Get('count-sheet')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'ACCOUNTANT', 'CASHIER')
+  @Permissions('inventory.physical')
   getCountSheet(
     @Query('departmentId') departmentId?: string,
     @Query('asOf') asOf?: string,
@@ -85,7 +85,7 @@ export class InventoryController {
   }
 
   @Get('count-sheet/export/pdf')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'ACCOUNTANT')
+  @Permissions('stock.view')
   async exportCountSheetPdf(
     @Res() res: Response,
     @Query('departmentId') departmentId?: string,
@@ -116,13 +116,13 @@ export class InventoryController {
   }
 
   @Get('sessions/:id')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('inventory.physical')
   getSession(@Param('id', ParseIntPipe) id: number) {
     return this.inventoryService.getInventorySession(id);
   }
 
   @Patch('sessions/:sessionId/lines/:lineId')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('inventory.physical')
   updateLine(
     @Param('sessionId', ParseIntPipe) sessionId: number,
     @Param('lineId', ParseIntPipe) lineId: number,
@@ -133,7 +133,7 @@ export class InventoryController {
   }
 
   @Post('sessions/:id/complete')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('inventory.physical')
   completeSession(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user?: { id?: number },
@@ -142,7 +142,7 @@ export class InventoryController {
   }
 
   @Post('sessions/:id/cancel')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('inventory.physical')
   cancelSession(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user?: { id?: number },
@@ -151,19 +151,19 @@ export class InventoryController {
   }
 
   @Post('entries')
-  @Roles('ADMIN')
+  @Permissions('stock.manage')
   stockIn(@Body() dto: StockMovementDto, @GetUser() user?: { id?: number }) {
     return this.inventoryService.increaseStock(dto.productId, dto.quantity, dto.reason, user?.id);
   }
 
   @Post('adjustments')
-  @Roles('ADMIN')
+  @Permissions('stock.adjust')
   adjust(@Body() dto: StockAdjustmentDto, @GetUser() user?: { id?: number }) {
     return this.inventoryService.adjustStock(dto.productId, dto.quantity, dto.reason, user?.id);
   }
 
   @Get('movements')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('stock.view')
   movements(
     @Query('skip') skipRaw?: string,
     @Query('take') takeRaw?: string,
@@ -189,7 +189,7 @@ export class InventoryController {
   }
 
   @Get('global-snapshot')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'ACCOUNTANT')
+  @PermissionsAny('stock.global', 'reports.view')
   globalSnapshot(
     @Query('companyIds') companyIdsRaw?: string,
     @Query('departmentIds') departmentIdsRaw?: string,
@@ -208,7 +208,7 @@ export class InventoryController {
   }
 
   @Get('global-snapshot/export/pdf')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'ACCOUNTANT')
+  @PermissionsAny('stock.global', 'reports.view')
   async exportGlobalSnapshotPdf(
     @Res() res: Response,
     @Query('companyIds') companyIdsRaw?: string,
@@ -295,7 +295,7 @@ export class InventoryController {
   }
 
   @Get('alerts')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('stock.view')
   alerts(
     @Query('threshold') threshold?: string,
     @Query('companyId') companyIdRaw?: string,
@@ -309,7 +309,7 @@ export class InventoryController {
   }
 
   @Get('alerts/zero')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('stock.view')
   zeroAlerts(
     @Query('companyId') companyIdRaw?: string,
     @Query('skip') skipRaw?: string,
@@ -322,7 +322,7 @@ export class InventoryController {
   }
 
   @Get('sessions/export/pdf')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'ACCOUNTANT')
+  @Permissions('stock.view')
   async exportInventorySessionsPdf(
     @Res() res: Response,
     @Query('departmentId') departmentId?: string,

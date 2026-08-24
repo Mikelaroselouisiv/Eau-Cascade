@@ -23,17 +23,16 @@ import {
 
 @Controller('credit')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permissions('credit.view')
 export class CreditController {
   constructor(private readonly creditService: CreditService) {}
 
   @Get('summary')
-  @Permissions('credit.view')
   summary(@Query('companyId', ParseIntPipe) companyId: number) {
     return this.creditService.summary(companyId);
   }
 
   @Get('customers')
-  @Permissions('credit.view')
   listCustomers(
     @Query('companyId', ParseIntPipe) companyId: number,
     @Query('q') q?: string,
@@ -46,7 +45,6 @@ export class CreditController {
   }
 
   @Get('customers/:id')
-  @Permissions('credit.view')
   getCustomer(@Param('id', ParseIntPipe) id: number) {
     return this.creditService.getCustomer(id);
   }

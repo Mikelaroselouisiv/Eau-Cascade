@@ -7,7 +7,7 @@ import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { buildSaleDetailPrintHtml, openBrowserPrintWindow } from '../utils/saleReceiptBrowserHtml';
 import { buildReceiptPayloadFromSale } from '../utils/receiptPayload';
-import { saleTicketNo } from '../utils/saleTicketNo';
+import { saleTxnNumber } from '../utils/saleTxnNumber';
 
 function formatApiError(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -39,6 +39,8 @@ function paymentMethodLabel(method: string): string {
       return 'Mobile money';
     case 'SPLIT':
       return 'Mixte';
+    case 'CREDIT':
+      return 'À crédit (non encaissé caisse)';
     default:
       return method;
   }
@@ -116,7 +118,7 @@ export function SaleDetailModal({
     setReceiptBusy(true);
     try {
       const blob = await exportSalePdf(sale.id);
-      const fileName = `ticket-vente-${sale.ticketNo || sale.id}.pdf`;
+      const fileName = `ticket-vente-${sale.id}.pdf`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -145,7 +147,7 @@ export function SaleDetailModal({
         style={{ maxWidth: 560, width: '100%' }}
       >
         <div className="modal-heading">
-          <h2 id="sale-detail-title">Vente #{saleTicketNo(sale)}</h2>
+          <h2 id="sale-detail-title">Vente #{saleTxnNumber(sale)}</h2>
           <p className="dept-hint" style={{ margin: 0 }}>
             {formatDateTime(sale.createdAt)}
             {companyName ? ` · ${companyName}` : ''}
@@ -192,9 +194,21 @@ export function SaleDetailModal({
           Total : {formatMoney(sale.total)}
         </p>
 
+        {sale.creditCustomerId != null ? (
+          <p className="info-text" style={{ margin: '0.35rem 0 0' }}>
+            Vente à crédit — payé {formatMoney(sale.amountPaid ?? 0)} · reste{' '}
+            {formatMoney(
+              Math.max(0, Number(sale.total) - Number(sale.amountPaid ?? 0)),
+            )}{' '}
+            (encaissement via board Crédit, hors caisse)
+          </p>
+        ) : null}
+
         {sale.payments && sale.payments.length > 0 ? (
           <>
-            <h3 style={{ margin: '1rem 0 0.35rem', fontSize: '0.95rem' }}>Paiements</h3>
+            <h3 style={{ margin: '1rem 0 0.35rem', fontSize: '0.95rem' }}>
+              {sale.creditCustomerId != null ? 'Mode de règlement' : 'Paiements'}
+            </h3>
             <ul className="simple-list" style={{ marginTop: 0 }}>
               {sale.payments.map((p, i) => (
                 <li key={p.id ?? i} className="simple-list-row">

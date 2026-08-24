@@ -2,32 +2,35 @@
   "expo": {
     "name": "POS Eau Cascade",
     "slug": "pos-eau-cascade-mobile",
-    "version": "1.0.0",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
     "userInterfaceStyle": "light",
     "ios": {
-      "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.eaucascade.pos.mobile",
+      "buildNumber": "1",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
         },
         "NSBluetoothAlwaysUsageDescription": "Utilisé pour se connecter à l'imprimante de tickets.",
+        "NSBluetoothPeripheralUsageDescription": "Utilisé pour se connecter à l'imprimante de tickets.",
         "UISupportedExternalAccessoryProtocols": []
       }
     },
     "android": {
       "package": "com.eaucascade.pos.mobile",
-      "usesCleartextTraffic": true,
+      "versionCode": 1,
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.BLUETOOTH_SCAN",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#F7F4EF",
+        "backgroundColor": "#E8F4F2",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -43,14 +46,31 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F7F4EF",
+          "backgroundColor": "#E8F4F2",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
       ],
       "expo-secure-store",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-file-system",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "./plugins/with-android-release-signing",
+      "./plugins/with-android-apk-install",
+      "./plugins/with-thermal-printer-bluetooth"
     ],
+    "autolinking": {
+      "ios": {
+        "exclude": ["expo-file-system", "expo-intent-launcher"]
+      }
+    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

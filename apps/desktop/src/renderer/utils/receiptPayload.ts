@@ -1,12 +1,32 @@
 import { formatDateTime } from './datetime';
+import { saleTxnNumber } from './saleTxnNumber';
 import type { CompanyProfile, DepartmentPrinterSettings, Sale } from '../types/api';
-import { saleTicketNo } from './saleTicketNo';
+
+function paymentModeLabel(method: string): string {
+  switch (method) {
+    case 'CASH':
+      return 'Espèces';
+    case 'CARD':
+      return 'Carte';
+    case 'MOBILE_MONEY':
+      return 'Mobile money';
+    case 'SPLIT':
+      return 'Mixte';
+    case 'CREDIT':
+      return 'À crédit';
+    case 'BANK':
+      return 'Banque';
+    default:
+      return method;
+  }
+}
 
 export function paymentModeFromSale(sale: Sale): string {
+  if (sale.creditCustomerId != null) return 'À crédit';
   const pays = sale.payments ?? [];
   if (pays.length === 0) return 'N/A';
-  if (pays.length === 1) return pays[0].method;
-  return 'SPLIT';
+  if (pays.length === 1) return paymentModeLabel(String(pays[0].method));
+  return 'Mixte';
 }
 
 export function cashierLabelFromSale(sale: Sale): string {
@@ -37,8 +57,7 @@ export function buildReceiptPayloadFromSale(
   const balanceDue = Math.max(0, Math.round((total - amountPaid) * 100) / 100);
   const paperWidth: 58 | 80 = printer?.paperWidth === 80 ? 80 : 58;
   return {
-    saleId: sale.id,
-    ticketNo: saleTicketNo(sale),
+    saleId: saleTxnNumber(sale),
     companyName: company?.name ?? 'Entreprise',
     companyPhone: company?.phone ?? null,
     address: [company?.address, company?.city].filter(Boolean).join(', ') || '',

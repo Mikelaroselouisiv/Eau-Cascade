@@ -10,7 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -23,19 +23,19 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  @Roles('ADMIN', 'MANAGER')
+  @Permissions('users.view')
   findAll() {
     return this.usersService.findAll();
   }
 
   @Get(':id')
-  @Roles('ADMIN')
+  @Permissions('users.view')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.findOne(id);
   }
 
   @Post()
-  @Roles('ADMIN')
+  @Permissions('users.manage')
   create(
     @Body() createUserDto: CreateUserDto,
     @GetUser() actor?: { id?: number },
@@ -44,7 +44,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN')
+  @Permissions('users.manage')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateUserDto: UpdateUserDto,
@@ -54,7 +54,7 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @Permissions('users.manage')
   remove(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() actor: { id: number },

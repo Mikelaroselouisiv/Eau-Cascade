@@ -1,8 +1,9 @@
 import { getCompany, getPrinterSettings } from './api';
 import { getDb } from './db';
-import type { CompanyProfile, DepartmentPrinterSettings } from '../types/api';
+import type { CompanyProfile, DepartmentPrinterSettings, Sale } from '../types/api';
 import type { ReceiptItem, SaleReceiptData } from './escpos';
 import { formatDateTime } from '../utils/datetime';
+import { paymentMethodLabel } from '../utils/paymentLabels';
 
 const PRINTER_CACHE_KEY = 'printer_settings_backend';
 const COMPANY_CACHE_KEY = 'company_profile';
@@ -51,6 +52,7 @@ export async function buildSaleReceiptData(params: {
   items: ReceiptItem[];
   total: number;
   paymentMode: string;
+  saleRef?: number;
   clientName?: string | null;
   cashier?: string | null;
   departmentId?: number;
@@ -73,6 +75,7 @@ export async function buildSaleReceiptData(params: {
     cashier: params.cashier ?? 'N/A',
     isTest: params.isTest,
     previewSampleBody: printer?.previewSampleBody,
+    saleRef: params.saleRef,
     items: params.items,
     total: params.total,
     paymentMode: params.paymentMode,
@@ -80,4 +83,40 @@ export async function buildSaleReceiptData(params: {
     paperWidth: printer?.paperWidth === 80 ? 80 : 58,
     autoCut: printer?.autoCut,
   };
+}
+
+export function paymentModeFromSale(sale: Sale): string {
+  const pays = sale.payments ?? [];
+  if (pays.length === 0) return 'N/A';
+  if (pays.length === 1) return paymentMethodLabel(String(pays[0].method));
+  return 'Mixte';
+}
+
+export function cashierLabelFromSale(sale: Sale): string {
+  return (
+    sale.user?.fullName?.trim() ||
+    sale.cashier ||
+    (sale.user?.phone ? `Tel ${sale.user.phone}` : 'N/A')
+  );
+}
+
+export async function buildSaleReceiptDataFromSale(
+  sale: Sale,
+  departmentId?: number,
+): Promise<SaleReceiptData> {
+  const items = (sale.items ?? []).map((it) => ({
+    name: it.lineLabel ?? it.product?.name ?? 'Article',
+    qty: Number(it.quantity),
+    price: Number(it.unitPrice),
+  }));
+  const data = await buildSaleReceiptData({
+    items,
+    total: Number(sale.total),
+    paymentMode: paymentModeFromSale(sale),
+    saleRef: sale.txnNumber ?? sale.id,
+    clientName: sale.clientName,
+    cashier: cashierLabelFromSale(sale),
+    departmentId: departmentId ?? sale.items?.[0]?.product?.departmentId ?? undefined,
+  });
+  return { ...data, dateTime: formatDateTime(sale.createdAt) };
 }

@@ -9,7 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { DeliveriesService } from './deliveries.service';
@@ -28,7 +28,7 @@ export class DeliveriesController {
   constructor(private readonly deliveriesService: DeliveriesService) {}
 
   @Get()
-  @Roles('ADMIN', 'MANAGER', 'CASHIER', 'LIVREUR', 'ACCOUNTANT')
+  @Permissions('deliveries.view')
   list(
     @GetUser() user: AuthUser,
     @Query('companyId') companyId?: string,
@@ -49,13 +49,13 @@ export class DeliveriesController {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'MANAGER', 'CASHIER', 'LIVREUR', 'ACCOUNTANT')
+  @Permissions('deliveries.view')
   findOne(@Param('id', ParseIntPipe) id: number, @GetUser() user: AuthUser) {
     return this.deliveriesService.findOne(id, user);
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MANAGER', 'CASHIER', 'LIVREUR')
+  @Permissions('deliveries.manage')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateDeliveryDto,

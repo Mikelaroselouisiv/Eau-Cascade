@@ -9,19 +9,25 @@ import { Platform } from 'react-native';
 
 export const Colors = {
   light: {
-    text: '#1C1917',
-    background: '#F7F4EF',
+    text: '#0A2540',
+    background: '#E8F4F2',
     backgroundElement: '#FFFFFF',
-    backgroundSelected: '#FFF4E5',
-    textSecondary: '#78716C',
+    backgroundSelected: '#D9EEF7',
+    textSecondary: '#4A6B7C',
+    primary: '#0F4C81',
+    primarySoft: '#D9EEF7',
+    border: '#C5DDE0',
   },
   dark: {
     // Même palette claire : le POS Eau Cascade n'utilise pas le mode sombre.
-    text: '#1C1917',
-    background: '#F7F4EF',
+    text: '#0A2540',
+    background: '#E8F4F2',
     backgroundElement: '#FFFFFF',
-    backgroundSelected: '#FFF4E5',
-    textSecondary: '#78716C',
+    backgroundSelected: '#D9EEF7',
+    textSecondary: '#4A6B7C',
+    primary: '#0F4C81',
+    primarySoft: '#D9EEF7',
+    border: '#C5DDE0',
   },
 } as const;
 

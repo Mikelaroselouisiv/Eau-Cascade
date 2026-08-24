@@ -10,10 +10,14 @@ export const ENTITY_ORDER = [
   'PackagingUnit',
   'Store',
   'Register',
-  // AppRole: seulement quand local ET GCP exposent l'entité via /sync/entities
   'User',
   'ExpenseCategory',
   'CreditCustomer',
+  // Banques avant Payment / CreditPayment / BankTransaction (FK bankAccountId).
+  'Bank',
+  'BankAccount',
+  'ProductFamily',
+  'ProductFamilyTier',
   'Product',
   'ProductSaleUnit',
   'ProductVolumePrice',
@@ -27,6 +31,8 @@ export const ENTITY_ORDER = [
   'StockMovement',
   'FinanceEntry',
   'CreditPayment',
+  // Dépôts POS/crédit : après comptes + paiements.
+  'BankTransaction',
   'InventorySession',
   'InventoryLine',
   'PurchaseOrder',

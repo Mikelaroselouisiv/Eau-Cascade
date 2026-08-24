@@ -4,6 +4,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 const productInclude = {
   department: true,
+  productFamily: {
+    include: {
+      tiers: {
+        where: { deletedAt: null },
+        orderBy: { minQuantity: 'asc' as const },
+      },
+    },
+  },
   saleUnits: {
     include: {
       packagingUnit: true,

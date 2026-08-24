@@ -25,6 +25,9 @@ apps/desktop/server-stack/.env.server
 *.pem
 secrets/
 
+# Local backups (mobile downloads, installer snapshots) — download-only, never push binaries
+backups/
+
 # OS / IDE
 Thumbs.db
 .env.local

@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreateGoodsReceiptDto, CreatePurchaseOrderDto, ReceivePurchaseOrderDto } from './dto/purchasing.dto';
@@ -23,7 +23,7 @@ export class PurchasingController {
   constructor(private readonly purchasingService: PurchasingService) {}
 
   @Post('orders')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('purchasing.manage')
   createOrder(
     @Body() dto: CreatePurchaseOrderDto,
     @GetUser() user?: { id?: number },
@@ -32,7 +32,7 @@ export class PurchasingController {
   }
 
   @Get('orders')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('purchasing.manage')
   listOrders(@Query('companyId') companyId?: string) {
     const n = companyId ? Number(companyId) : undefined;
     return this.purchasingService.listPurchaseOrders(
@@ -42,41 +42,23 @@ export class PurchasingController {
 
   /** Totaux montants commandes (estimés) — admin uniquement, hors journal de caisse. */
   @Get('orders-summary')
-  @Roles('ADMIN')
-  ordersSummary(
-    @Query('companyId') companyId?: string,
-    @Query('dateFrom') dateFrom?: string,
-    @Query('dateTo') dateTo?: string,
-    @Query('departmentId') departmentId?: string,
-    @Query('receptionStatus') receptionStatus?: string,
-  ) {
+  @Permissions('purchasing.manage')
+  ordersSummary(@Query('companyId') companyId?: string) {
     const n = companyId ? Number(companyId) : NaN;
     if (!Number.isFinite(n) || n <= 0) {
       throw new BadRequestException('companyId est requis.');
     }
-    const dept = departmentId ? Number(departmentId) : undefined;
-    const reception =
-      receptionStatus === 'pending' ||
-      receptionStatus === 'partial' ||
-      receptionStatus === 'complete'
-        ? receptionStatus
-        : undefined;
-    return this.purchasingService.getPurchaseOrdersAmountSummary(n, {
-      dateFrom: dateFrom?.trim() || undefined,
-      dateTo: dateTo?.trim() || undefined,
-      departmentId: dept != null && Number.isFinite(dept) && dept > 0 ? dept : undefined,
-      receptionStatus: reception,
-    });
+    return this.purchasingService.getPurchaseOrdersAmountSummary(n);
   }
 
   @Get('orders/:id')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('purchasing.manage')
   getOrder(@Param('id', ParseIntPipe) id: number) {
     return this.purchasingService.getPurchaseOrder(id);
   }
 
   @Post('orders/:id/receive')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('purchasing.manage')
   receiveOrder(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ReceivePurchaseOrderDto,
@@ -86,7 +68,7 @@ export class PurchasingController {
   }
 
   @Post('receipts')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('purchasing.manage')
   createReceipt(
     @Body() dto: CreateGoodsReceiptDto,
     @GetUser() user?: { id?: number },
@@ -95,7 +77,7 @@ export class PurchasingController {
   }
 
   @Get('receipts')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('purchasing.manage')
   listReceipts(@Query('departmentId') departmentId?: string) {
     const n = departmentId ? Number(departmentId) : undefined;
     return this.purchasingService.listGoodsReceipts(
@@ -104,13 +86,13 @@ export class PurchasingController {
   }
 
   @Get('receipts/:id')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('purchasing.manage')
   getReceipt(@Param('id', ParseIntPipe) id: number) {
     return this.purchasingService.getGoodsReceipt(id);
   }
 
   @Post('receipts/:id/post')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('purchasing.manage')
   postReceipt(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user?: { id?: number },
@@ -119,7 +101,7 @@ export class PurchasingController {
   }
 
   @Delete('orders/:id')
-  @Roles('ADMIN')
+  @Permissions('purchasing.manage')
   deleteOrder(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user?: { id?: number },
@@ -128,7 +110,7 @@ export class PurchasingController {
   }
 
   @Delete('receipts/:id')
-  @Roles('ADMIN')
+  @Permissions('purchasing.manage')
   deleteReceipt(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user?: { id?: number },

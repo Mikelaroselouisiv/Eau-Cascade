@@ -207,7 +207,8 @@ export class RegisterSessionsService {
 
   /**
    * Espèces attendues à la fermeture :
-   * fond d’ouverture + encaissements espèces (session) − dépenses (session).
+   * fond d’ouverture + encaissements espèces (session) + monnaie non rendue − dépenses (session).
+   * Inclut toutes les ventes POS de la session (classiques et spéciales) liées à la caisse / ouvreur.
    */
   async getClosingCashPreview(sessionId: number, userId: number) {
     const session = await this.prisma.registerSession.findFirst({
@@ -226,23 +227,37 @@ export class RegisterSessionsService {
     const openedAt = session.openedAt;
     const openingCash = this.round2(Number(session.openingCashAmount ?? 0));
 
-    const cashPayments = await this.prisma.payment.findMany({
-      where: {
-        method: 'CASH',
-        sale: {
-          deletedAt: null,
-          status: 'COMPLETED',
-          createdAt: { gte: openedAt },
-          OR: [
-            { userId: session.openedById },
-            { registerId: session.registerId },
-          ],
+    const sessionSaleScope = {
+      deletedAt: null as null,
+      status: 'COMPLETED' as const,
+      creditCustomerId: null as null,
+      createdAt: { gte: openedAt },
+      OR: [{ userId: session.openedById }, { registerId: session.registerId }],
+    };
+
+    // Ventes POS de la session (classiques + spéciales). Hors board Crédit.
+    const sessionSales = await this.prisma.sale.findMany({
+      where: sessionSaleScope,
+      select: {
+        total: true,
+        payments: {
+          where: { deletedAt: null, method: { not: 'CREDIT' } },
+          select: { amount: true, method: true },
         },
       },
-      select: { amount: true },
     });
+    const salesTotal = this.round2(
+      sessionSales.reduce((acc, s) => acc + Number(s.total), 0),
+    );
     const salesCash = this.round2(
-      cashPayments.reduce((acc, p) => acc + Number(p.amount), 0),
+      sessionSales.reduce(
+        (acc, s) =>
+          acc +
+          s.payments
+            .filter((p) => p.method === 'CASH')
+            .reduce((sum, p) => sum + Number(p.amount), 0),
+        0,
+      ),
     );
 
     const expenseRows = await this.prisma.financeEntry.findMany({
@@ -258,17 +273,11 @@ export class RegisterSessionsService {
       expenseRows.reduce((acc, e) => acc + Number(e.amount), 0),
     );
 
-    // Monnaie encore due aux clients : cash toujours dans le tiroir.
+    // Monnaie encore due aux clients : cash toujours dans le tiroir (session courante).
     const unsettledChangeRows = await this.prisma.sale.findMany({
       where: {
-        deletedAt: null,
-        status: 'COMPLETED',
-        creditCustomerId: null,
+        ...sessionSaleScope,
         changeDue: { gt: 0.009 },
-        OR: [
-          { userId: session.openedById },
-          { registerId: session.registerId },
-        ],
       },
       select: { changeDue: true },
     });
@@ -280,6 +289,7 @@ export class RegisterSessionsService {
 
     return {
       openingCash,
+      salesTotal,
       salesCash,
       expenses,
       unsettledChange,

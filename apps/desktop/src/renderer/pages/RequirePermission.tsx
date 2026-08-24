@@ -2,20 +2,22 @@ import type { ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-/** Garde de route basée sur les autorisations AppRole (pas le code MANAGER/ADMIN). */
+/** Garde de route basée sur les autorisations du rôle (Config → Rôles). */
 export function RequirePermission({
   permission,
+  anyOf,
   children,
 }: {
-  permission: string | string[];
+  permission?: string;
+  anyOf?: string[];
   children: ReactNode;
 }) {
-  const { user, canPerm } = useAuth();
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-  const needed = Array.isArray(permission) ? permission : [permission];
-  const ok = needed.some((p) => canPerm(p));
+  const { canPerm } = useAuth();
+  const ok = anyOf?.length
+    ? anyOf.some((p) => canPerm(p))
+    : permission
+      ? canPerm(permission)
+      : false;
   if (!ok) {
     return <Navigate to="/app" replace />;
   }

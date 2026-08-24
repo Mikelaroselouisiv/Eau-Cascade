@@ -4,14 +4,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  BankTransactionType,
   FinanceType,
   PaymentMethod,
   Prisma,
 } from '@prisma/client';
-import { newSaleIdentity } from '../../common/utils/sale-ticket-no';
-import { resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
+import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AccountingPostingService } from '../accounting/accounting-posting.service';
 import { AuditService } from '../audit/audit.service';
 import { DeliveriesService } from '../deliveries/deliveries.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -31,6 +32,7 @@ export class CreditService {
     private readonly inventoryService: InventoryService,
     private readonly auditService: AuditService,
     private readonly deliveriesService: DeliveriesService,
+    private readonly accountingPosting: AccountingPostingService,
   ) {}
 
   private round2(n: number) {
@@ -236,11 +238,47 @@ export class CreditService {
       let total = 0;
       let firstDepartmentId: number | null = customer.departmentId;
 
+      const loaded: Array<{
+        item: (typeof dto.items)[number];
+        psu: {
+          id: number;
+          salePrice: { toString(): string } | number;
+          labelOverride: string | null;
+          unitsPerPackage: { toString(): string } | number;
+          product: {
+            id: number;
+            name: string;
+            companyId: number;
+            departmentId: number | null;
+            isService: boolean;
+            trackStock: boolean;
+            productFamilyId: number | null;
+            productFamily: {
+              tiers: Array<{ minQuantity: unknown; unitPrice: unknown }>;
+            } | null;
+          };
+          packagingUnit: { label: string };
+          volumePrices: Array<{ minQuantity: unknown; unitPrice: unknown }>;
+        };
+        baseQuantity: number;
+      }> = [];
+
       for (const item of dto.items) {
         const psu = await tx.productSaleUnit.findUnique({
           where: { id: item.productSaleUnitId },
           include: {
-            product: true,
+            product: {
+              include: {
+                productFamily: {
+                  include: {
+                    tiers: {
+                      where: { deletedAt: null },
+                      orderBy: { minQuantity: 'asc' },
+                    },
+                  },
+                },
+              },
+            },
             packagingUnit: true,
             volumePrices: { orderBy: { minQuantity: 'asc' } },
           },
@@ -275,11 +313,36 @@ export class CreditService {
           await this.inventoryService.ensureStockAvailabilityTx(tx, product.id, baseQuantity);
         }
 
+        loaded.push({ item, psu, baseQuantity });
+      }
+
+      const familyQty = new Map<number, number>();
+      for (const line of loaded) {
+        const fid = line.psu.product.productFamilyId;
+        if (fid == null) continue;
+        familyQty.set(fid, (familyQty.get(fid) ?? 0) + Number(line.item.quantity));
+      }
+
+      for (const line of loaded) {
+        const { item, psu, baseQuantity } = line;
+        const product = psu.product;
         const tierRows = psu.volumePrices.map((v) => ({
           minQuantity: Number(v.minQuantity),
           unitPrice: Number(v.unitPrice),
         }));
-        const unitPrice = resolveVolumeUnitPrice(Number(psu.salePrice), tierRows, item.quantity);
+        const familyTiers =
+          product.productFamily?.tiers.map((t) => ({
+            minQuantity: Number(t.minQuantity),
+            unitPrice: Number(t.unitPrice),
+          })) ?? [];
+        const familyPrice =
+          product.productFamilyId != null
+            ? resolveFamilyUnitPrice(familyTiers, familyQty.get(product.productFamilyId) ?? 0)
+            : null;
+        const unitPrice =
+          familyPrice != null
+            ? familyPrice
+            : resolveVolumeUnitPrice(Number(psu.salePrice), tierRows, item.quantity);
         const subtotal = unitPrice * item.quantity;
         total += subtotal;
         const lineLabel = psu.labelOverride
@@ -320,11 +383,8 @@ export class CreditService {
         cashier = u?.fullName?.trim() || u?.phone?.trim() || `User#${userId}`;
       }
 
-      const { uuid: saleUuid, ticketNo: saleTicketNo } = newSaleIdentity();
       const sale = await tx.sale.create({
         data: {
-          uuid: saleUuid,
-          ticketNo: saleTicketNo,
           total,
           subtotal: total,
           tax: 0,
@@ -345,21 +405,13 @@ export class CreditService {
               productSaleUnitId: it.productSaleUnitId,
             })),
           },
+          // Un seul paiement CREDIT (total) : pas de Payment CASH d’acompte,
+          // sinon la caisse classique le compterait comme encaissé POS.
+          // L’acompte réel passe par CreditPayment + FinanceEntry ci-dessous.
           payments: {
             create: [
-              ...(down > 0.009
-                ? [
-                    {
-                      amount: down,
-                      method: (dto.downPaymentMethod && dto.downPaymentMethod !== PaymentMethod.CREDIT
-                        ? dto.downPaymentMethod
-                        : PaymentMethod.CASH) as PaymentMethod,
-                      reference: 'Acompte crédit',
-                    },
-                  ]
-                : []),
               {
-                amount: this.round2(total - down),
+                amount: total,
                 method: PaymentMethod.CREDIT,
                 reference: dto.note?.trim() || 'Vente à crédit',
               },
@@ -367,6 +419,13 @@ export class CreditService {
           },
         },
         include: { items: true },
+      });
+
+      // Numéro métier = id d’origine (aligné impression / dashboard / sync).
+      const txnNumber = sale.id;
+      await tx.sale.update({
+        where: { id: sale.id },
+        data: { txnNumber },
       });
 
       // Fiche livraison PENDING — stock sort à la livraison (même flux que le POS).
@@ -380,14 +439,19 @@ export class CreditService {
         })),
       });
 
-      // Acompte → journal finance (cash), sans lier saleId unique POS.
+      const downMethod =
+        dto.downPaymentMethod && dto.downPaymentMethod !== PaymentMethod.CREDIT
+          ? dto.downPaymentMethod
+          : PaymentMethod.CASH;
+
+      // Acompte → journal entreprise « Encaissements crédit » (hors caisse POS).
       if (down > 0.009) {
         const categoryId = await this.findOrCreateCreditCashCategoryId(tx, customer.companyId);
         const fe = await tx.financeEntry.create({
           data: {
             type: FinanceType.INCOME,
             amount: down,
-            description: `Acompte crédit — ${customer.name} — vente #${sale.ticketNo}`,
+            description: `Acompte crédit — ${customer.name} — vente #${sale.id}`,
             userId: userId ?? null,
             categoryId,
           },
@@ -397,16 +461,37 @@ export class CreditService {
             creditCustomerId: customer.id,
             saleId: sale.id,
             amount: down,
-            method:
-              dto.downPaymentMethod && dto.downPaymentMethod !== PaymentMethod.CREDIT
-                ? dto.downPaymentMethod
-                : PaymentMethod.CASH,
+            method: downMethod,
             note: 'Acompte à l’achat',
             userId: userId ?? null,
             financeEntryId: fe.id,
           },
         });
       }
+
+      const costRows = await tx.saleItem.findMany({
+        where: { saleId: sale.id },
+        select: { baseQuantity: true, product: { select: { cost: true } } },
+      });
+      const cogs = costRows.reduce(
+        (s, it) => s + Number(it.baseQuantity) * Number(it.product.cost ?? 0),
+        0,
+      );
+
+      await this.accountingPosting.postCreditSale(
+        {
+          companyId: customer.companyId,
+          saleId: sale.id,
+          entryDate: new Date(),
+          total,
+          downPayment: down,
+          downMethod,
+          cogs,
+          customerName: customer.name,
+          createdById: userId,
+        },
+        tx,
+      );
 
       await this.auditService.log({
         userId,
@@ -423,7 +508,7 @@ export class CreditService {
 
       return {
         saleId: sale.id,
-        ticketNo: sale.ticketNo,
+        txnNumber,
         total,
         amountPaid: down,
         balanceDue: this.round2(total - down),
@@ -443,6 +528,10 @@ export class CreditService {
 
     const method =
       dto.method && dto.method !== PaymentMethod.CREDIT ? dto.method : PaymentMethod.CASH;
+
+    if (method === PaymentMethod.BANK && (dto.bankAccountId == null || dto.bankAccountId < 1)) {
+      throw new BadRequestException('Compte bancaire requis pour un paiement banque');
+    }
 
     return this.prisma.$transaction(async (tx) => {
       let remaining = amount;
@@ -495,18 +584,46 @@ export class CreditService {
         throw new BadRequestException('Aucune créance ouverte à solder pour ce montant');
       }
 
+      let bankAccount: {
+        id: number;
+        name: string;
+        bank: { id: number; name: string };
+      } | null = null;
+      if (method === PaymentMethod.BANK) {
+        bankAccount = await tx.bankAccount.findFirst({
+          where: {
+            id: dto.bankAccountId!,
+            companyId: customer.companyId,
+            deletedAt: null,
+            isActive: true,
+            bank: { deletedAt: null, isActive: true },
+          },
+          include: { bank: { select: { id: true, name: true } } },
+        });
+        if (!bankAccount) {
+          throw new BadRequestException('Compte bancaire introuvable ou inactif');
+        }
+      }
+
       const categoryId = await this.findOrCreateCreditCashCategoryId(tx, customer.companyId);
+      const saleSuffix =
+        allocations.length === 1 ? ` — vente #${allocations[0].saleId}` : '';
       const fe = await tx.financeEntry.create({
         data: {
           type: FinanceType.INCOME,
           amount: applied,
-          description: `Remboursement crédit — ${customer.name}${
-            allocations.length === 1 ? ` — vente #${allocations[0].saleId}` : ''
-          }`,
+          description:
+            method === PaymentMethod.BANK
+              ? `Remboursement crédit banque — ${customer.name}${saleSuffix}`
+              : `Remboursement crédit — ${customer.name}${saleSuffix}`,
           userId: userId ?? null,
           categoryId,
         },
       });
+
+      const bankReference = bankAccount
+        ? dto.reference?.trim() || `${bankAccount.bank.name} · ${bankAccount.name}`
+        : dto.reference?.trim() || null;
 
       const payment = await tx.creditPayment.create({
         data: {
@@ -514,19 +631,55 @@ export class CreditService {
           saleId: allocations.length === 1 ? allocations[0].saleId : dto.saleId ?? null,
           amount: applied,
           method,
-          reference: dto.reference?.trim() || null,
+          reference: bankReference,
+          bankAccountId: bankAccount?.id ?? null,
           note: dto.note?.trim() || null,
           userId: userId ?? null,
           financeEntryId: fe.id,
         },
       });
 
+      // Dépôt banque après CreditPayment pour une référence stable (sync / réconciliation).
+      if (bankAccount) {
+        const saleRef =
+          allocations.length === 1 ? `vente #${allocations[0].saleId}` : 'multi-ventes';
+        await tx.bankTransaction.create({
+          data: {
+            bankAccountId: bankAccount.id,
+            type: BankTransactionType.DEPOSIT,
+            amount: applied,
+            description: `Remboursement crédit — ${customer.name} — ${saleRef} — ${bankAccount.bank.name} / ${bankAccount.name}`,
+            reference: `creditPayment:${payment.uuid}`,
+            userId: userId ?? null,
+          },
+        });
+      }
+
+      await this.accountingPosting.postCreditPayment(
+        {
+          companyId: customer.companyId,
+          paymentId: payment.id,
+          entryDate: new Date(),
+          amount: applied,
+          method,
+          customerName: customer.name,
+          createdById: userId,
+        },
+        tx,
+      );
+
       await this.auditService.log({
         userId,
         action: 'CREDIT_PAYMENT_RECORDED',
         entity: 'CreditPayment',
         entityId: String(payment.id),
-        metadata: { applied, allocations, remainderUnused: remaining },
+        metadata: {
+          applied,
+          allocations,
+          remainderUnused: remaining,
+          method,
+          bankAccountId: bankAccount?.id ?? null,
+        },
       });
 
       return {

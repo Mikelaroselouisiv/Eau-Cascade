@@ -222,10 +222,6 @@ export interface PurchaseOrderListItem {
 
 export interface PurchaseOrdersAmountSummary {
   companyId: number;
-  dateFrom?: string | null;
-  dateTo?: string | null;
-  departmentId?: number | null;
-  receptionStatus?: ReceptionStatus | null;
   orderCount: number;
   pendingCount: number;
   partialCount: number;
@@ -318,6 +314,28 @@ export interface ProductVolumePrice {
   sortOrder: number;
 }
 
+export interface ProductFamilyTier {
+  id: number;
+  productFamilyId: number;
+  minQuantity: string | number;
+  unitPrice: string | number;
+  sortOrder: number;
+}
+
+export interface ProductFamily {
+  id: number;
+  uuid?: string;
+  companyId: number;
+  name: string;
+  tiers: ProductFamilyTier[];
+  products?: Array<{
+    id: number;
+    name: string;
+    companyId?: number;
+    departmentId?: number | null;
+  }>;
+}
+
 export interface ProductSaleUnit {
   id: number;
   productId: number;
@@ -333,6 +351,8 @@ export interface ProductSaleUnit {
 export interface Product {
   id: number;
   companyId?: number;
+  productFamilyId?: number | null;
+  productFamily?: ProductFamily | null;
   name: string;
   cardColor?: string | null;
   sku?: string | null;
@@ -356,9 +376,11 @@ export interface SaleItemPayload {
 }
 
 export interface PaymentPayload {
-  method: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT' | 'CREDIT';
+  method: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT' | 'CREDIT' | 'BANK';
   amount: number;
   reference?: string;
+  /** Requis si method = BANK. */
+  bankAccountId?: number;
 }
 
 export interface CreateSalePayload {
@@ -376,6 +398,8 @@ export interface CreateSalePayload {
 
 export interface SaleCashGapRow {
   id: number;
+  /** Numéro ticket / livraison (stable après sync). */
+  txnNumber?: number;
   clientName?: string | null;
   cashier?: string | null;
   createdAt: string;
@@ -395,15 +419,16 @@ export interface SaleCashGaps {
 export interface SalePaymentRow {
   id?: number;
   amount: string | number;
-  method: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT' | 'CREDIT';
+  method: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT' | 'CREDIT' | 'BANK';
   reference?: string | null;
+  bankAccountId?: number | null;
   createdAt?: string;
 }
 
 export interface Sale {
   id: number;
-  /** Numéro de fiche imprimé / affiché (stable sync). */
-  ticketNo?: string | null;
+  /** Numéro métier (impression / tableau) — stable après sync. */
+  txnNumber?: number | null;
   total: number | string;
   subtotal?: number | string;
   tax?: number | string;
@@ -416,6 +441,8 @@ export interface Sale {
   changeDue?: number | string;
   changeSettledAt?: string | null;
   cashBalanceSettledAt?: string | null;
+  /** Présent si la vente vient du board Crédit (hors caisse POS). */
+  creditCustomerId?: number | null;
   userId?: number | null;
   user?: {
     id: number;
@@ -461,6 +488,8 @@ export interface Delivery {
   id: number;
   uuid: string;
   saleId: number;
+  /** Numéro imprimé sur le ticket (= sale.txnNumber) — à utiliser pour retrouver la fiche. */
+  saleRef?: number | null;
   companyId: number;
   departmentId?: number | null;
   status: DeliveryStatus;
@@ -476,7 +505,7 @@ export interface Delivery {
   } | null;
   sale?: {
     id: number;
-    ticketNo?: string | null;
+    txnNumber?: number | null;
     total: number | string;
     clientName?: string | null;
     cashier?: string | null;
@@ -598,6 +627,7 @@ export interface FinanceEntry {
   type: 'INCOME' | 'EXPENSE';
   amount: string | number;
   description: string;
+  detail?: string | null;
   createdAt: string;
   user?: { id: number; fullName?: string | null; phone: string } | null;
 }
@@ -609,6 +639,7 @@ export interface FinanceLedgerRow {
   occurredAt: string;
   amount: number;
   description: string;
+  detail?: string | null;
   user: { id: number; fullName: string | null; phone: string } | null;
 }
 
@@ -638,7 +669,6 @@ export interface CreditCustomerDetail extends CreditCustomerListItem {
   availableCredit: number;
   sales: Array<{
     id: number;
-    ticketNo?: string | null;
     total: number;
     amountPaid: number;
     balanceDue: number;
@@ -755,4 +785,184 @@ export interface BankTransactionRow {
     accountNumber?: string | null;
     bank: { id: number; name: string };
   };
+}
+
+/** ——— Comptabilité (partie double PCG) ——— */
+
+export type FiscalYearStatus = 'OPEN' | 'CLOSED';
+export type JournalCode = 'VE' | 'AC' | 'BQ' | 'CA' | 'OD' | 'AN';
+
+export interface AccountRow {
+  id: number;
+  code: string;
+  name: string;
+  classNumber: number;
+  nature: 'BALANCE_SHEET' | 'INCOME_STATEMENT';
+  isDebitNormal: boolean;
+  systemKey?: string | null;
+  isSystem: boolean;
+  isActive: boolean;
+}
+
+export interface FiscalYearRow {
+  id: number;
+  companyId?: number;
+  label: string;
+  /** YYYY-MM-DD (ou ISO) */
+  startDate: string;
+  /** YYYY-MM-DD (ou ISO) */
+  endDate: string;
+  status: FiscalYearStatus;
+  closedAt?: string | null;
+  closedBy?: { id: number; fullName: string | null; phone: string } | null;
+  _count?: { entries: number };
+}
+
+export interface JournalLineRow {
+  id: number;
+  debit: string | number;
+  credit: string | number;
+  label?: string | null;
+  account: { id: number; code: string; name: string };
+}
+
+export interface JournalEntryRow {
+  id: number;
+  entryDate: string;
+  journalCode: JournalCode;
+  entryNumber: number;
+  description: string;
+  reference?: string | null;
+  source: string;
+  lines: JournalLineRow[];
+  createdBy?: { id: number; fullName: string | null; phone: string } | null;
+}
+
+export interface AccountingOverview {
+  openFiscalYear: FiscalYearRow | null;
+  fiscalYears: FiscalYearRow[];
+  accountCount: number;
+  entryCount: number;
+}
+
+export interface AccountBalanceRow {
+  accountId: number;
+  code: string;
+  name: string;
+  classNumber: number;
+  nature: 'BALANCE_SHEET' | 'INCOME_STATEMENT';
+  debit: number;
+  credit: number;
+  balance: number;
+  balanceSide: 'debit' | 'credit' | 'zero';
+}
+
+export interface TrialBalanceReport {
+  fiscalYear: { id: number; label: string; status: string };
+  dateFrom: string;
+  dateTo: string;
+  rows: AccountBalanceRow[];
+  totals: { debit: number; credit: number };
+  balanceTotals?: { debit: number; credit: number };
+  balanced?: boolean;
+}
+
+export interface BalanceSheetReport {
+  fiscalYear: { id: number; label: string; status: string };
+  dateFrom: string;
+  dateTo: string;
+  actif: AccountBalanceRow[];
+  passif: AccountBalanceRow[];
+  totalActif: number;
+  totalPassif: number;
+  balanced: boolean;
+  resultatEnCours: number;
+}
+
+export interface IncomeStatementReport {
+  fiscalYear: { id: number; label: string; status: string };
+  dateFrom: string;
+  dateTo: string;
+  charges: AccountBalanceRow[];
+  produits: AccountBalanceRow[];
+  totalCharges: number;
+  totalProduits: number;
+  resultat: number;
+  resultatLabel: string;
+}
+
+export interface GeneralLedgerReport {
+  fiscalYear: { id: number; label: string; status: string };
+  dateFrom: string;
+  dateTo: string;
+  account: { id: number; code: string; name: string; classNumber: number };
+  movements: Array<{
+    entryId: number;
+    entryDate: string;
+    journalCode: JournalCode;
+    entryNumber: number;
+    description: string;
+    label?: string | null;
+    debit: number;
+    credit: number;
+    balance: number;
+  }>;
+  closingBalance: number;
+}
+
+export interface AccountingBackfillResult {
+  fiscalYear: { id: number; label: string; startDate: string; endDate: string };
+  posted: {
+    sales: number;
+    creditSales: number;
+    creditPayments: number;
+    expenses: number;
+    purchases: number;
+    bankManual: number;
+    supplierPayments: number;
+    fixedAssets: number;
+    depreciations: number;
+  };
+  skipped: {
+    outsidePeriod: number;
+    alreadyPosted: number;
+    other: number;
+  };
+}
+
+export interface SupplierPaymentRow {
+  id: number;
+  supplierName: string;
+  amount: string | number;
+  method: string;
+  paidAt: string;
+  note?: string | null;
+  bankAccount?: {
+    id: number;
+    name: string;
+    bank: { name: string };
+  } | null;
+  user?: { id: number; fullName: string | null; phone: string } | null;
+}
+
+export interface AccountingSuppliersOverview {
+  suppliersPayable: number;
+  supplierNames: string[];
+  payments: SupplierPaymentRow[];
+}
+
+export interface FixedAssetRow {
+  id: number;
+  name: string;
+  acquisitionDate: string;
+  acquisitionCost: number;
+  residualValue: number;
+  usefulLifeMonths: number;
+  accumulatedDepreciation: number;
+  lastDepreciationPeriod: string | null;
+  isActive: boolean;
+  note: string | null;
+  monthlyDepreciation: number;
+  netBookValue: number;
+  remainingDepreciable: number;
 }

@@ -1,6 +1,6 @@
 import { FinanceType } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsDateString, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class CreateFinanceEntryDto {
   @IsEnum(FinanceType)
@@ -13,6 +13,12 @@ export class CreateFinanceEntryDto {
 
   @IsString()
   description: string;
+
+  /** Précisions libres (optionnel) en plus du libellé. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  detail?: string;
 
   /**
    * Entreprise ciblée (utile surtout pour l'ADMIN qui peut filtrer/monitorer

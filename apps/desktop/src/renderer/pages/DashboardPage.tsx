@@ -38,6 +38,7 @@ import type {
   StockMovementRow,
 } from '../types/api';
 import { formatQuantity } from '../utils/formatQuantity';
+import { saleTxnNumber } from '../utils/saleTxnNumber';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { useAuth } from '../context/AuthContext';
 import { AuditJournalPanel } from '../components/AuditJournalPanel';
@@ -54,7 +55,7 @@ import { StockZeroAlertsPanel } from '../components/StockZeroAlertsPanel';
 import { StockMovementsPanel } from '../components/StockMovementsPanel';
 import { InventoryPhysicalSection } from '../components/InventoryPhysicalSection';
 import { formatMoney } from '../utils/currency';
-import { formatDateTime, formatYmd, defaultMonthStartYmd, ymdStartIso, ymdEndIso } from '../utils/datetime';
+import { formatDateTime, formatYmd, defaultMonthStartYmd, addDaysYmd, ymdStartIso, ymdEndIso } from '../utils/datetime';
 import {
   EXPENSE_LABEL_OPTIONS,
   EXPENSE_LABEL_OTHER,
@@ -65,13 +66,50 @@ export function DashboardPage() {
   type TabId = 'synthese' | 'ventes' | 'achats' | 'stock' | 'banque' | 'benefices';
 
   const { can, canPerm } = useAuth();
-  const isAdmin = can(['ADMIN']) || canPerm('*');
+  const isAdmin = can(['ADMIN']);
   const canAccessDashboard = canPerm('dashboard.view');
-  const canManageFinance = canPerm('finance.view') || canPerm('finance.write');
+  const canManageFinance = canPerm('finance.write');
+  /** Voir journal / totaux finance (pas seulement saisir une dépense). */
+  const canViewFinance = canPerm('finance.view') || canManageFinance;
+  /** Formulaire dépense seul — sans accès au reste de la finance. */
+  const canRecordExpense = canPerm('finance.expense') || canManageFinance;
+  const showExpensesTab = canRecordExpense || canViewFinance;
   const canCancelOrRefund = canPerm('sales.cancel');
+  const canDeleteSale = canPerm('sales.delete');
   const canSeePurchases = isAdmin || canPerm('purchasing.manage');
+  const canSeeSynthesis = isAdmin || canPerm('dashboard.synthesis') || canPerm('reports.view');
+  const canSeeBanks = isAdmin || canPerm('banks.view') || canPerm('banks.manage');
+  const canSeeBenefices = isAdmin || canPerm('reports.view');
+  const canSeeGlobalStock = isAdmin || canPerm('stock.global') || canPerm('reports.view');
+  const canSeeSales = isAdmin || canPerm('sales.view');
+  /** Historique ventes libre (rapports). */
+  const canSeeUnlimitedSalesRange = isAdmin || canPerm('reports.view');
+  /** Totaux ventes : illimité via reports, ou fenêtre 2 jours via sales.recent_totals. */
+  const canSeeSalesTotals =
+    canSeeUnlimitedSalesRange || canPerm('sales.recent_totals');
+  const salesRecentMinYmd = useMemo(() => {
+    if (canSeeUnlimitedSalesRange || !canSeeSalesTotals) return null;
+    return addDaysYmd(formatYmd(new Date()), -1);
+  }, [canSeeUnlimitedSalesRange, canSeeSalesTotals]);
 
-  const [tab, setTab] = useState<TabId>(isAdmin ? 'synthese' : 'ventes');
+  function defaultVentesFromYmd() {
+    if (salesRecentMinYmd) return salesRecentMinYmd;
+    return defaultMonthStartYmd();
+  }
+
+  function clampSalesRangeYmd(from: string, to: string): { from: string; to: string } {
+    const today = formatYmd(new Date());
+    let nextFrom = from;
+    let nextTo = to;
+    if (salesRecentMinYmd) {
+      if (nextFrom < salesRecentMinYmd) nextFrom = salesRecentMinYmd;
+      if (nextTo > today) nextTo = today;
+      if (nextTo < nextFrom) nextTo = nextFrom;
+    }
+    return { from: nextFrom, to: nextTo };
+  }
+
+  const [tab, setTab] = useState<TabId>(() => (canSeeSynthesis ? 'synthese' : 'ventes'));
   const [inventoryHistorySlot, setInventoryHistorySlot] = useState<HTMLDivElement | null>(null);
   const [ledgerPdfLoading, setLedgerPdfLoading] = useState(false);
   const [saleActionBusy, setSaleActionBusy] = useState(false);
@@ -167,7 +205,11 @@ export function DashboardPage() {
 
   const [salesByProductRows, setSalesByProductRows] = useState<DashboardSalesByProductRow[]>([]);
   const [salesByProductLoading, setSalesByProductLoading] = useState(false);
-  const [ventesDateFrom, setVentesDateFrom] = useState(defaultMonthStartYmd);
+  const [ventesDateFrom, setVentesDateFrom] = useState(() => {
+    const today = formatYmd(new Date());
+    if (!canSeeUnlimitedSalesRange && canSeeSalesTotals) return addDaysYmd(today, -1);
+    return defaultMonthStartYmd();
+  });
   const [ventesDateTo, setVentesDateTo] = useState(() => formatYmd(new Date()));
   const [ventesPdfLoading, setVentesPdfLoading] = useState(false);
   const [ventesDeptModal, setVentesDeptModal] = useState<{
@@ -176,10 +218,47 @@ export function DashboardPage() {
     rows: DashboardSalesByProductRow[];
   } | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [txnDateFrom, setTxnDateFrom] = useState(defaultMonthStartYmd);
+  const [txnDateFrom, setTxnDateFrom] = useState(() => {
+    const today = formatYmd(new Date());
+    if (!canSeeUnlimitedSalesRange && canSeeSalesTotals) return addDaysYmd(today, -1);
+    return defaultMonthStartYmd();
+  });
   const [txnDateTo, setTxnDateTo] = useState(() => formatYmd(new Date()));
 
   const [msg, setMsg] = useAutoClearMessage();
+
+  const allowedTabs = useMemo(() => {
+    const tabs: Array<[TabId, string]> = [];
+    if (canSeeSynthesis) tabs.push(['synthese', 'Synthèse']);
+    if (canSeeSales) tabs.push(['ventes', 'Ventes']);
+    if (canSeeGlobalStock) tabs.push(['stock', 'Stock & Mouvements']);
+    if (showExpensesTab) {
+      tabs.push([
+        'achats',
+        canViewFinance && (isAdmin || canSeePurchases) ? 'Achats & Dépenses' : 'Dépenses',
+      ]);
+    }
+    if (canSeeBanks) tabs.push(['banque', 'Banque']);
+    if (canSeeBenefices) tabs.push(['benefices', 'Analyse des bénéfices']);
+    return tabs;
+  }, [
+    canSeeSynthesis,
+    canSeeSales,
+    canSeeGlobalStock,
+    showExpensesTab,
+    canViewFinance,
+    canSeePurchases,
+    canSeeBanks,
+    canSeeBenefices,
+    isAdmin,
+  ]);
+
+  useEffect(() => {
+    if (allowedTabs.length === 0) return;
+    if (!allowedTabs.some(([id]) => id === tab)) {
+      setTab(allowedTabs[0][0]);
+    }
+  }, [allowedTabs, tab]);
 
   const salesByDepartmentGroups = useMemo(() => {
     const groups: {
@@ -250,8 +329,7 @@ export function DashboardPage() {
   }, [companyId, canAccessDashboard]);
 
   useEffect(() => {
-    if (!canManageFinance && !isAdmin) return;
-    if (companyId === '') return;
+    if (!canAccessDashboard || companyId === '') return;
 
     const cid = Number(companyId);
     setAchatsTotalsDateFrom(defaultMonthStartYmd());
@@ -284,12 +362,12 @@ export function DashboardPage() {
     setSaleReceiptPrinter(null);
     setSalesByProductRows([]);
     setVentesDeptModal(null);
-    setVentesDateFrom(defaultMonthStartYmd());
+    setVentesDateFrom(defaultVentesFromYmd());
     setVentesDateTo(formatYmd(new Date()));
-    setTxnDateFrom(defaultMonthStartYmd());
+    setTxnDateFrom(defaultVentesFromYmd());
     setTxnDateTo(formatYmd(new Date()));
 
-    if (!isAdmin) return;
+    if (!canSeeGlobalStock) return;
 
     void Promise.all([
       getInventoryAlerts({ threshold: 5, companyId: cid, skip: 0, take: alertsTake }),
@@ -307,17 +385,17 @@ export function DashboardPage() {
         setMovementsTotal(mov.total);
       })
       .catch(() => setMsg('Impossible de charger le tableau de bord.', { persist: true }));
-  }, [companyId, isAdmin, canManageFinance, setMsg]);
+  }, [companyId, canAccessDashboard, canSeeGlobalStock, setMsg]);
 
   useEffect(() => {
-    if (!isAdmin || companyId === '' || tab !== 'stock') return;
+    if (!canSeeGlobalStock || companyId === '' || tab !== 'stock') return;
     const cid = Number(companyId);
     setGlobalCompanyIds([cid]);
     setGlobalDeptIds([]);
     setGlobalItems([]);
     setGlobalAsOf('');
     setGlobalAsOfApplied(null);
-  }, [companyId, tab, isAdmin]);
+  }, [companyId, tab, canSeeGlobalStock]);
 
   async function loadGlobalSnapshot() {
     setGlobalLoading(true);
@@ -374,20 +452,39 @@ export function DashboardPage() {
   }
 
   useEffect(() => {
-    if (!canAccessDashboard || companyId === '' || tab !== 'ventes') return;
-    if (!ventesDateFrom || !ventesDateTo || ventesDateFrom > ventesDateTo) return;
+    if (!canAccessDashboard || companyId === '' || tab !== 'ventes' || !canSeeSalesTotals) {
+      if (!canSeeSalesTotals) setSalesByProductRows([]);
+      return;
+    }
+    const { from, to } = clampSalesRangeYmd(ventesDateFrom, ventesDateTo);
+    if (from !== ventesDateFrom || to !== ventesDateTo) {
+      setVentesDateFrom(from);
+      setVentesDateTo(to);
+      return;
+    }
+    if (!from || !to || from > to) return;
     setSalesByProductLoading(true);
     void getDashboardSalesByProduct({
       companyId: Number(companyId),
-      dateFrom: ventesDateFrom,
-      dateTo: ventesDateTo,
+      dateFrom: from,
+      dateTo: to,
     })
       .then(setSalesByProductRows)
       .catch(() =>
         setMsg('Impossible de charger le détail des ventes par produit.', { persist: true }),
       )
       .finally(() => setSalesByProductLoading(false));
-  }, [companyId, ventesDateFrom, ventesDateTo, tab, canAccessDashboard, setMsg]);
+  }, [companyId, ventesDateFrom, ventesDateTo, tab, canAccessDashboard, canSeeSalesTotals, setMsg]);
+
+  useEffect(() => {
+    if (!canAccessDashboard || companyId === '' || tab !== 'ventes') return;
+    if (!salesRecentMinYmd) return;
+    const { from, to } = clampSalesRangeYmd(txnDateFrom, txnDateTo);
+    if (from !== txnDateFrom || to !== txnDateTo) {
+      setTxnDateFrom(from);
+      setTxnDateTo(to);
+    }
+  }, [tab, companyId, canAccessDashboard, salesRecentMinYmd, txnDateFrom, txnDateTo]);
 
   useEffect(() => {
     if (!canAccessDashboard || companyId === '' || tab !== 'ventes') return;
@@ -408,7 +505,7 @@ export function DashboardPage() {
   }, [companyId, salesListQuery, canAccessDashboard, setMsg, tab]);
 
   useEffect(() => {
-    if (!canManageFinance || companyId === '' || tab !== 'achats') return;
+    if (!canViewFinance || companyId === '' || tab !== 'achats') return;
     if (!achatsTotalsDateFrom || !achatsTotalsDateTo || achatsTotalsDateFrom > achatsTotalsDateTo) return;
     setAchatsTotalsLoading(true);
     void getDashboardSummaryRange({
@@ -421,10 +518,10 @@ export function DashboardPage() {
         setMsg('Impossible de charger les totaux achats / dépenses.', { persist: true }),
       )
       .finally(() => setAchatsTotalsLoading(false));
-  }, [tab, companyId, achatsTotalsDateFrom, achatsTotalsDateTo, canManageFinance, setMsg]);
+  }, [tab, companyId, achatsTotalsDateFrom, achatsTotalsDateTo, canViewFinance, setMsg]);
 
   useEffect(() => {
-    if (!canManageFinance || companyId === '' || tab !== 'achats') return;
+    if (!canViewFinance || companyId === '' || tab !== 'achats') return;
     if (!ledgerDateFrom || !ledgerDateTo || ledgerDateFrom > ledgerDateTo) return;
     setLedgerLoading(true);
     setLedgerSkip(0);
@@ -444,10 +541,10 @@ export function DashboardPage() {
       })
       .catch(() => setMsg('Impossible de charger le journal unifié.', { persist: true }))
       .finally(() => setLedgerLoading(false));
-  }, [tab, companyId, ledgerDateFrom, ledgerDateTo, effectiveLedgerNature, canManageFinance, canSeePurchases, setMsg]);
+  }, [tab, companyId, ledgerDateFrom, ledgerDateTo, effectiveLedgerNature, canViewFinance, canSeePurchases, setMsg]);
 
   async function refreshAchatsLedger() {
-    if (companyId === '') return;
+    if (companyId === '' || !canViewFinance) return;
     const cid = Number(companyId);
     const [range, ledgerRes] = await Promise.all([
       getDashboardSummaryRange({
@@ -473,16 +570,14 @@ export function DashboardPage() {
 
   async function submitExpense(e: FormEvent) {
     e.preventDefault();
-    if (companyId === '') return;
+    if (companyId === '' || !canRecordExpense) return;
     setMsg('');
     const amount = Number(expenseAmount);
-    const label =
+    const description =
       expenseLabelChoice === EXPENSE_LABEL_OTHER
         ? expenseDescOther.trim()
         : expenseLabelChoice.trim();
-    const detail = expenseDetail.trim();
-    const description = detail ? `${label} — ${detail}` : label;
-    if (!label || !Number.isFinite(amount) || amount <= 0) return;
+    if (!description || !Number.isFinite(amount) || amount <= 0) return;
     if (expensePrintOrder && expenseDeptId === '') {
       setMsg('Choisissez un département pour imprimer l’ordre.', { persist: true });
       return;
@@ -493,6 +588,7 @@ export function DashboardPage() {
         type: 'EXPENSE',
         amount,
         description,
+        detail: expenseDetail.trim() || undefined,
         companyId: Number(companyId),
         entryDate: expenseEntryDate.trim() || undefined,
       });
@@ -505,11 +601,10 @@ export function DashboardPage() {
             getPrinterSettings(expenseDeptId),
           ]);
           const payload = buildDisbursementOrderPayload({
-            entry: { ...entry, description: label },
+            entry,
             company,
             printer,
             entryDateYmd: expenseEntryDate.trim() || undefined,
-            detail: detail || undefined,
           });
           const r = await window.desktopApp.printReceipt({
             ...payload,
@@ -710,7 +805,7 @@ export function DashboardPage() {
   async function confirmDeleteSale(sale: Sale) {
     if (companyId === '') return;
     const ok = window.confirm(
-      `Supprimer définitivement la vente n°${sale.ticketNo || sale.id} ?\n\n` +
+      `Supprimer définitivement la vente n°${saleTxnNumber(sale)} ?\n\n` +
         `Cette action est irréversible : la vente, les lignes, les paiements et l’écriture de caisse seront effacés de la base. ` +
         `Si la vente était encore « complétée », le stock livré sera rétabli.`,
     );
@@ -746,7 +841,7 @@ export function DashboardPage() {
 
   async function confirmCancelSale(sale: Sale) {
     const ok = window.confirm(
-      `Annuler la vente n°${sale.ticketNo || sale.id} ?\n\n` +
+      `Annuler la vente n°${saleTxnNumber(sale)} ?\n\n` +
         `L’écriture de caisse sera retirée. Le stock déjà livré sera réintégré.`,
     );
     if (!ok) return;
@@ -755,7 +850,7 @@ export function DashboardPage() {
     try {
       await cancelSale(sale.id);
       removeSaleFromList(sale.id);
-      setMsg(`Vente n°${sale.ticketNo || sale.id} annulée.`);
+      setMsg(`Vente n°${saleTxnNumber(sale)} annulée.`);
     } catch {
       setMsg('Impossible d’annuler cette vente.', { persist: true });
     } finally {
@@ -765,7 +860,7 @@ export function DashboardPage() {
 
   async function confirmRefundSale(sale: Sale) {
     const ok = window.confirm(
-      `Rembourser la vente n°${sale.ticketNo || sale.id} (${formatMoney(sale.total)}) ?\n\n` +
+      `Rembourser la vente n°${saleTxnNumber(sale)} (${formatMoney(sale.total)}) ?\n\n` +
         `L’écriture de caisse sera retirée. Le stock déjà livré sera réintégré.`,
     );
     if (!ok) return;
@@ -774,7 +869,7 @@ export function DashboardPage() {
     try {
       await refundSale(sale.id);
       removeSaleFromList(sale.id);
-      setMsg(`Vente n°${sale.ticketNo || sale.id} remboursée.`);
+      setMsg(`Vente n°${saleTxnNumber(sale)} remboursée.`);
     } catch {
       setMsg('Impossible de rembourser cette vente.', { persist: true });
     } finally {
@@ -888,25 +983,12 @@ export function DashboardPage() {
   if (!canAccessDashboard) {
     return (
       <div className="page-inner">
-        <p className="info-text">Accès au tableau de bord non autorisé pour votre rôle.</p>
+        <p className="info-text">Accès au tableau de bord non autorisé pour ce rôle.</p>
       </div>
     );
   }
 
-  const dashboardTabs = (
-    [
-      ...(isAdmin ? ([['synthese', 'Synthèse']] as const) : []),
-      ['ventes', 'Ventes'] as const,
-      ...(isAdmin ? ([['stock', 'Stock & Mouvements']] as const) : []),
-      ...(canManageFinance
-        ? ([[ 'achats', canSeePurchases ? 'Achats & Dépenses' : 'Dépenses' ]] as const)
-        : []),
-      ...(canPerm('banks.view') || canPerm('banks.manage')
-        ? ([['banque', 'Banque']] as const)
-        : []),
-      ['benefices', 'Analyse des bénéfices'] as const,
-    ] as Array<readonly [TabId, string]>
-  );
+  const dashboardTabs = allowedTabs;
 
   return (
     <div className="page-inner">
@@ -963,7 +1045,7 @@ export function DashboardPage() {
 
       {msg ? <p className="info-text" style={{ marginTop: '0.9rem' }}>{msg}</p> : null}
 
-      {tab === 'synthese' ? (
+      {tab === 'synthese' && canSeeSynthesis ? (
         companies.length === 0 ? (
           <p className="info-text" style={{ marginTop: '0.9rem' }}>Chargement…</p>
         ) : (
@@ -999,10 +1081,17 @@ export function DashboardPage() {
         <p className="info-text" style={{ marginTop: '0.9rem' }}>Chargement…</p>
       ) : (
         <>
-          {tab === 'ventes' ? (
+          {tab === 'ventes' && canSeeSales ? (
             <>
+              {canSeeSalesTotals ? (
               <section className="card" style={{ marginTop: '1rem' }}>
                 <h2>Ventes</h2>
+                {salesRecentMinYmd ? (
+                  <p className="dept-hint" style={{ marginTop: 0 }}>
+                    Totaux limités aux 2 derniers jours (depuis le {salesRecentMinYmd}). L’historique
+                    plus ancien n’est pas accessible pour ce rôle.
+                  </p>
+                ) : null}
                 <div
                   className="form-grid inline"
                   style={{
@@ -1016,7 +1105,13 @@ export function DashboardPage() {
                     <input
                       type="date"
                       value={ventesDateFrom}
-                      onChange={(e) => setVentesDateFrom(e.target.value)}
+                      min={salesRecentMinYmd ?? undefined}
+                      max={formatYmd(new Date())}
+                      onChange={(e) => {
+                        const { from, to } = clampSalesRangeYmd(e.target.value, ventesDateTo);
+                        setVentesDateFrom(from);
+                        setVentesDateTo(to);
+                      }}
                     />
                   </label>
                   <label>
@@ -1024,7 +1119,13 @@ export function DashboardPage() {
                     <input
                       type="date"
                       value={ventesDateTo}
-                      onChange={(e) => setVentesDateTo(e.target.value)}
+                      min={salesRecentMinYmd ?? undefined}
+                      max={formatYmd(new Date())}
+                      onChange={(e) => {
+                        const { from, to } = clampSalesRangeYmd(ventesDateFrom, e.target.value);
+                        setVentesDateFrom(from);
+                        setVentesDateTo(to);
+                      }}
                     />
                   </label>
                   <div style={{ justifySelf: 'start' }}>
@@ -1080,8 +1181,14 @@ export function DashboardPage() {
                   </>
                 )}
               </section>
+              ) : (
+                <p className="info-text" style={{ marginTop: '1rem' }}>
+                  Les totaux de ventes ne sont pas autorisés pour ce rôle. Activez « Voir le total des
+                  ventes (2 derniers jours max) » ou les rapports complets dans Rôles & autorisations.
+                </p>
+              )}
 
-              {ventesDeptModal ? (
+              {ventesDeptModal && canSeeSalesTotals ? (
                 <VentesDepartmentModal
                   label={ventesDeptModal.label}
                   departmentId={ventesDeptModal.departmentId}
@@ -1108,7 +1215,13 @@ export function DashboardPage() {
                     <input
                       type="date"
                       value={txnDateFrom}
-                      onChange={(e) => setTxnDateFrom(e.target.value)}
+                      min={salesRecentMinYmd ?? undefined}
+                      max={formatYmd(new Date())}
+                      onChange={(e) => {
+                        const { from, to } = clampSalesRangeYmd(e.target.value, txnDateTo);
+                        setTxnDateFrom(from);
+                        setTxnDateTo(to);
+                      }}
                     />
                   </label>
                   <label>
@@ -1116,7 +1229,13 @@ export function DashboardPage() {
                     <input
                       type="date"
                       value={txnDateTo}
-                      onChange={(e) => setTxnDateTo(e.target.value)}
+                      min={salesRecentMinYmd ?? undefined}
+                      max={formatYmd(new Date())}
+                      onChange={(e) => {
+                        const { from, to } = clampSalesRangeYmd(txnDateFrom, e.target.value);
+                        setTxnDateFrom(from);
+                        setTxnDateTo(to);
+                      }}
                     />
                   </label>
                 </div>
@@ -1131,17 +1250,17 @@ export function DashboardPage() {
                         <th>Total</th>
                         <th>Caissier</th>
                         <th>Statut</th>
-                        {canCancelOrRefund || isAdmin ? <th>Actions</th> : null}
+                        {canCancelOrRefund || canDeleteSale ? <th>Actions</th> : null}
                       </tr>
                     </thead>
                     <tbody>
                       {salesLoading && sales.length === 0 ? (
                         <tr>
-                          <td colSpan={canCancelOrRefund || isAdmin ? 7 : 6}>Chargement…</td>
+                          <td colSpan={canCancelOrRefund || canDeleteSale ? 7 : 6}>Chargement…</td>
                         </tr>
                       ) : sales.length === 0 ? (
                         <tr>
-                          <td colSpan={canCancelOrRefund || isAdmin ? 7 : 6}>
+                          <td colSpan={canCancelOrRefund || canDeleteSale ? 7 : 6}>
                             Aucune vente pour cette entreprise.
                           </td>
                         </tr>
@@ -1161,7 +1280,7 @@ export function DashboardPage() {
                             tabIndex={0}
                             style={{ cursor: 'pointer' }}
                           >
-                            <td>{s.ticketNo || s.id}</td>
+                            <td>{saleTxnNumber(s)}</td>
                             <td>{formatDateTime(s.createdAt)}</td>
                             <td>{(s.clientName && s.clientName.trim()) || '—'}</td>
                             <td className="journal-amt">{formatMoney(s.total)}</td>
@@ -1170,14 +1289,16 @@ export function DashboardPage() {
                             </td>
                             <td>
                               {s.status === 'COMPLETED'
-                                ? 'Complétée'
+                                ? s.creditCustomerId != null
+                                  ? 'Crédit'
+                                  : 'Complétée'
                                 : s.status === 'CANCELLED'
                                   ? 'Annulée'
                                   : s.status === 'REFUNDED'
                                     ? 'Remboursée'
                                     : s.status}
                             </td>
-                            {canCancelOrRefund || isAdmin ? (
+                            {canCancelOrRefund || canDeleteSale ? (
                               <td
                                 onClick={(e) => e.stopPropagation()}
                                 onKeyDown={(e) => e.stopPropagation()}
@@ -1188,7 +1309,7 @@ export function DashboardPage() {
                                       type="button"
                                       className="btn btn-secondary btn-sm"
                                       disabled={saleActionBusy}
-                                      aria-label={`Rembourser la vente n°${s.ticketNo || s.id}`}
+                                      aria-label={`Rembourser la vente n°${saleTxnNumber(s)}`}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         void confirmRefundSale(s);
@@ -1197,12 +1318,12 @@ export function DashboardPage() {
                                       Rembourser
                                     </button>
                                   ) : null}
-                                  {isAdmin ? (
+                                  {canDeleteSale ? (
                                     <button
                                       type="button"
                                       className="btn btn-danger btn-sm"
                                       disabled={saleDeletingId === s.id}
-                                      aria-label={`Supprimer définitivement la vente n°${s.ticketNo || s.id}`}
+                                      aria-label={`Supprimer définitivement la vente n°${saleTxnNumber(s)}`}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         void confirmDeleteSale(s);
@@ -1243,97 +1364,111 @@ export function DashboardPage() {
             </>
           ) : null}
 
-          {tab === 'achats' ? (
+          {tab === 'achats' && showExpensesTab ? (
             <>
-              <section className="grid two-col" style={{ marginTop: '1rem' }}>
-                <div className="card">
-                  <h2>Nouvelle dépense manuelle</h2>
-                  <form className="form-grid" onSubmit={(e) => void submitExpense(e)}>
-                    <label>
-                      Libellé
-                      <select
-                        value={expenseLabelChoice}
-                        onChange={(e) => {
-                          setExpenseLabelChoice(e.target.value);
-                          if (e.target.value !== EXPENSE_LABEL_OTHER) setExpenseDescOther('');
-                        }}
-                        required
-                      >
-                        <option value="">— Choisir —</option>
-                        {EXPENSE_LABEL_OPTIONS.map((label) => (
-                          <option key={label} value={label}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {expenseLabelChoice === EXPENSE_LABEL_OTHER ? (
+              <section
+                className={canViewFinance ? 'grid two-col' : 'grid'}
+                style={{ marginTop: '1rem' }}
+              >
+                {canRecordExpense ? (
+                  <div className="card">
+                    <h2>Nouvelle dépense manuelle</h2>
+                    {!canViewFinance ? (
+                      <p className="dept-hint">
+                        Vous pouvez enregistrer une dépense. Le journal et les totaux finance restent
+                        réservés à d’autres rôles.
+                      </p>
+                    ) : null}
+                    <form className="form-grid" onSubmit={(e) => void submitExpense(e)}>
                       <label>
-                        Préciser
-                        <input
-                          value={expenseDescOther}
-                          onChange={(e) => setExpenseDescOther(e.target.value)}
+                        Libellé
+                        <select
+                          value={expenseLabelChoice}
+                          onChange={(e) => {
+                            setExpenseLabelChoice(e.target.value);
+                            if (e.target.value !== EXPENSE_LABEL_OTHER) setExpenseDescOther('');
+                          }}
                           required
-                          placeholder="Libellé libre…"
+                        >
+                          <option value="">— Choisir —</option>
+                          {EXPENSE_LABEL_OPTIONS.map((label) => (
+                            <option key={label} value={label}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {expenseLabelChoice === EXPENSE_LABEL_OTHER ? (
+                        <label>
+                          Préciser
+                          <input
+                            value={expenseDescOther}
+                            onChange={(e) => setExpenseDescOther(e.target.value)}
+                            required
+                            placeholder="Libellé libre…"
+                          />
+                        </label>
+                      ) : null}
+                      <label>
+                        Détail
+                        <textarea
+                          value={expenseDetail}
+                          onChange={(e) => setExpenseDetail(e.target.value)}
+                          placeholder="Précisions optionnelles…"
+                          rows={2}
+                          maxLength={1000}
                         />
                       </label>
-                    ) : null}
-                    <label>
-                      Détail
-                      <input
-                        value={expenseDetail}
-                        onChange={(e) => setExpenseDetail(e.target.value)}
-                        placeholder="Précisions (optionnel)…"
-                      />
-                    </label>
-                    <MoneyField
-                      label="Montant"
-                      min={0.01}
-                      step={0.01}
-                      value={expenseAmount}
-                      onChange={(e) => setExpenseAmount(e.target.value)}
-                      required
-                    />
-                    <label>
-                      Date de la dépense
-                      <input
-                        type="date"
-                        value={expenseEntryDate}
-                        onChange={(e) => setExpenseEntryDate(e.target.value)}
+                      <MoneyField
+                        label="Montant"
+                        min={0.01}
+                        step={0.01}
+                        value={expenseAmount}
+                        onChange={(e) => setExpenseAmount(e.target.value)}
                         required
                       />
-                    </label>
-                    <label>
-                      Département (impression)
-                      <select
-                        value={expenseDeptId === '' ? '' : String(expenseDeptId)}
-                        onChange={(e) =>
-                          setExpenseDeptId(e.target.value ? Number(e.target.value) : '')
-                        }
-                        disabled={departments.length === 0}
-                      >
-                        <option value="">— Choisir —</option>
-                        {departments.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={expensePrintOrder}
-                        onChange={(e) => setExpensePrintOrder(e.target.checked)}
-                      />
-                      Imprimer l’ordre de décaissement
-                    </label>
-                    <button type="submit" className="btn btn-primary">
-                      Enregistrer
-                    </button>
-                  </form>
-                </div>
+                      <label>
+                        Date de la dépense
+                        <input
+                          type="date"
+                          value={expenseEntryDate}
+                          onChange={(e) => setExpenseEntryDate(e.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Département (impression)
+                        <select
+                          value={expenseDeptId === '' ? '' : String(expenseDeptId)}
+                          onChange={(e) =>
+                            setExpenseDeptId(e.target.value ? Number(e.target.value) : '')
+                          }
+                          disabled={departments.length === 0}
+                        >
+                          <option value="">— Choisir —</option>
+                          {departments.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={expensePrintOrder}
+                          onChange={(e) => setExpensePrintOrder(e.target.checked)}
+                        />
+                        Imprimer l’ordre de décaissement
+                      </label>
+                      <button type="submit" className="btn btn-primary">
+                        Enregistrer
+                      </button>
+                    </form>
+                  </div>
+                ) : null}
 
+                {canViewFinance ? (
                 <div className="card">
                   <h2>{canSeePurchases ? 'Totaux (achats & dépenses manuelles)' : 'Totaux (dépenses manuelles)'}</h2>
                   <div
@@ -1383,8 +1518,10 @@ export function DashboardPage() {
                     </section>
                   )}
                 </div>
+                ) : null}
               </section>
 
+              {canViewFinance ? (
               <section className="card" style={{ marginTop: '1rem' }}>
                 <h2>{canSeePurchases ? 'Journal (achats, ventes caisse, dépenses)' : 'Journal (ventes caisse, dépenses)'}</h2>
                 <div
@@ -1485,6 +1622,11 @@ export function DashboardPage() {
                         </span>
                         <span>
                           <span>{row.description}</span>
+                          {row.detail?.trim() ? (
+                            <span className="dept-hint" style={{ display: 'block', marginTop: '0.15rem' }}>
+                              {row.detail.trim()}
+                            </span>
+                          ) : null}
                           <span className="dept-hint" style={{ display: 'block', marginTop: '0.2rem' }}>
                             {formatDateTime(row.occurredAt)} ·{' '}
                             {row.user?.fullName?.trim() || row.user?.phone || '—'}
@@ -1520,10 +1662,11 @@ export function DashboardPage() {
                   </div>
                 ) : null}
               </section>
+              ) : null}
             </>
           ) : null}
 
-          {tab === 'stock' ? (
+          {tab === 'stock' && canSeeGlobalStock ? (
             <>
               <StockLowAlertsPanel
                 alerts={alerts}
@@ -1731,7 +1874,7 @@ export function DashboardPage() {
         </>
       )}
 
-      {tab === 'banque' ? (
+      {tab === 'banque' && canSeeBanks ? (
         typeof companyId === 'number' ? (
           <DashboardBanksTab companyId={companyId} />
         ) : (
@@ -1741,7 +1884,7 @@ export function DashboardPage() {
         )
       ) : null}
 
-      {tab === 'benefices' ? (
+      {tab === 'benefices' && canSeeBenefices ? (
         typeof companyId === 'number' ? (
           <DashboardBeneficesTab companyId={companyId} />
         ) : (

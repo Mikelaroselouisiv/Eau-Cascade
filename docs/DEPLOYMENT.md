@@ -4,8 +4,10 @@
 
 | Poste | Installateur | Ce qui se passe tout seul |
 |-------|--------------|---------------------------|
-| **Machine mère (Server)** | `POS-Eau-Cascade-Server-*.exe` | Docker, Postgres, API `:3000`, sync-agent, tâche au démarrage Windows |
-| **Postes distants (Remote)** | `POS-Eau-Cascade-Remote-*.exe` | Connexion GCP, mises à jour auto |
+| **Machine mère (Server)** | `POS-Eau-Cascade-Server-*.exe` | Docker, Postgres, API `:3000`, sync-agent, **mises à jour auto** (GCS `installers/server`) |
+| **Postes distants (Remote)** | `POS-Eau-Cascade-Remote-*.exe` | Connexion GCP, **mises à jour auto** (GCS `installers/remote`) |
+
+Les deux éditions ont le bouton **Mise à jour** (écran de connexion + menu latéral) : vérification en ligne → téléchargement → redémarrage pour installer.
 
 ## Machine mère — machine vierge (magasin)
 
@@ -37,19 +39,19 @@ Ces étapes se font **chez vous**, pas chez le client :
 # 1. Aligner sync GCP (depuis le PC de dev)
 powershell -ExecutionPolicy Bypass -File infra/scripts/gcp-provision-sync.ps1
 
-# 2. Builder l’installateur Server (Docker requis sur la machine de build)
+# 2. Builder les deux installateurs (Docker requis pour Server)
 cd apps/desktop
 npm run icons
 npm run dist:win:server
-
-# 3. Builder + publier Remote (après bump de version dans apps/desktop/package.json)
 npm run dist:win:remote
+
+# 3. Publier les deux feeds GCS (mises à jour en ligne Remote + Server)
+powershell -ExecutionPolicy Bypass -File ../../infra/scripts/assert-eau-cascade-gcp.ps1
+powershell -ExecutionPolicy Bypass -File ../../infra/scripts/upload-desktop-installer.ps1 -Edition server
 powershell -ExecutionPolicy Bypass -File ../../infra/scripts/upload-desktop-installer.ps1 -Edition remote
 ```
 
-Les postes **Remote** déjà installés détectent `latest.yml` au démarrage (et toutes les 4 h), téléchargent en arrière-plan, affichent une bannière + bouton **Redémarrer et mettre à jour** (sidebar : version + **Mettre à jour** / **Installer**).
-
-Copier l’exe Server sur clé USB ou `installers/server/` sur GCS pour le magasin.
+Premier déploiement magasin : installer l’exe Server une fois (USB ou téléchargement GCS). Ensuite les mises à jour passent par le bouton dans l’app.
 
 ## Vérification (IT uniquement)
 

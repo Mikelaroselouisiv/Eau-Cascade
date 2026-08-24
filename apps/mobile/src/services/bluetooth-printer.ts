@@ -1,34 +1,76 @@
 import { Buffer } from 'buffer';
 import { PermissionsAndroid, Platform } from 'react-native';
-import RNBluetoothClassic, { type BluetoothDevice } from 'react-native-bluetooth-classic';
-import { buildEscPosPayload, type SaleReceiptData } from './escpos';
+
+import {
+  getNativePrinter,
+  getPlatformTransport,
+  isThermalPrinterNativeAvailable,
+  type PrinterTransport,
+  type ThermalPrinterDevice,
+} from '../../modules/thermal-printer';
 import { getDb } from './db';
+import { buildEscPosPayload, type SaleReceiptData } from './escpos';
+
+export type { PrinterTransport, ThermalPrinterDevice };
 
 export interface SavedPrinter {
   address: string;
   name: string | null;
   paperWidth: 58 | 80;
+  transport: PrinterTransport;
 }
 
-/** Android 12+ exige ces permissions à l'exécution en plus de la déclaration dans app.json. */
 export async function requestBluetoothPermissions(): Promise<boolean> {
-  if (Platform.OS !== 'android') return true;
-  const granted = await PermissionsAndroid.requestMultiple([
-    PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-    PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-  ]);
+  if (Platform.OS !== 'android') {
+    if (!isThermalPrinterNativeAvailable()) return false;
+    try {
+      return await getNativePrinter().requestPermissions();
+    } catch {
+      return false;
+    }
+  }
+
+  const permissions =
+    typeof Platform.Version === 'number' && Platform.Version >= 31
+      ? [
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+        ]
+      : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
+
+  const granted = await PermissionsAndroid.requestMultiple(permissions);
   return Object.values(granted).every((v) => v === PermissionsAndroid.RESULTS.GRANTED);
 }
 
-/** Liste uniquement les appareils déjà appairés au niveau OS (pas de flux d'appairage in-app en phase 1). */
-export async function listBondedDevices(): Promise<BluetoothDevice[]> {
-  return RNBluetoothClassic.getBondedDevices();
+export function subscribePrinterScan(
+  onDevice: (device: ThermalPrinterDevice) => void,
+  onFinished: () => void,
+): () => void {
+  if (!isThermalPrinterNativeAvailable()) return () => undefined;
+  const native = getNativePrinter();
+  const found = native.addListener('onDeviceFound', onDevice);
+  const done = native.addListener('onScanFinished', onFinished);
+  return () => {
+    found.remove();
+    done.remove();
+  };
 }
 
-async function writeBytes(device: BluetoothDevice, bytes: Uint8Array): Promise<void> {
-  const base64 = Buffer.from(bytes).toString('base64');
-  await device.write(base64, 'base64');
+export async function startPrinterScan(durationMs = 12000): Promise<void> {
+  await getNativePrinter().startScan(durationMs);
+}
+
+export async function stopPrinterScan(): Promise<void> {
+  if (!isThermalPrinterNativeAvailable()) return;
+  await getNativePrinter().stopScan();
+}
+
+/** Garde le lien BLE ouvert pour éviter le dialogue de jumelage à chaque ticket. */
+export async function holdPrinterConnection(address: string): Promise<void> {
+  if (!isThermalPrinterNativeAvailable()) return;
+  const native = getNativePrinter();
+  if (typeof native.holdConnection !== 'function') return;
+  await native.holdConnection(address);
 }
 
 export async function getSavedPrinter(): Promise<SavedPrinter | null> {
@@ -36,45 +78,69 @@ export async function getSavedPrinter(): Promise<SavedPrinter | null> {
     device_address: string | null;
     device_name: string | null;
     paper_width: number;
-  }>('SELECT device_address, device_name, paper_width FROM printer_settings WHERE id = 1');
+    transport: string | null;
+  }>('SELECT device_address, device_name, paper_width, transport FROM printer_settings WHERE id = 1');
   if (!row?.device_address) return null;
   return {
     address: row.device_address,
     name: row.device_name,
     paperWidth: row.paper_width === 80 ? 80 : 58,
+    transport: row.transport === 'ble' ? 'ble' : 'classic',
   };
 }
 
-export async function saveSelectedPrinter(device: { address: string; name: string | null }): Promise<void> {
+export async function saveSelectedPrinter(device: {
+  address: string;
+  name: string | null;
+  transport?: PrinterTransport;
+}): Promise<void> {
   const existing = await getSavedPrinter();
   await getDb().runAsync(
-    'INSERT OR REPLACE INTO printer_settings (id, device_address, device_name, paper_width) VALUES (1, ?, ?, ?)',
+    'INSERT OR REPLACE INTO printer_settings (id, device_address, device_name, paper_width, transport) VALUES (1, ?, ?, ?, ?)',
     device.address,
     device.name,
     existing?.paperWidth ?? 58,
+    device.transport ?? getPlatformTransport(),
   );
+}
+
+export async function getLocalPaperWidth(): Promise<58 | 80> {
+  const row = await getDb().getFirstAsync<{ paper_width: number }>(
+    'SELECT paper_width FROM printer_settings WHERE id = 1',
+  );
+  return row?.paper_width === 80 ? 80 : 58;
 }
 
 export async function savePaperWidth(paperWidth: 58 | 80): Promise<void> {
-  const existing = await getSavedPrinter();
+  const row = await getDb().getFirstAsync<{ id: number }>(
+    'SELECT id FROM printer_settings WHERE id = 1',
+  );
+  if (row) {
+    await getDb().runAsync('UPDATE printer_settings SET paper_width = ? WHERE id = 1', paperWidth);
+    return;
+  }
   await getDb().runAsync(
-    'INSERT OR REPLACE INTO printer_settings (id, device_address, device_name, paper_width) VALUES (1, ?, ?, ?)',
-    existing?.address ?? null,
-    existing?.name ?? null,
+    'INSERT INTO printer_settings (id, device_address, device_name, paper_width, transport) VALUES (1, NULL, NULL, ?, ?)',
     paperWidth,
+    getPlatformTransport(),
   );
 }
 
-/** Formate le ticket, se connecte à l'imprimante enregistrée, l'écrit, puis déconnecte. */
+export async function clearSavedPrinter(): Promise<void> {
+  const existing = await getSavedPrinter();
+  await getDb().runAsync(
+    'INSERT OR REPLACE INTO printer_settings (id, device_address, device_name, paper_width, transport) VALUES (1, NULL, NULL, ?, ?)',
+    existing?.paperWidth ?? 58,
+    existing?.transport ?? getPlatformTransport(),
+  );
+}
+
+/** Formate le ticket ESC/POS puis l'envoie à l'imprimante Bluetooth enregistrée. */
 export async function printReceipt(saleData: SaleReceiptData): Promise<void> {
   const saved = await getSavedPrinter();
   if (!saved) throw new Error('Aucune imprimante Bluetooth configurée');
 
-  const payload = buildEscPosPayload({ ...saleData, paperWidth: saved.paperWidth });
-  const device = await RNBluetoothClassic.connectToDevice(saved.address);
-  try {
-    await writeBytes(device, payload);
-  } finally {
-    await device.disconnect();
-  }
+  const payload = await buildEscPosPayload({ ...saleData, paperWidth: saved.paperWidth });
+  const base64 = Buffer.from(payload).toString('base64');
+  await getNativePrinter().print(saved.address, base64);
 }

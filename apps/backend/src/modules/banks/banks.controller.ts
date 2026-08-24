@@ -11,8 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Permissions } from '../../common/decorators/permissions.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { BanksService } from './banks.service';
@@ -35,8 +34,9 @@ export class BanksController {
     return this.banksService.summary(companyId);
   }
 
+  /** Liste pour config banques + sélection compte au POS (paiement banque). */
   @Get()
-  @Permissions('banks.view')
+  @PermissionsAny('banks.view', 'pos.use', 'sales.create')
   listBanks(
     @Query('companyId', ParseIntPipe) companyId: number,
     @Query('includeInactive') includeInactive?: string,
@@ -105,7 +105,7 @@ export class BanksController {
   }
 
   @Delete('transactions/:id')
-  @Roles('ADMIN')
+  @Permissions('banks.manage')
   deleteTransaction(
     @Param('id', ParseIntPipe) id: number,
     @Query('companyId', ParseIntPipe) companyId: number,

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BankTransactionType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SyncPushDto, SyncRecordDto } from './dto/sync.dto';
 import {
@@ -36,17 +36,24 @@ export class SyncService {
       throw new BadRequestException(`Entité sync inconnue: ${entity}`);
     }
     const limit = Math.min(Math.max(take || 200, 1), 1000);
-    const sinceDate = since ? new Date(since) : new Date(0);
-    if (Number.isNaN(sinceDate.getTime())) {
-      throw new BadRequestException('since invalide (ISO 8601 attendu)');
-    }
-
+    const cursor = this.parsePullCursor(since);
     const timeField = entity === 'AuditLog' ? 'createdAt' : 'updatedAt';
+
+    const where =
+      cursor.uuid != null
+        ? {
+            OR: [
+              { [timeField]: { gt: cursor.at } },
+              {
+                AND: [{ [timeField]: cursor.at }, { uuid: { gt: cursor.uuid } }],
+              },
+            ],
+          }
+        : { [timeField]: { gt: cursor.at } };
+
     const rows = await this.delegate(entity).findMany({
-      where: {
-        [timeField]: { gt: sinceDate },
-      },
-      orderBy: { [timeField]: 'asc' },
+      where,
+      orderBy: [{ [timeField]: 'asc' }, { uuid: 'asc' }],
       take: limit,
     });
 
@@ -60,12 +67,44 @@ export class SyncService {
       records.push(await this.toSyncRecord(entity, row));
     }
     const last = rows[rows.length - 1];
-    const nextCursor =
-      last && last[timeField]
-        ? new Date(String(last[timeField])).toISOString()
-        : sinceDate.toISOString();
+    let nextCursor = this.formatPullCursor(cursor.at, cursor.uuid);
+    if (last) {
+      const lastAtRaw = last[timeField] ?? last.createdAt;
+      const lastAt = lastAtRaw ? new Date(String(lastAtRaw)) : cursor.at;
+      const lastUuid = last.uuid != null ? String(last.uuid) : null;
+      if (!Number.isNaN(lastAt.getTime())) {
+        nextCursor = this.formatPullCursor(lastAt, lastUuid);
+      }
+    }
 
     return { entity, records, nextCursor, count: records.length };
+  }
+
+  /** Curseur composite `ISO8601` ou `ISO8601|uuid` (évite les trous à horodatage égal). */
+  private parsePullCursor(since?: string): { at: Date; uuid: string | null } {
+    if (!since?.trim()) {
+      return { at: new Date(0), uuid: null };
+    }
+    const raw = since.trim();
+    const pipe = raw.lastIndexOf('|');
+    if (pipe > 0) {
+      const iso = raw.slice(0, pipe);
+      const uuid = raw.slice(pipe + 1).trim();
+      const at = new Date(iso);
+      if (!Number.isNaN(at.getTime()) && uuid.length > 0) {
+        return { at, uuid };
+      }
+    }
+    const at = new Date(raw);
+    if (Number.isNaN(at.getTime())) {
+      throw new BadRequestException('since invalide (ISO 8601 ou ISO|uuid attendu)');
+    }
+    return { at, uuid: null };
+  }
+
+  private formatPullCursor(at: Date, uuid: string | null): string {
+    const iso = at.toISOString();
+    return uuid ? `${iso}|${uuid}` : iso;
   }
 
   async push(dto: SyncPushDto) {
@@ -82,6 +121,12 @@ export class SyncService {
     for (const record of dto.records) {
       try {
         const action = await this.applyRecord(entity, record);
+        if (
+          (action === 'created' || action === 'updated') &&
+          (entity === 'Payment' || entity === 'CreditPayment')
+        ) {
+          await this.ensureBankDepositForSyncedPayment(entity, record.uuid);
+        }
         results.push({ uuid: record.uuid, action });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -142,9 +187,13 @@ export class SyncService {
     });
     if (existing) {
       if (!this.shouldApplyIncoming(entity, record, existing, incomingAt)) {
+        // Même si LWW ignore le reste, réparer un txnNumber manquant / backfill local erroné.
+        if (entity === 'Sale') {
+          await this.healSaleTxnNumber(existing, record);
+        }
         return 'skipped';
       }
-      await this.updateFromSync(entity, record.uuid, record);
+      await this.updateFromSync(entity, record.uuid, record, { existing });
       return 'updated';
     }
 
@@ -152,10 +201,16 @@ export class SyncService {
     const byNaturalKey = await this.findByNaturalKey(entity, record);
     if (byNaturalKey) {
       if (!this.shouldApplyIncoming(entity, record, byNaturalKey, incomingAt)) {
+        if (entity === 'Sale') {
+          await this.healSaleTxnNumber(byNaturalKey, record);
+        }
         return 'skipped';
       }
       const localUuid = String(byNaturalKey.uuid);
-      await this.updateFromSync(entity, localUuid, record, { adoptUuid: true });
+      await this.updateFromSync(entity, localUuid, record, {
+        adoptUuid: true,
+        existing: byNaturalKey,
+      });
       this.logger.log(
         `Sync ${entity}: fusion clé naturelle ${localUuid} → ${record.uuid}`,
       );
@@ -164,6 +219,69 @@ export class SyncService {
 
     await this.createFromSync(entity, record);
     return 'created';
+  }
+
+  /**
+   * Numéro métier imprimé sur le ticket / carte livraison.
+   * Ne doit jamais être écrasé par l’id local du nœud cible après sync.
+   */
+  private async healSaleTxnNumber(
+    existing: Record<string, unknown>,
+    record: SyncRecordDto,
+  ): Promise<void> {
+    const incoming = Number(record.data?.txnNumber);
+    if (!Number.isFinite(incoming) || incoming <= 0) return;
+    const localId = Number(existing.id);
+    const current =
+      existing.txnNumber == null || existing.txnNumber === ''
+        ? null
+        : Number(existing.txnNumber);
+    const needsHeal =
+      current == null ||
+      !Number.isFinite(current) ||
+      (Number.isFinite(localId) && current === localId && incoming !== localId);
+    if (!needsHeal) return;
+    try {
+      await this.prisma.sale.update({
+        where: { uuid: String(existing.uuid) },
+        data: { txnNumber: incoming },
+      });
+      this.logger.log(
+        `Sync Sale: txnNumber réparé ${String(existing.uuid)} → ${incoming}`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Sync Sale txnNumber heal: ${message}`);
+    }
+  }
+
+  private preserveSaleTxnNumber(
+    data: Record<string, unknown>,
+    existing?: Record<string, unknown> | null,
+  ): void {
+    const incomingRaw = data.txnNumber;
+    const incoming =
+      incomingRaw == null || incomingRaw === '' ? null : Number(incomingRaw);
+    const localId = existing?.id != null ? Number(existing.id) : null;
+    const current =
+      existing?.txnNumber == null || existing?.txnNumber === ''
+        ? null
+        : Number(existing.txnNumber);
+
+    if (incoming == null || !Number.isFinite(incoming) || incoming <= 0) {
+      // Ne jamais nullifier un txnNumber déjà connu.
+      delete data.txnNumber;
+      return;
+    }
+
+    if (
+      current != null &&
+      Number.isFinite(current) &&
+      !(localId != null && current === localId && incoming !== localId)
+    ) {
+      // Déjà un numéro métier stable (≠ simple backfill id local) : immutable.
+      delete data.txnNumber;
+    }
   }
 
   /**
@@ -232,8 +350,29 @@ export class SyncService {
 
   private async createFromSync(entity: SyncEntityName, record: SyncRecordDto) {
     const data = await this.sanitizePayload(entity, record);
+    let healTxnFromId = false;
+    if (entity === 'Sale') {
+      const txn = Number(data.txnNumber);
+      if (!Number.isFinite(txn) || txn <= 0) {
+        // Anciennes ventes cloud sans txnNumber : créer puis backfill id (ne plus bloquer le sync).
+        delete data.txnNumber;
+        healTxnFromId = true;
+        this.logger.warn(
+          `Sync Sale ${record.uuid}: txnNumber manquant — création puis backfill id`,
+        );
+      }
+    }
     try {
-      await this.delegate(entity).create({ data });
+      const created = await this.delegate(entity).create({ data });
+      if (healTxnFromId && entity === 'Sale') {
+        const id = Number(created.id);
+        if (Number.isFinite(id) && id > 0) {
+          await this.prisma.sale.update({
+            where: { id },
+            data: { txnNumber: id },
+          });
+        }
+      }
     } catch (err) {
       // Course : fiche créée entre findByNaturalKey et create.
       if (
@@ -257,13 +396,16 @@ export class SyncService {
     entity: SyncEntityName,
     whereUuid: string,
     record: SyncRecordDto,
-    opts?: { adoptUuid?: boolean },
+    opts?: { adoptUuid?: boolean; existing?: Record<string, unknown> | null },
   ) {
     const data = await this.sanitizePayload(entity, record);
     if (!opts?.adoptUuid) {
       delete data.uuid;
     } else {
       data.uuid = record.uuid;
+    }
+    if (entity === 'Sale') {
+      this.preserveSaleTxnNumber(data, opts?.existing);
     }
     await this.delegate(entity).update({
       where: { uuid: whereUuid },
@@ -305,7 +447,28 @@ export class SyncService {
     }
 
     await this.resolveForeignKeys(entity, raw);
+    // Ne jamais planter le sync si le nœud source a des colonnes
+    // plus récentes que le Prisma client local (ex. txnNumber avant redeploy).
+    this.stripUnknownScalarFields(entity, raw);
     return raw;
+  }
+
+  private stripUnknownScalarFields(
+    entity: SyncEntityName,
+    data: Record<string, unknown>,
+  ): void {
+    try {
+      const models = Prisma.dmmf.datamodel.models;
+      const model = models.find((m) => m.name === entity);
+      if (!model) return;
+      const allowed = new Set(model.fields.map((f) => f.name));
+      for (const key of Object.keys(data)) {
+        if (key.endsWith('Uuid')) continue;
+        if (!allowed.has(key)) delete data[key];
+      }
+    } catch {
+      /* ignore — best effort */
+    }
   }
 
   /** Remplace les Int source par les ids locaux via les uuid parents. */
@@ -356,6 +519,18 @@ export class SyncService {
         );
       }
       data[ref.idField] = null;
+    }
+
+    // Paiement banque : ne jamais accepter method=BANK sans compte résolu
+    // (sinon le capital bancaire reste à 0 sur le nœud cible).
+    if (
+      (entity === 'Payment' || entity === 'CreditPayment') &&
+      data.method === 'BANK' &&
+      (data.bankAccountId == null || data.bankAccountId === '')
+    ) {
+      throw new BadRequestException(
+        `${entity} BANK sans bankAccountUuid résolu — sync BankAccount d’abord`,
+      );
     }
 
     // Nettoyer tout *Uuid résiduel non mappé
@@ -437,6 +612,105 @@ export class SyncService {
     return out;
   }
 
+  /**
+   * Compense un paiement BANK synchronisé sans dépôt local
+   * (ex. ancien agent qui n’envoyait pas BankTransaction).
+   */
+  private async ensureBankDepositForSyncedPayment(
+    entity: 'Payment' | 'CreditPayment',
+    uuid: string,
+  ): Promise<void> {
+    if (entity === 'Payment') {
+      const payment = await this.prisma.payment.findUnique({
+        where: { uuid },
+        include: {
+          sale: { select: { id: true, txnNumber: true, status: true, deletedAt: true } },
+          bankAccount: {
+            select: { id: true, name: true, bank: { select: { name: true } } },
+          },
+        },
+      });
+      if (
+        !payment ||
+        payment.deletedAt ||
+        payment.method !== 'BANK' ||
+        payment.bankAccountId == null ||
+        !payment.bankAccount ||
+        payment.sale.deletedAt ||
+        payment.sale.status !== 'COMPLETED' ||
+        Number(payment.amount) <= 0.009
+      ) {
+        return;
+      }
+      const txnRef =
+        payment.sale.txnNumber != null
+          ? `saleTxn:${payment.sale.txnNumber}`
+          : `sale:${payment.saleId}`;
+      const refs = [`sale:${payment.saleId}`, txnRef];
+      const existing = await this.prisma.bankTransaction.findFirst({
+        where: {
+          deletedAt: null,
+          type: BankTransactionType.DEPOSIT,
+          reference: { in: refs },
+        },
+        select: { id: true },
+      });
+      if (existing) return;
+      await this.prisma.bankTransaction.create({
+        data: {
+          bankAccountId: payment.bankAccountId,
+          type: BankTransactionType.DEPOSIT,
+          amount: payment.amount,
+          description: `Vente #${payment.sale.txnNumber ?? payment.saleId} — ${payment.bankAccount.bank.name} / ${payment.bankAccount.name}`,
+          reference: txnRef,
+          occurredAt: payment.createdAt,
+        },
+      });
+      return;
+    }
+
+    const creditPay = await this.prisma.creditPayment.findUnique({
+      where: { uuid },
+      include: {
+        creditCustomer: { select: { name: true } },
+        bankAccount: {
+          select: { id: true, name: true, bank: { select: { name: true } } },
+        },
+      },
+    });
+    if (
+      !creditPay ||
+      creditPay.deletedAt ||
+      creditPay.method !== 'BANK' ||
+      creditPay.bankAccountId == null ||
+      !creditPay.bankAccount ||
+      Number(creditPay.amount) <= 0.009
+    ) {
+      return;
+    }
+    const ref = `creditPayment:${creditPay.uuid}`;
+    const existing = await this.prisma.bankTransaction.findFirst({
+      where: {
+        deletedAt: null,
+        type: BankTransactionType.DEPOSIT,
+        reference: ref,
+      },
+      select: { id: true },
+    });
+    if (existing) return;
+    await this.prisma.bankTransaction.create({
+      data: {
+        bankAccountId: creditPay.bankAccountId,
+        type: BankTransactionType.DEPOSIT,
+        amount: creditPay.amount,
+        description: `Remboursement crédit — ${creditPay.creditCustomer.name} — ${creditPay.bankAccount.bank.name} / ${creditPay.bankAccount.name}`,
+        reference: ref,
+        occurredAt: creditPay.createdAt,
+        userId: creditPay.userId,
+      },
+    });
+  }
+
   private delegate(entity: SyncEntityName): Delegate {
     const map: Record<SyncEntityName, Delegate> = {
       Company: this.prisma.company as unknown as Delegate,
@@ -445,13 +719,14 @@ export class SyncService {
       PackagingUnit: this.prisma.packagingUnit as unknown as Delegate,
       Store: this.prisma.store as unknown as Delegate,
       Register: this.prisma.register as unknown as Delegate,
+      ProductFamily: this.prisma.productFamily as unknown as Delegate,
+      ProductFamilyTier: this.prisma.productFamilyTier as unknown as Delegate,
       Product: this.prisma.product as unknown as Delegate,
       ProductSaleUnit: this.prisma.productSaleUnit as unknown as Delegate,
       ProductVolumePrice: this.prisma.productVolumePrice as unknown as Delegate,
       ProductRecipe: this.prisma.productRecipe as unknown as Delegate,
       RecipeComponent: this.prisma.recipeComponent as unknown as Delegate,
       User: this.prisma.user as unknown as Delegate,
-      AppRole: this.prisma.appRole as unknown as Delegate,
       ExpenseCategory: this.prisma.expenseCategory as unknown as Delegate,
       CreditCustomer: this.prisma.creditCustomer as unknown as Delegate,
       Sale: this.prisma.sale as unknown as Delegate,
@@ -462,6 +737,9 @@ export class SyncService {
       StockMovement: this.prisma.stockMovement as unknown as Delegate,
       FinanceEntry: this.prisma.financeEntry as unknown as Delegate,
       CreditPayment: this.prisma.creditPayment as unknown as Delegate,
+      Bank: this.prisma.bank as unknown as Delegate,
+      BankAccount: this.prisma.bankAccount as unknown as Delegate,
+      BankTransaction: this.prisma.bankTransaction as unknown as Delegate,
       InventorySession: this.prisma.inventorySession as unknown as Delegate,
       InventoryLine: this.prisma.inventoryLine as unknown as Delegate,
       PurchaseOrder: this.prisma.purchaseOrder as unknown as Delegate,

@@ -2,6 +2,7 @@ import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 
+import { AndroidUpdatePrompt } from '@/components/AndroidUpdatePrompt';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { onReconnect } from '@/services/net';
 import { syncSalesQueue } from '@/services/offline-queue';
@@ -13,12 +14,12 @@ const LightTheme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
-    primary: '#E67E00',
-    background: '#F7F4EF',
+    primary: '#0F4C81',
+    background: '#E8F4F2',
     card: '#FFFFFF',
-    text: '#1C1917',
-    border: '#E6DDD2',
-    notification: '#FF8C00',
+    text: '#0A2540',
+    border: '#C5DDE0',
+    notification: '#3D9B8F',
   },
 };
 
@@ -39,13 +40,14 @@ function RootNavigator() {
     });
   }, []);
 
-  if (loading) return null;
-
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="login" />
-      <Stack.Screen name="(tabs)" />
-    </Stack>
+    <>
+      <AndroidUpdatePrompt />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="login" />
+        <Stack.Screen name="(app)" />
+      </Stack>
+    </>
   );
 }
 

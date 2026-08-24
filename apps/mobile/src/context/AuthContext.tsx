@@ -18,6 +18,7 @@ import {
 import { isLikelyNetworkError } from '../services/api-errors';
 import { initDb } from '../services/db';
 import type { SessionUser, UserRole } from '../types/api';
+import { permissionsInclude, resolveUserPermissions } from '../utils/permissions';
 
 type AuthContextValue = {
   user: SessionUser | null;
@@ -26,6 +27,7 @@ type AuthContextValue = {
   logout: () => void;
   refreshUser: () => Promise<void>;
   can: (roles: UserRole[]) => boolean;
+  canPerm: (permission: string) => boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -46,8 +48,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      await initAuthCache();
-      await initDb();
+      try {
+        await initAuthCache();
+      } catch {
+        // ignore cache hydrate errors
+      }
+      try {
+        await initDb();
+      } catch {
+        // SQLite indisponible : l’app continue (file offline limitée)
+      }
       if (!getToken()) {
         if (!cancelled) {
           setUser(null);
@@ -62,7 +72,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled) {
           const cached = getSessionUser();
           if (isLikelyNetworkError(error) && cached) {
-            // Session déjà validée en ligne : garder l'utilisateur pendant la panne.
             setUser(cached);
           } else {
             await apiLogout();
@@ -93,17 +102,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  const can = useCallback(
-    (roles: UserRole[]) => {
-      if (!user) return false;
-      return roles.includes(user.role);
-    },
+  const resolvedPerms = useMemo(
+    () => (user ? resolveUserPermissions(user) : []),
     [user],
   );
 
+  const can = useCallback(
+    (roles: UserRole[]) => {
+      if (!user) return false;
+      if (roles.includes(user.role)) return true;
+      // Accès complet via * (rôle custom admin, etc.)
+      return permissionsInclude(resolvedPerms, '*');
+    },
+    [user, resolvedPerms],
+  );
+
+  const canPerm = useCallback(
+    (permission: string) => {
+      if (!user) return false;
+      return permissionsInclude(resolvedPerms, permission);
+    },
+    [user, resolvedPerms],
+  );
+
   const value = useMemo(
-    () => ({ user, loading, login, logout, refreshUser, can }),
-    [user, loading, login, logout, refreshUser, can],
+    () => ({ user, loading, login, logout, refreshUser, can, canPerm }),
+    [user, loading, login, logout, refreshUser, can, canPerm],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

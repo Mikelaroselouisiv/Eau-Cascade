@@ -3,14 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { printReceipt } = require('./thermal-printer.cjs');
 const localDb = require('./local-db.cjs');
-const {
-  initUpdater,
-  setMainWindow,
-  checkForUpdatesManual,
-  quitAndInstall,
-  getUpdaterStatus,
-  getAppVersion,
-} = require('./updater.cjs');
+const { initUpdater } = require('./updater.cjs');
 const { getAppEdition } = require('./edition.cjs');
 const { ensureServerStack } = require('./server-bootstrap.cjs');
 
@@ -72,8 +65,6 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
-
-  return mainWindow;
 }
 
 app.whenReady().then(async () => {
@@ -90,17 +81,6 @@ app.whenReady().then(async () => {
   }
 
   await localDb.initLocalDb(app.getPath('userData'));
-
-  if (getAppEdition() === 'server' && !isDev) {
-    const stack = await ensureServerStack();
-    if (!stack.ok) {
-      await dialog.showMessageBox({
-        type: 'error',
-        title: 'Serveur local',
-        message: stack.message || 'Impossible de démarrer le serveur local.',
-      });
-    }
-  }
 
   ipcMain.handle('localdb:outboxEnqueue', (_e, payload) => localDb.outboxEnqueue(payload));
   ipcMain.handle('localdb:outboxList', () => localDb.outboxList());
@@ -120,20 +100,25 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('app:get-edition', () => getAppEdition());
-  ipcMain.handle('app:get-version', () => getAppVersion());
-  ipcMain.handle('updater:get-status', () => getUpdaterStatus());
-  ipcMain.handle('updater:check', () => checkForUpdatesManual({ silent: false }));
-  ipcMain.handle('updater:quit-and-install', () => quitAndInstall());
 
-  const mainWindow = createWindow();
-  setMainWindow(mainWindow);
-  // Remote prod : polling GCS. Dev / Server : statut « disabled » pour l’UI version.
-  initUpdater(mainWindow);
+  // Fenêtre + mises à jour d’abord : Server peut se mettre à jour même si Docker/API locale est lent.
+  createWindow();
+  initUpdater();
+
+  if (getAppEdition() === 'server' && !isDev) {
+    const stack = await ensureServerStack();
+    if (!stack.ok) {
+      await dialog.showMessageBox({
+        type: 'error',
+        title: 'Serveur local',
+        message: stack.message || 'Impossible de démarrer le serveur local.',
+      });
+    }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      const win = createWindow();
-      setMainWindow(win);
+      createWindow();
     }
   });
 });

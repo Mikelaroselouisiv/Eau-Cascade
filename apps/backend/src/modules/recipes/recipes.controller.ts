@@ -8,7 +8,7 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { UpsertRecipeDto } from './dto/recipe.dto';
@@ -20,13 +20,13 @@ export class RecipesController {
   constructor(private readonly recipesService: RecipesService) {}
 
   @Get('by-product/:productId')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('products.view')
   getByProduct(@Param('productId', ParseIntPipe) productId: number) {
     return this.recipesService.getByParentProduct(productId);
   }
 
   @Put(':productId')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('recipes.manage')
   upsert(
     @Param('productId', ParseIntPipe) productId: number,
     @Body() dto: UpsertRecipeDto,
@@ -35,7 +35,7 @@ export class RecipesController {
   }
 
   @Delete(':productId')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('recipes.manage')
   remove(@Param('productId', ParseIntPipe) productId: number) {
     return this.recipesService.remove(productId);
   }

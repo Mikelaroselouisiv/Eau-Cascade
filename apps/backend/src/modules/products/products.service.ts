@@ -90,10 +90,26 @@ export class ProductsService {
     }
   }
 
+  private async assertFamilyBelongsToCompany(
+    productFamilyId: number | null | undefined,
+    companyId: number,
+  ) {
+    if (productFamilyId == null) return;
+    const f = await this.prisma.productFamily.findFirst({
+      where: { id: productFamilyId, deletedAt: null },
+    });
+    if (!f || f.companyId !== companyId) {
+      throw new BadRequestException(
+        'La famille de produits doit appartenir à la même entreprise que le produit.',
+      );
+    }
+  }
+
   async create(createProductDto: CreateProductDto, userId?: number) {
     this.validateSaleUnits(createProductDto);
     const companyId = await this.resolveCompanyId(createProductDto.companyId);
     await this.assertDepartmentBelongsToCompany(createProductDto.departmentId ?? null, companyId);
+    await this.assertFamilyBelongsToCompany(createProductDto.productFamilyId ?? null, companyId);
     if (createProductDto.departmentId == null) {
       throw new BadRequestException(
         'Un département est requis pour rattacher les conditionnements de vente au produit.',
@@ -111,6 +127,9 @@ export class ProductsService {
         data: {
           company: { connect: { id: companyId } },
           department: { connect: { id: createProductDto.departmentId } },
+          ...(createProductDto.productFamilyId
+            ? { productFamily: { connect: { id: createProductDto.productFamilyId } } }
+            : {}),
           name: createProductDto.name,
           cardColor: createProductDto.cardColor,
           ...(userId != null ? { createdBy: { connect: { id: userId } } } : {}),
@@ -154,6 +173,14 @@ export class ProductsService {
         where: { id: product.id },
         include: {
           department: true,
+          productFamily: {
+            include: {
+              tiers: {
+                where: { deletedAt: null },
+                orderBy: { minQuantity: 'asc' },
+              },
+            },
+          },
           saleUnits: {
             include: {
               packagingUnit: true,
@@ -194,8 +221,11 @@ export class ProductsService {
         ? existingProduct.departmentId
         : updateProductDto.departmentId;
     await this.assertDepartmentBelongsToCompany(nextDeptId, nextCompanyId);
+    if (updateProductDto.productFamilyId !== undefined) {
+      await this.assertFamilyBelongsToCompany(updateProductDto.productFamilyId, nextCompanyId);
+    }
 
-    const { salePrice, volumePrices, packagingUnitId, labelOverride, ...productFields } =
+    const { salePrice, volumePrices, packagingUnitId, labelOverride, productFamilyId, ...productFields } =
       updateProductDto;
 
     const data: Prisma.ProductUpdateInput = {
@@ -209,6 +239,12 @@ export class ProductsService {
           ? { disconnect: true }
           : productFields.departmentId !== undefined
             ? { connect: { id: productFields.departmentId } }
+            : undefined,
+      productFamily:
+        productFamilyId === null
+          ? { disconnect: true }
+          : productFamilyId !== undefined
+            ? { connect: { id: productFamilyId } }
             : undefined,
       sku: productFields.sku,
       barcode: productFields.barcode,
@@ -302,6 +338,14 @@ export class ProductsService {
         where: { id },
         include: {
           department: true,
+          productFamily: {
+            include: {
+              tiers: {
+                where: { deletedAt: null },
+                orderBy: { minQuantity: 'asc' },
+              },
+            },
+          },
           saleUnits: {
             include: {
               packagingUnit: true,

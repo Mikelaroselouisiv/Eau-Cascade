@@ -2,10 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('desktopApp', {
   platform: process.platform,
-  getVersion: () => ipcRenderer.invoke('app:get-version'),
-  getEdition: () => ipcRenderer.invoke('app:get-edition'),
   printReceipt: (saleData) => ipcRenderer.invoke('printer:print-receipt', saleData),
   listPrinters: () => ipcRenderer.invoke('printer:list'),
+  getEdition: () => ipcRenderer.invoke('app:get-edition'),
   localDb: {
     outboxEnqueue: (payload) => ipcRenderer.invoke('localdb:outboxEnqueue', payload),
     outboxList: () => ipcRenderer.invoke('localdb:outboxList'),
@@ -14,13 +13,22 @@ contextBridge.exposeInMainWorld('desktopApp', {
     cacheGet: (key) => ipcRenderer.invoke('localdb:cacheGet', key),
   },
   updater: {
-    getStatus: () => ipcRenderer.invoke('updater:get-status'),
+    getState: () => ipcRenderer.invoke('updater:get-state'),
     check: () => ipcRenderer.invoke('updater:check'),
-    quitAndInstall: () => ipcRenderer.invoke('updater:quit-and-install'),
-    onStatus: (callback) => {
-      const listener = (_event, status) => callback(status);
-      ipcRenderer.on('updater:status', listener);
-      return () => ipcRenderer.removeListener('updater:status', listener);
+    download: () => ipcRenderer.invoke('updater:download'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    snooze: (optionKey) => ipcRenderer.invoke('updater:snooze', optionKey),
+    dismiss: () => ipcRenderer.invoke('updater:dismiss'),
+    getSnoozeOptions: () => ipcRenderer.invoke('updater:get-snooze-options'),
+    onState: (handler) => {
+      const listener = (_event, state) => handler(state);
+      ipcRenderer.on('updater:state', listener);
+      return () => ipcRenderer.removeListener('updater:state', listener);
+    },
+    onOpenPrompt: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on('updater:open-prompt', listener);
+      return () => ipcRenderer.removeListener('updater:open-prompt', listener);
     },
   },
 });

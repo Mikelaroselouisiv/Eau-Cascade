@@ -75,13 +75,9 @@ function buildTicketText(saleData, width = 58) {
   }
 
   lines.push(separator);
-  const ticketRef =
-    (saleData.ticketNo != null && String(saleData.ticketNo).trim() !== ''
-      ? String(saleData.ticketNo).trim()
-      : null) ||
-    (saleData.saleId != null && saleData.saleId !== '' ? String(saleData.saleId) : null);
-  if (ticketRef) {
-    lines.push(clipLine(`Vente #${ticketRef}`, lineWidth));
+  if (saleData.saleId != null && saleData.saleId !== '') {
+    // Même numéro que la carte « Livraisons » (sale.txnNumber métier).
+    lines.push(clipLine(`Vente #${saleData.saleId}`, lineWidth));
   }
   if (saleData.receiptClientName) {
     lines.push(clipLine(`Client: ${saleData.receiptClientName}`, lineWidth));
@@ -196,7 +192,7 @@ function buildDisbursementOrderText(data, width = 58) {
     if (prepared) lines.push(clipLine(`Préparé par: ${prepared}`, lineWidth));
     lines.push(separator);
     lines.push(clipLine(`Libellé: ${data.description ?? '—'}`, lineWidth));
-    const detail = String(data.detail || '').trim();
+    const detail = String(data.detail ?? '').trim();
     if (detail) lines.push(clipLine(`Détail: ${detail}`, lineWidth));
     lines.push(clipLine(`Montant: ${formatMoney(data.amount ?? data.total ?? 0)}`, lineWidth));
     lines.push(separator);

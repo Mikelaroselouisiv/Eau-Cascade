@@ -19,6 +19,8 @@ enum PaymentMethod {
   MOBILE_MONEY
   SPLIT
   CREDIT
+  /// Virement / dépôt banque — crédite un compte, hors fond de caisse.
+  BANK
 }
 
 enum MovementType {
@@ -78,6 +80,37 @@ enum SyncDirection {
   PUSH
 }
 
+/// Exercice comptable : ouvert (saisies possibles) ou clôturé (figé).
+enum FiscalYearStatus {
+  OPEN
+  CLOSED
+}
+
+/// Statut d’une écriture de journal (partie double).
+enum JournalEntryStatus {
+  DRAFT
+  POSTED
+  VOID
+}
+
+/// Nature du compte pour le bilan / résultat (PCG style France–Haïti).
+enum AccountNature {
+  /// Classes 1–5 : bilan
+  BALANCE_SHEET
+  /// Classes 6–7 : charges / produits
+  INCOME_STATEMENT
+}
+
+/// Journal d’origine (codes classiques).
+enum JournalCode {
+  VE /// Ventes
+  AC /// Achats
+  BQ /// Banque
+  CA /// Caisse
+  OD /// Opérations diverses
+  AN /// À-nouveaux / ouverture
+}
+
 model Company {
   id               Int      @id @default(autoincrement())
   uuid             String   @unique @default(uuid())
@@ -97,6 +130,7 @@ model Company {
   departments      Department[]
   stores           Store[]
   products         Product[]
+  productFamilies  ProductFamily[]
   users            User[]
   expenseCategories ExpenseCategory[]
   purchaseOrders   PurchaseOrder[]
@@ -104,6 +138,11 @@ model Company {
   creditCustomers  CreditCustomer[]
   banks            Bank[]
   bankAccounts     BankAccount[]
+  accounts         Account[]
+  fiscalYears      FiscalYear[]
+  journalEntries   JournalEntry[]
+  supplierPayments SupplierPayment[]
+  fixedAssets      FixedAsset[]
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   deletedAt        DateTime?
@@ -243,6 +282,9 @@ model Product {
   company      Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
   departmentId Int?
   department   Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  /// Famille de prix volume (comptage croisé entre produits à la caisse).
+  productFamilyId Int?
+  productFamily   ProductFamily? @relation(fields: [productFamilyId], references: [id], onDelete: SetNull)
   sku          String?
   barcode      String?
   name         String
@@ -268,6 +310,40 @@ model Product {
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   deletedAt    DateTime?
+
+  @@index([productFamilyId])
+}
+
+/// Famille de produits : paliers de prix basés sur la quantité totale panier de la famille.
+model ProductFamily {
+  id        Int                 @id @default(autoincrement())
+  uuid      String              @unique @default(uuid())
+  companyId Int
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  products  Product[]
+  tiers     ProductFamilyTier[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  deletedAt DateTime?
+
+  @@index([companyId])
+}
+
+/// À partir de minQuantity (inclus) d’articles de la famille dans le panier, prix unitaire = unitPrice pour chaque ligne.
+model ProductFamilyTier {
+  id              Int           @id @default(autoincrement())
+  uuid            String        @unique @default(uuid())
+  productFamilyId Int
+  productFamily   ProductFamily @relation(fields: [productFamilyId], references: [id], onDelete: Cascade)
+  minQuantity     Decimal       @db.Decimal(12, 4)
+  unitPrice       Decimal       @db.Decimal(12, 2)
+  sortOrder       Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+
+  @@unique([productFamilyId, minQuantity])
 }
 
 model ProductSaleUnit {
@@ -310,8 +386,8 @@ model ProductVolumePrice {
 model Sale {
   id         Int         @id @default(autoincrement())
   uuid       String      @unique @default(uuid())
-  /// Numéro de fiche / ticket affiché et imprimé (stable cross-nœuds, syncé).
-  ticketNo   String      @unique
+  /// Numéro métier imprimé / affiché (conservé au sync ; distinct de l’id local).
+  txnNumber  Int?
   /// UUID généré côté client (offline) pour idempotence push.
   clientUuid String?     @unique
   total      Decimal     @db.Decimal(12, 2)
@@ -350,6 +426,7 @@ model Sale {
   @@index([creditCustomerId, createdAt])
   @@index([changeDue, status])
   @@index([amountPaid, status])
+  @@index([txnNumber])
 }
 
 model SaleItem {
@@ -412,16 +489,21 @@ model DeliveryItem {
 }
 
 model Payment {
-  id        Int           @id @default(autoincrement())
-  uuid      String        @unique @default(uuid())
-  saleId    Int
-  amount    Decimal       @db.Decimal(12, 2)
-  method    PaymentMethod
-  reference String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  deletedAt DateTime?
-  sale      Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  id            Int           @id @default(autoincrement())
+  uuid          String        @unique @default(uuid())
+  saleId        Int
+  amount        Decimal       @db.Decimal(12, 2)
+  method        PaymentMethod
+  reference     String?
+  /// Compte crédité lorsque method = BANK.
+  bankAccountId Int?
+  bankAccount   BankAccount?  @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
+  sale          Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([bankAccountId])
 }
 
 model StockMovement {
@@ -607,6 +689,8 @@ model FinanceEntry {
   type        FinanceType
   amount      Decimal           @db.Decimal(12, 2)
   description String
+  /// Précisions libres (optionnel) en plus du libellé.
+  detail      String?
   categoryId  Int?
   category    ExpenseCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   userId      Int?
@@ -654,6 +738,9 @@ model CreditPayment {
   amount           Decimal        @db.Decimal(12, 2)
   method           PaymentMethod  @default(CASH)
   reference        String?
+  /// Compte crédité lorsque method = BANK.
+  bankAccountId    Int?
+  bankAccount      BankAccount?   @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
   note             String?
   userId           Int?
   user             User?          @relation("CreditPaymentUser", fields: [userId], references: [id], onDelete: SetNull)
@@ -665,6 +752,7 @@ model CreditPayment {
 
   @@index([creditCustomerId, createdAt])
   @@index([saleId, createdAt])
+  @@index([bankAccountId])
 }
 
 /// Banque (établissement) où l’entreprise détient des comptes.
@@ -699,6 +787,9 @@ model BankAccount {
   isActive       Boolean           @default(true)
   note           String?
   transactions   BankTransaction[]
+  payments       Payment[]
+  creditPayments CreditPayment[]
+  supplierPayments SupplierPayment[]
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
   deletedAt      DateTime?
@@ -787,9 +878,170 @@ model User {
   registerSessionsOpened RegisterSession[] @relation("RegisterSessionOpenedBy")
   registerSessionsClosed RegisterSession[] @relation("RegisterSessionClosedBy")
   deliveriesDelivered Delivery[] @relation("DeliveryDeliveredBy")
+  fiscalYearsClosed FiscalYear[] @relation("FiscalYearClosedBy")
+  journalEntriesCreated JournalEntry[] @relation("JournalEntryCreatedBy")
+  supplierPayments SupplierPayment[] @relation("SupplierPaymentUser")
+  fixedAssetsCreated FixedAsset[] @relation("FixedAssetCreatedBy")
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   deletedAt    DateTime?
+}
+
+/// Compte du plan comptable (PCG commerce Haïti / France).
+model Account {
+  id          Int           @id @default(autoincrement())
+  uuid        String        @unique @default(uuid())
+  companyId   Int
+  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Numéro PCG (ex. 411, 530, 707).
+  code        String
+  name        String
+  /// Classe 1–7.
+  classNumber Int
+  nature      AccountNature
+  /// true = solde normal débiteur (actif, charges) ; false = créditeur (passif, produits).
+  isDebitNormal Boolean      @default(true)
+  /// Clé système pour auto-imputation (CASH, CUSTOMERS, SALES…).
+  systemKey   String?
+  isSystem    Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  parentId    Int?
+  parent      Account?      @relation("AccountTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Account[]     @relation("AccountTree")
+  lines       JournalLine[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+
+  @@unique([companyId, code])
+  @@unique([companyId, systemKey])
+  @@index([companyId, classNumber, isActive])
+}
+
+/// Exercice comptable (année fiscale) — seul un exercice OPEN accepte des écritures.
+model FiscalYear {
+  id          Int              @id @default(autoincrement())
+  uuid        String           @unique @default(uuid())
+  companyId   Int
+  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  label       String
+  startDate   DateTime         @db.Date
+  endDate     DateTime         @db.Date
+  status      FiscalYearStatus @default(OPEN)
+  closedAt    DateTime?
+  closedById  Int?
+  closedBy    User?            @relation("FiscalYearClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  entries     JournalEntry[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
+
+  @@unique([companyId, label])
+  @@index([companyId, status])
+  @@index([companyId, startDate, endDate])
+}
+
+/// Écriture de journal (en-tête) — toujours équilibrée débit = crédit.
+model JournalEntry {
+  id           Int                 @id @default(autoincrement())
+  uuid         String              @unique @default(uuid())
+  companyId    Int
+  company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fiscalYearId Int
+  fiscalYear   FiscalYear          @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  entryDate    DateTime            @db.Date
+  journalCode  JournalCode         @default(OD)
+  /// Numéro séquentiel dans l’exercice (ex. VE-00042).
+  entryNumber  Int
+  reference    String?
+  description  String
+  /// Origine métier : SALE, CREDIT_SALE, CREDIT_PAYMENT, EXPENSE, PURCHASE, BANK, MANUAL, OPENING, CLOSING…
+  source       String
+  sourceId     String?
+  status       JournalEntryStatus  @default(POSTED)
+  createdById  Int?
+  createdBy    User?               @relation("JournalEntryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  lines        JournalLine[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  deletedAt    DateTime?
+
+  @@unique([fiscalYearId, journalCode, entryNumber])
+  @@unique([companyId, source, sourceId])
+  @@index([companyId, entryDate])
+  @@index([fiscalYearId, entryDate])
+  @@index([companyId, status, entryDate])
+}
+
+/// Ligne d’écriture (mouvement sur un compte).
+model JournalLine {
+  id             Int          @id @default(autoincrement())
+  uuid           String       @unique @default(uuid())
+  journalEntryId Int
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId      Int
+  account        Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  label          String?
+  debit          Decimal      @default(0) @db.Decimal(14, 2)
+  credit         Decimal      @default(0) @db.Decimal(14, 2)
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([accountId])
+  @@index([journalEntryId, sortOrder])
+}
+
+/// Paiement fournisseur — solde le compte 401 (Dr Fournisseurs / Cr Caisse ou Banque).
+model SupplierPayment {
+  id            Int           @id @default(autoincrement())
+  uuid          String        @unique @default(uuid())
+  companyId     Int
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  supplierName  String
+  amount        Decimal       @db.Decimal(12, 2)
+  method        PaymentMethod @default(CASH)
+  bankAccountId Int?
+  bankAccount   BankAccount?  @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  /// Lien optionnel vers une réception d’achat.
+  goodsReceiptId Int?
+  note          String?
+  paidAt        DateTime      @default(now())
+  userId        Int?
+  user          User?         @relation("SupplierPaymentUser", fields: [userId], references: [id], onDelete: SetNull)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
+
+  @@index([companyId, paidAt])
+  @@index([companyId, supplierName])
+}
+
+/// Immobilisation corporelle — amortissement linéaire mensuel (681 / 281).
+model FixedAsset {
+  id                      Int       @id @default(autoincrement())
+  uuid                    String    @unique @default(uuid())
+  companyId               Int
+  company                 Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name                    String
+  /// Date d’acquisition (début amortissement le mois suivant ou le mois d’acquisition).
+  acquisitionDate         DateTime  @db.Date
+  acquisitionCost         Decimal   @db.Decimal(14, 2)
+  residualValue           Decimal   @default(0) @db.Decimal(14, 2)
+  usefulLifeMonths        Int
+  /// Cumul des amortissements déjà passés.
+  accumulatedDepreciation Decimal   @default(0) @db.Decimal(14, 2)
+  /// Dernière période amortie (YYYY-MM) ou null.
+  lastDepreciationPeriod  String?
+  isActive                Boolean   @default(true)
+  note                    String?
+  createdById             Int?
+  createdBy               User?     @relation("FixedAssetCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  deletedAt               DateTime?
+
+  @@index([companyId, isActive])
 }
 
 model Session {

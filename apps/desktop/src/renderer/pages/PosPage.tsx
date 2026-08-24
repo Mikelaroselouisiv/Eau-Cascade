@@ -12,6 +12,7 @@ import {
   getInventoryCountSheet,
   getPrinterSettings,
   getRegisterClosingCashPreview,
+  listBanks,
   listRegisters,
   listSaleCashGaps,
   openRegisterSession,
@@ -28,6 +29,7 @@ import type {
   InventoryCountSheetRow,
   Product,
   ProductSaleUnit,
+  BankRow,
   RegisterListItem,
   RegisterSessionDetail,
   SaleCashGapRow,
@@ -37,7 +39,7 @@ import { formatRegisterCode } from '../utils/registerDisplay';
 import { MoneyField } from '../components/MoneyField';
 import { useAuth } from '../context/AuthContext';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
-import { resolveVolumeUnitPrice } from '../utils/volumeUnitPrice';
+import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../utils/volumeUnitPrice';
 import { formatMoney, resolveCurrencyCode } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 
@@ -93,10 +95,37 @@ function clampQty(q: number, maxQ: number | undefined): number {
   return roundQty(x);
 }
 
-function effectiveUnitPrice(product: Product | undefined, line: CartLine): number {
+function familyQtyByProduct(
+  cart: CartLine[],
+  productsById: Map<number, Product>,
+): Map<number, number> {
+  const qty = new Map<number, number>();
+  for (const line of cart) {
+    const p = productsById.get(line.productId);
+    const fid = p?.productFamilyId ?? p?.productFamily?.id;
+    if (fid == null) continue;
+    qty.set(fid, (qty.get(fid) ?? 0) + Number(line.quantity));
+  }
+  return qty;
+}
+
+function effectiveUnitPrice(
+  product: Product | undefined,
+  line: CartLine,
+  familyQty?: Map<number, number>,
+): number {
   if (!product) return 0;
   const su = product.saleUnits?.find((s) => s.id === line.productSaleUnitId);
   if (!su) return 0;
+  const fid = product.productFamilyId ?? product.productFamily?.id;
+  if (fid != null && familyQty) {
+    const familyTiers = (product.productFamily?.tiers ?? []).map((t) => ({
+      minQuantity: Number(t.minQuantity),
+      unitPrice: Number(t.unitPrice),
+    }));
+    const familyPrice = resolveFamilyUnitPrice(familyTiers, familyQty.get(fid) ?? 0);
+    if (familyPrice != null) return familyPrice;
+  }
   const tiers = (su.volumePrices ?? []).map((v) => ({
     minQuantity: Number(v.minQuantity),
     unitPrice: Number(v.unitPrice),
@@ -108,7 +137,7 @@ export function PosPage() {
   const { user, canPerm } = useAuth();
   const cashierLabel = user?.fullName?.trim() || user?.phone || 'Caissier';
   const isCashier = user?.role === 'CASHIER';
-  const canSpecialSale = canPerm('sales.special');
+  const canSpecialSale = canPerm('sales.special_price');
   const [saleMode, setSaleMode] = useState<'classic' | 'special'>('classic');
   const [products, setProducts] = useState<Product[]>([]);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
@@ -117,26 +146,37 @@ export function PosPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | ''>('');
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<number | ''>('');
-  type PaymentMethod = 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT';
+  type PaymentMethod = 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT' | 'BANK';
   type SaleDraft = {
     id: string;
     cart: CartLine[];
     paymentMethod: PaymentMethod;
     name: string;
+    bankId: number | '';
+    bankAccountId: number | '';
   };
 
-  const [drafts, setDrafts] = useState<SaleDraft[]>(() => [
-    { id: 'd1', cart: [], paymentMethod: 'CASH', name: 'Client' },
-  ]);
+  const emptyDraft = (id: string): SaleDraft => ({
+    id,
+    cart: [],
+    paymentMethod: 'CASH',
+    name: 'Client',
+    bankId: '',
+    bankAccountId: '',
+  });
+
+  const [drafts, setDrafts] = useState<SaleDraft[]>(() => [emptyDraft('d1')]);
   const [activeDraftId, setActiveDraftId] = useState<string>('d1');
   const [status, setStatus] = useAutoClearMessage();
   const [printTicket, setPrintTicket] = useState(false);
   const [amountReceived, setAmountReceived] = useState('');
+  const [banks, setBanks] = useState<BankRow[]>([]);
   const [cashGaps, setCashGaps] = useState<{
     changeOwed: SaleCashGapRow[];
     balanceOwed: SaleCashGapRow[];
   }>({ changeOwed: [], balanceOwed: [] });
   const [cashGapBusyId, setCashGapBusyId] = useState<number | null>(null);
+  const [cashGapQuery, setCashGapQuery] = useState('');
 
   const [registerSession, setRegisterSession] = useState<RegisterSessionDetail | null>(null);
   const [registers, setRegisters] = useState<RegisterListItem[]>([]);
@@ -149,6 +189,14 @@ export function PosPage() {
   const [openingCash, setOpeningCash] = useState('');
   const [closingCashExpected, setClosingCashExpected] = useState('');
   const [closingCashCounted, setClosingCashCounted] = useState('');
+  const [closingCashPreview, setClosingCashPreview] = useState<{
+    openingCash: number;
+    salesTotal?: number;
+    salesCash: number;
+    expenses: number;
+    unsettledChange: number;
+    expected: number;
+  } | null>(null);
 
   const salesEnabled = registerSession != null;
 
@@ -349,6 +397,17 @@ export function PosPage() {
   );
   const activeCart = activeDraft?.cart ?? [];
 
+  const productsById = useMemo(() => {
+    const m = new Map<number, Product>();
+    for (const p of products) m.set(p.id, p);
+    return m;
+  }, [products]);
+
+  const familyQtyMap = useMemo(
+    () => familyQtyByProduct(activeCart, productsById),
+    [activeCart, productsById],
+  );
+
   const cartTotal = useMemo(
     () =>
       activeCart.reduce((sum, l) => {
@@ -357,10 +416,10 @@ export function PosPage() {
           if (price == null || !Number.isFinite(price)) return sum;
           return sum + price * l.quantity;
         }
-        const p = products.find((x) => x.id === l.productId);
-        return sum + effectiveUnitPrice(p, l) * l.quantity;
+        const p = productsById.get(l.productId);
+        return sum + effectiveUnitPrice(p, l, familyQtyMap) * l.quantity;
       }, 0),
-    [activeCart, products, saleMode],
+    [activeCart, productsById, familyQtyMap, saleMode],
   );
 
   const specialPricesReady = useMemo(() => {
@@ -370,8 +429,11 @@ export function PosPage() {
     );
   }, [activeCart, saleMode]);
 
+  const showTenderField =
+    activeDraft?.paymentMethod === 'CASH' || activeDraft?.paymentMethod === 'SPLIT';
+
   const tenderPreview = useMemo(() => {
-    if (saleMode !== 'classic') return null;
+    if (!showTenderField) return null;
     const raw = amountReceived.trim().replace(',', '.');
     if (raw === '') return null;
     const received = Number(raw);
@@ -379,11 +441,36 @@ export function PosPage() {
     const changeDue = Math.max(0, Math.round((received - cartTotal) * 100) / 100);
     const balanceDue = Math.max(0, Math.round((cartTotal - received) * 100) / 100);
     return { received, changeDue, balanceDue };
-  }, [amountReceived, cartTotal, saleMode]);
+  }, [amountReceived, cartTotal, showTenderField]);
 
-  const showTenderField =
-    saleMode === 'classic' &&
-    (activeDraft?.paymentMethod === 'CASH' || activeDraft?.paymentMethod === 'SPLIT');
+  const filteredCashGaps = useMemo(() => {
+    const q = cashGapQuery.trim().toLowerCase().replace(/^#/, '');
+    if (!q) return cashGaps;
+    const match = (row: SaleCashGapRow) => {
+      const txn = String(row.txnNumber ?? row.id);
+      const name = (row.clientName ?? '').trim().toLowerCase();
+      const cashier = (row.cashier ?? '').trim().toLowerCase();
+      const amounts = [
+        row.changeDue,
+        row.balanceDue,
+        row.total,
+        row.amountReceived,
+        row.amountPaid,
+      ]
+        .map((n) => String(n))
+        .join(' ');
+      return (
+        txn.includes(q) ||
+        name.includes(q) ||
+        cashier.includes(q) ||
+        amounts.includes(q.replace(',', '.'))
+      );
+    };
+    return {
+      changeOwed: cashGaps.changeOwed.filter(match),
+      balanceOwed: cashGaps.balanceOwed.filter(match),
+    };
+  }, [cashGaps, cashGapQuery]);
 
   async function refreshCashGaps() {
     const cid = effectiveCompanyId;
@@ -399,7 +486,9 @@ export function PosPage() {
       });
       setCashGaps(gaps);
     } catch {
-      // silencieux : panneau secondaire
+      setCashGaps({ changeOwed: [], balanceOwed: [] });
+      // Visible sur Remote : avant, une erreur API (cloud) laissait « Aucune » sans explication.
+      setStatus('Impossible de charger monnaie / restes à encaisser', { persist: true });
     }
   }
 
@@ -408,12 +497,30 @@ export function PosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveCompanyId, effectiveDepartmentId, salesEnabled]);
 
+  useEffect(() => {
+    const cid = effectiveCompanyId;
+    if (cid == null) {
+      setBanks([]);
+      return;
+    }
+    void listBanks({ companyId: cid })
+      .then((rows) => setBanks(rows.filter((b) => b.isActive)))
+      .catch(() => setBanks([]));
+  }, [effectiveCompanyId]);
+
+  const activeBankAccounts = useMemo(() => {
+    if (!activeDraft || activeDraft.bankId === '') return [];
+    const bank = banks.find((b) => b.id === activeDraft.bankId);
+    return (bank?.accounts ?? []).filter((a) => a.isActive);
+  }, [activeDraft, banks]);
+
   function switchSaleMode(mode: 'classic' | 'special') {
     if (mode === saleMode) return;
     if (mode === 'special' && !canSpecialSale) return;
     setSaleMode(mode);
-    setDrafts([{ id: 'd1', cart: [], paymentMethod: 'CASH', name: 'Client' }]);
+    setDrafts([emptyDraft('d1')]);
     setActiveDraftId('d1');
+    setAmountReceived('');
   }
 
   function updateActiveDraft(next: (d: SaleDraft) => SaleDraft) {
@@ -425,7 +532,11 @@ export function PosPage() {
     // Si c'est la dernière fiche, on la réinitialise pour continuer à encaisser.
     if (drafts.length <= 1) {
       setDrafts((prev) =>
-        prev.map((d) => (d.id === activeDraftId ? { ...d, cart: [], name: 'Client' } : d)),
+        prev.map((d) =>
+          d.id === activeDraftId
+            ? { ...d, cart: [], name: 'Client', bankId: '', bankAccountId: '' }
+            : d,
+        ),
       );
       return;
     }
@@ -438,12 +549,17 @@ export function PosPage() {
 
   function createDraft() {
     const nextId = `d${Date.now()}`;
-    setDrafts((prev) => [...prev, { id: nextId, cart: [], paymentMethod: 'CASH', name: 'Client' }]);
+    setDrafts((prev) => [...prev, emptyDraft(nextId)]);
     setActiveDraftId(nextId);
   }
 
   function setActivePaymentMethod(m: PaymentMethod) {
-    updateActiveDraft((d) => ({ ...d, paymentMethod: m }));
+    updateActiveDraft((d) => ({
+      ...d,
+      paymentMethod: m,
+      ...(m !== 'BANK' ? { bankId: '' as const, bankAccountId: '' as const } : {}),
+    }));
+    if (m !== 'CASH' && m !== 'SPLIT') setAmountReceived('');
   }
 
   function setActiveDraftName(name: string) {
@@ -621,6 +737,17 @@ export function PosPage() {
       return;
     }
 
+    if (activeDraft.paymentMethod === 'BANK') {
+      if (activeDraft.bankId === '' || activeDraft.bankAccountId === '') {
+        setStatus('Choisissez la banque et le compte', { persist: true });
+        return;
+      }
+      if (!navigator.onLine) {
+        setStatus('Paiement banque indisponible hors ligne', { persist: true });
+        return;
+      }
+    }
+
     const clientName = activeDraft.name || null;
     const clientUuid =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -638,6 +765,9 @@ export function PosPage() {
         {
           method: activeDraft.paymentMethod,
           amount: applied > 0.009 ? applied : total > 0.009 ? applied : 0.01,
+          ...(activeDraft.paymentMethod === 'BANK' && typeof activeDraft.bankAccountId === 'number'
+            ? { bankAccountId: activeDraft.bankAccountId }
+            : {}),
         },
       ],
       clientName,
@@ -657,13 +787,13 @@ export function PosPage() {
       }
       const sale = (await createSale(payload)) as {
         id: number;
-        ticketNo?: string;
+        txnNumber?: number | null;
         changeDue?: number;
         balanceDue?: number;
         amountReceived?: number;
       };
-      const ticketRef = sale.ticketNo?.trim() || String(sale.id);
-      const msgParts = [`Vente #${ticketRef} enregistrée`];
+      const txnRef = sale.txnNumber ?? sale.id;
+      const msgParts = [`Vente #${txnRef} enregistrée`];
       if ((sale.changeDue ?? changeDue) > 0.009) {
         msgParts.push(`monnaie due ${formatMoney(sale.changeDue ?? changeDue)}`);
       }
@@ -673,19 +803,18 @@ export function PosPage() {
       setStatus(msgParts.join(' — '));
       if (printTicket && window.desktopApp?.printReceipt) {
         await window.desktopApp.printReceipt({
-          saleId: sale.id,
-          ticketNo: ticketRef,
+          saleId: txnRef,
           companyName: company?.name ?? 'Entreprise',
           companyPhone: company?.phone ?? null,
           address: [company?.address, company?.city].filter(Boolean).join(', ') || '',
           cashier: cashierLabel,
           receiptClientName: activeDraft.name || null,
           items: activeCart.map((x) => {
-            const pr = products.find((z) => z.id === x.productId);
+            const pr = productsById.get(x.productId);
             const price =
               saleMode === 'special'
                 ? (x.manualUnitPrice ?? 0)
-                : effectiveUnitPrice(pr, x);
+                : effectiveUnitPrice(pr, x, familyQtyMap);
             return {
               name: x.label,
               qty: x.quantity,
@@ -696,7 +825,18 @@ export function PosPage() {
           amountReceived: sale.amountReceived ?? tendered,
           changeDue: sale.changeDue ?? changeDue,
           balanceDue: sale.balanceDue ?? balanceDue,
-          paymentMode: activeDraft.paymentMethod,
+          paymentMode:
+            activeDraft.paymentMethod === 'CASH'
+              ? 'Espèces'
+              : activeDraft.paymentMethod === 'CARD'
+                ? 'Carte'
+                : activeDraft.paymentMethod === 'MOBILE_MONEY'
+                  ? 'Mobile money'
+                  : activeDraft.paymentMethod === 'SPLIT'
+                    ? 'Mixte'
+                    : activeDraft.paymentMethod === 'BANK'
+                      ? 'Banque'
+                      : activeDraft.paymentMethod,
           paperWidth: printer?.paperWidth === 80 ? 80 : 58,
           printerName: printer?.deviceName ?? '',
           receiptHeaderText: printer?.receiptHeaderText ?? null,
@@ -802,6 +942,7 @@ export function PosPage() {
       setRegisterPanel(null);
       setClosingCashExpected('');
       setClosingCashCounted('');
+      setClosingCashPreview(null);
       await loadRegisterContext(effectiveDepartmentId, effectiveCompanyId);
       setStatus('Caisse fermée');
     } catch {
@@ -828,12 +969,16 @@ export function PosPage() {
     if (mode === 'close' && registerSession) {
       try {
         const preview = await getRegisterClosingCashPreview(registerSession.id);
+        setClosingCashPreview(preview);
         setClosingCashExpected(String(preview.expected));
       } catch {
+        setClosingCashPreview(null);
         const opening = Number(registerSession.openingCashAmount ?? 0);
         setClosingCashExpected(Number.isFinite(opening) ? String(opening) : '0');
         setRegisterError('Impossible de calculer les espèces attendues.');
       }
+    } else {
+      setClosingCashPreview(null);
     }
     setRegisterPanel(mode);
   }
@@ -947,25 +1092,59 @@ export function PosPage() {
               busy={registerBusy}
               error={registerError}
               cashFields={
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
-                  <MoneyField
-                    label="Espèces attendues"
-                    currencyCode={currencyCode}
-                    type="text"
-                    inputMode="decimal"
-                    value={closingCashExpected}
-                    disabled
-                    readOnly
-                  />
-                  <MoneyField
-                    label="Espèces comptées"
-                    currencyCode={currencyCode}
-                    type="text"
-                    inputMode="decimal"
-                    value={closingCashCounted}
-                    disabled={registerBusy}
-                    onChange={(e) => setClosingCashCounted(e.target.value)}
-                  />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {closingCashPreview ? (
+                    <div className="pos-closing-cash-breakdown" aria-label="Détail caisse">
+                      <div className="pos-closing-cash-row">
+                        <span>Fond d’ouverture</span>
+                        <strong>{formatMoney(closingCashPreview.openingCash)}</strong>
+                      </div>
+                      <div className="pos-closing-cash-row">
+                        <span>Total ventes (session)</span>
+                        <strong>
+                          {formatMoney(
+                            closingCashPreview.salesTotal ?? closingCashPreview.salesCash,
+                          )}
+                        </strong>
+                      </div>
+                      <div className="pos-closing-cash-row">
+                        <span>Dont encaissements espèces</span>
+                        <strong>{formatMoney(closingCashPreview.salesCash)}</strong>
+                      </div>
+                      {closingCashPreview.unsettledChange > 0.009 ? (
+                        <div className="pos-closing-cash-row">
+                          <span>Monnaie non rendue</span>
+                          <strong>{formatMoney(closingCashPreview.unsettledChange)}</strong>
+                        </div>
+                      ) : null}
+                      {closingCashPreview.expenses > 0.009 ? (
+                        <div className="pos-closing-cash-row">
+                          <span>Dépenses</span>
+                          <strong>−{formatMoney(closingCashPreview.expenses)}</strong>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <MoneyField
+                      label="Espèces attendues"
+                      currencyCode={currencyCode}
+                      type="text"
+                      inputMode="decimal"
+                      value={closingCashExpected}
+                      disabled
+                      readOnly
+                    />
+                    <MoneyField
+                      label="Espèces comptées"
+                      currencyCode={currencyCode}
+                      type="text"
+                      inputMode="decimal"
+                      value={closingCashCounted}
+                      disabled={registerBusy}
+                      onChange={(e) => setClosingCashCounted(e.target.value)}
+                    />
+                  </div>
                 </div>
               }
               onSubmit={(lines) => void onCloseRegister(lines)}
@@ -1037,8 +1216,57 @@ export function PosPage() {
                 <option value="CARD">Carte</option>
                 <option value="MOBILE_MONEY">Mobile money</option>
                 <option value="SPLIT">Mixte</option>
+                <option value="BANK">Banque</option>
               </select>
             </label>
+            {activeDraft.paymentMethod === 'BANK' ? (
+              <>
+                <label>
+                  Banque
+                  <select
+                    value={activeDraft.bankId === '' ? '' : String(activeDraft.bankId)}
+                    disabled={!salesEnabled}
+                    onChange={(e) => {
+                      const bankId = e.target.value === '' ? '' : Number(e.target.value);
+                      updateActiveDraft((d) => ({
+                        ...d,
+                        bankId,
+                        bankAccountId: '',
+                      }));
+                    }}
+                  >
+                    <option value="">Choisir…</option>
+                    {banks.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Compte
+                  <select
+                    value={
+                      activeDraft.bankAccountId === '' ? '' : String(activeDraft.bankAccountId)
+                    }
+                    disabled={!salesEnabled || activeDraft.bankId === ''}
+                    onChange={(e) => {
+                      const bankAccountId =
+                        e.target.value === '' ? '' : Number(e.target.value);
+                      updateActiveDraft((d) => ({ ...d, bankAccountId }));
+                    }}
+                  >
+                    <option value="">Choisir…</option>
+                    {activeBankAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                        {a.accountNumber ? ` (${a.accountNumber})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            ) : null}
           </div>
           <div className="product-grid">
             {displayedProducts.map((p) => {
@@ -1122,11 +1350,11 @@ export function PosPage() {
           </div>
           <ul className="cart-lines">
             {activeCart.map((l) => {
-              const pr = products.find((x) => x.id === l.productId);
+              const pr = productsById.get(l.productId);
               const unitP =
                 saleMode === 'special'
                   ? (l.manualUnitPrice ?? 0)
-                  : effectiveUnitPrice(pr, l);
+                  : effectiveUnitPrice(pr, l, familyQtyMap);
               const lineTotal =
                 saleMode === 'special' && (l.manualUnitPrice == null || !Number.isFinite(l.manualUnitPrice))
                   ? 0
@@ -1273,7 +1501,9 @@ export function PosPage() {
             disabled={
               activeCart.length === 0 ||
               !specialPricesReady ||
-              (showTenderField && amountReceived.trim() === '')
+              (showTenderField && amountReceived.trim() === '') ||
+              (activeDraft.paymentMethod === 'BANK' &&
+                (activeDraft.bankId === '' || activeDraft.bankAccountId === ''))
             }
             onClick={() => void checkout()}
           >
@@ -1281,16 +1511,39 @@ export function PosPage() {
           </button>
 
           <div className="pos-cash-gaps">
+            {(cashGaps.changeOwed.length > 0 || cashGaps.balanceOwed.length > 0) ? (
+              <label className="pos-cash-gap-search">
+                <span className="sr-only">Rechercher une fiche</span>
+                <input
+                  type="search"
+                  value={cashGapQuery}
+                  onChange={(e) => setCashGapQuery(e.target.value)}
+                  placeholder="Rechercher (#fiche, client…)"
+                  autoComplete="off"
+                />
+              </label>
+            ) : null}
             <section className="pos-cash-gap-list">
-              <h3>Monnaie à rendre</h3>
+              <h3>
+                Monnaie à rendre
+                {cashGapQuery.trim() && cashGaps.changeOwed.length > 0 ? (
+                  <span className="pos-cash-gap-count">
+                    {' '}
+                    ({filteredCashGaps.changeOwed.length}/{cashGaps.changeOwed.length})
+                  </span>
+                ) : null}
+              </h3>
               {cashGaps.changeOwed.length === 0 ? (
                 <p className="dept-hint">Aucune</p>
+              ) : filteredCashGaps.changeOwed.length === 0 ? (
+                <p className="dept-hint">Aucun résultat</p>
               ) : (
                 <ul>
-                  {cashGaps.changeOwed.map((row) => (
+                  {filteredCashGaps.changeOwed.map((row) => (
                     <li key={`c-${row.id}`}>
                       <div>
-                        <strong>#{row.id}</strong> {row.clientName?.trim() || 'Client'}
+                        <strong>#{row.txnNumber ?? row.id}</strong>{' '}
+                        {row.clientName?.trim() || 'Client'}
                         <div className="dept-hint">{formatMoney(row.changeDue)}</div>
                       </div>
                       <button
@@ -1307,15 +1560,26 @@ export function PosPage() {
               )}
             </section>
             <section className="pos-cash-gap-list">
-              <h3>Restes à encaisser</h3>
+              <h3>
+                Restes à encaisser
+                {cashGapQuery.trim() && cashGaps.balanceOwed.length > 0 ? (
+                  <span className="pos-cash-gap-count">
+                    {' '}
+                    ({filteredCashGaps.balanceOwed.length}/{cashGaps.balanceOwed.length})
+                  </span>
+                ) : null}
+              </h3>
               {cashGaps.balanceOwed.length === 0 ? (
                 <p className="dept-hint">Aucun</p>
+              ) : filteredCashGaps.balanceOwed.length === 0 ? (
+                <p className="dept-hint">Aucun résultat</p>
               ) : (
                 <ul>
-                  {cashGaps.balanceOwed.map((row) => (
+                  {filteredCashGaps.balanceOwed.map((row) => (
                     <li key={`b-${row.id}`}>
                       <div>
-                        <strong>#{row.id}</strong> {row.clientName?.trim() || 'Client'}
+                        <strong>#{row.txnNumber ?? row.id}</strong>{' '}
+                        {row.clientName?.trim() || 'Client'}
                         <div className="dept-hint">{formatMoney(row.balanceDue)}</div>
                       </div>
                       <button

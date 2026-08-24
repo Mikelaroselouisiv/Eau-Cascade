@@ -1,9 +1,10 @@
+import { randomUUID } from 'crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { FinanceType, MovementType, Prisma } from '@prisma/client';
+import { BankTransactionType, FinanceType, MovementType, PaymentMethod, Prisma } from '@prisma/client';
 import { permissionsSatisfy } from '../../common/permissions';
-import { newSaleIdentity } from '../../common/utils/sale-ticket-no';
-import { resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
+import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AccountingPostingService } from '../accounting/accounting-posting.service';
 import { AuditService } from '../audit/audit.service';
 import { DeliveriesService } from '../deliveries/deliveries.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -20,6 +21,7 @@ export class SalesService {
     private readonly auditService: AuditService,
     private readonly deliveriesService: DeliveriesService,
     private readonly rolesService: RolesService,
+    private readonly accountingPosting: AccountingPostingService,
   ) {}
 
   async create(
@@ -33,9 +35,9 @@ export class SalesService {
 
     if (isSpecialSale) {
       const perms = role ? await this.rolesService.getPermissionsForUserRole(role) : [];
-      if (!permissionsSatisfy(perms, ['sales.special'])) {
+      if (!permissionsSatisfy(perms, ['sales.special_price'])) {
         throw new ForbiddenException(
-          'Vente spéciale non autorisée pour votre rôle (droit sales.special)',
+          'Vente spéciale réservée aux rôles autorisés (permission sales.special_price)',
         );
       }
       for (const item of createSaleDto.items) {
@@ -50,7 +52,7 @@ export class SalesService {
     if (createSaleDto.clientUuid) {
       const existing = await this.prisma.sale.findUnique({
         where: { clientUuid: createSaleDto.clientUuid },
-        select: { id: true },
+        select: { id: true, txnNumber: true },
       });
       if (existing) return existing;
     }
@@ -59,7 +61,7 @@ export class SalesService {
       if (createSaleDto.clientUuid) {
         const raced = await tx.sale.findUnique({
           where: { clientUuid: createSaleDto.clientUuid },
-          select: { id: true },
+          select: { id: true, txnNumber: true },
         });
         if (raced) return raced;
       }
@@ -69,11 +71,47 @@ export class SalesService {
       let firstCompanyId: number | null = null;
       let firstDepartmentId: number | null = null;
 
+      const loadedLines: Array<{
+        item: (typeof createSaleDto.items)[number];
+        psu: {
+          id: number;
+          salePrice: Prisma.Decimal;
+          labelOverride: string | null;
+          unitsPerPackage: Prisma.Decimal;
+          product: {
+            id: number;
+            companyId: number;
+            departmentId: number | null;
+            name: string;
+            isService: boolean;
+            trackStock: boolean;
+            productFamilyId: number | null;
+            productFamily: {
+              tiers: { minQuantity: Prisma.Decimal; unitPrice: Prisma.Decimal }[];
+            } | null;
+          };
+          packagingUnit: { label: string };
+          volumePrices: { minQuantity: Prisma.Decimal; unitPrice: Prisma.Decimal }[];
+        };
+        baseQuantity: number;
+      }> = [];
+
       for (const item of createSaleDto.items) {
         const psu = await tx.productSaleUnit.findUnique({
           where: { id: item.productSaleUnitId },
           include: {
-            product: true,
+            product: {
+              include: {
+                productFamily: {
+                  include: {
+                    tiers: {
+                      where: { deletedAt: null },
+                      orderBy: { minQuantity: 'asc' },
+                    },
+                  },
+                },
+              },
+            },
             packagingUnit: true,
             volumePrices: { orderBy: { minQuantity: 'asc' } },
           },
@@ -116,13 +154,44 @@ export class SalesService {
           );
         }
 
+        loadedLines.push({ item, psu, baseQuantity });
+      }
+
+      const familyQty = new Map<number, number>();
+      if (!isSpecialSale) {
+        for (const line of loadedLines) {
+          const fid = line.psu.product.productFamilyId;
+          if (fid == null) continue;
+          familyQty.set(fid, (familyQty.get(fid) ?? 0) + Number(line.item.quantity));
+        }
+      }
+
+      for (const line of loadedLines) {
+        const { item, psu, baseQuantity } = line;
+        const product = psu.product;
         const tierRows = psu.volumePrices.map((v) => ({
           minQuantity: Number(v.minQuantity),
           unitPrice: Number(v.unitPrice),
         }));
-        const unitPrice = isSpecialSale
-          ? Number(item.unitPrice)
-          : resolveVolumeUnitPrice(Number(psu.salePrice), tierRows, item.quantity);
+        let unitPrice: number;
+        if (isSpecialSale) {
+          unitPrice = Number(item.unitPrice);
+        } else {
+          const fid = product.productFamilyId;
+          const familyTiers =
+            product.productFamily?.tiers.map((t) => ({
+              minQuantity: Number(t.minQuantity),
+              unitPrice: Number(t.unitPrice),
+            })) ?? [];
+          const familyPrice =
+            fid != null
+              ? resolveFamilyUnitPrice(familyTiers, familyQty.get(fid) ?? 0)
+              : null;
+          unitPrice =
+            familyPrice != null
+              ? familyPrice
+              : resolveVolumeUnitPrice(Number(psu.salePrice), tierRows, item.quantity);
+        }
         const subtotal = unitPrice * item.quantity;
         total += subtotal;
 
@@ -140,6 +209,12 @@ export class SalesService {
           product: { connect: { id: product.id } },
           productSaleUnit: { connect: { id: psu.id } },
         });
+      }
+
+      for (const p of createSaleDto.payments) {
+        if (p.method === PaymentMethod.BANK && (p.bankAccountId == null || p.bankAccountId < 1)) {
+          throw new BadRequestException('Compte bancaire requis pour un paiement banque');
+        }
       }
 
       const paymentTotal = createSaleDto.payments.reduce((acc, p) => acc + p.amount, 0);
@@ -182,19 +257,26 @@ export class SalesService {
       const registerId = createSaleDto.registerId ?? null;
 
       const clientUuid = createSaleDto.clientUuid ?? null;
-      const { uuid: saleUuid, ticketNo } = newSaleIdentity();
-      const insertedRows = await tx.$queryRaw<Array<{ id: number; ticketNo: string }>>`
+      // uuid : plus de DEFAULT SQL après drift Prisma (@default(uuid()) côté client seulement).
+      // L’INSERT brut doit donc fournir uuid explicitement.
+      const saleUuid = randomUUID();
+      const insertedRows = await tx.$queryRaw<Array<{ id: number }>>`
         INSERT INTO "Sale"
-          ("uuid", "ticketNo", "total", "subtotal", "tax", "cashier", "userId", "storeId", "registerId", "clientUuid",
+          ("uuid", "total", "subtotal", "tax", "cashier", "userId", "storeId", "registerId", "clientUuid",
            "amountPaid", "amountReceived", "changeDue", "updatedAt")
         VALUES
-          (${saleUuid}, ${ticketNo}, ${total}, ${total}, 0, ${cashier}, ${userId ?? null}, ${storeId}, ${registerId}, ${clientUuid},
+          (${saleUuid}, ${total}, ${total}, 0, ${cashier}, ${userId ?? null}, ${storeId}, ${registerId}, ${clientUuid},
            ${amountPaid}, ${amountReceived}, ${changeDue}, NOW())
-        RETURNING "id", "ticketNo";
+        RETURNING "id";
       `;
       const saleId = insertedRows?.[0]?.id;
-      const saleTicketNo = insertedRows?.[0]?.ticketNo ?? ticketNo;
       if (!saleId) throw new BadRequestException('Impossible de créer la vente.');
+
+      // Numéro métier = id d’origine ; conservé tel quel lors du sync (≠ id local cible).
+      await tx.$executeRaw`
+        UPDATE "Sale" SET "txnNumber" = ${saleId} WHERE "id" = ${saleId} AND "txnNumber" IS NULL
+      `;
+      const txnNumber = saleId;
 
       await tx.saleItem.createMany({
         data: saleItemsData.map((it) => ({
@@ -220,41 +302,117 @@ export class SalesService {
       if (appliedPayments.length === 0 && amountPaid > 0.009) {
         appliedPayments = [
           {
-            method: createSaleDto.payments[0]?.method ?? ('CASH' as const),
+            method: createSaleDto.payments[0]?.method ?? PaymentMethod.CASH,
             amount: amountPaid,
             reference: createSaleDto.payments[0]?.reference,
+            bankAccountId: createSaleDto.payments[0]?.bankAccountId,
           },
         ];
       }
 
+      // Valider / créditer les comptes banque (hors caisse) avant d’enregistrer les paiements.
+      const bankPaymentRefs = new Map<number, string>();
+      for (let i = 0; i < appliedPayments.length; i++) {
+        const payment = appliedPayments[i];
+        if (payment.method !== PaymentMethod.BANK || payment.amount <= 0.009) continue;
+        const accountId = payment.bankAccountId;
+        if (accountId == null) {
+          throw new BadRequestException('Compte bancaire requis pour un paiement banque');
+        }
+        const account = await tx.bankAccount.findFirst({
+          where: {
+            id: accountId,
+            deletedAt: null,
+            isActive: true,
+            bank: { deletedAt: null, isActive: true },
+            ...(firstCompanyId != null ? { companyId: firstCompanyId } : {}),
+          },
+          include: { bank: { select: { id: true, name: true } } },
+        });
+        if (!account) {
+          throw new BadRequestException('Compte bancaire introuvable ou inactif');
+        }
+        await tx.bankTransaction.create({
+          data: {
+            bankAccountId: account.id,
+            type: BankTransactionType.DEPOSIT,
+            amount: payment.amount,
+            description: `Vente #${txnNumber} — ${account.bank.name} / ${account.name}`,
+            reference: `saleTxn:${txnNumber}`,
+            userId: userId ?? null,
+          },
+        });
+        bankPaymentRefs.set(i, payment.reference?.trim() || `${account.bank.name} · ${account.name}`);
+      }
+
       await tx.payment.createMany({
-        data: appliedPayments.map((payment) => ({
+        data: appliedPayments.map((payment, i) => ({
           saleId,
           amount: payment.amount as unknown as Prisma.Decimal,
           method: payment.method,
-          reference: payment.reference ?? null,
+          reference: bankPaymentRefs.get(i) ?? payment.reference ?? null,
+          bankAccountId:
+            payment.method === PaymentMethod.BANK ? (payment.bankAccountId ?? null) : null,
         })),
       });
 
       // Journal financier : INCOME = part réellement appliquée (hors CREDIT).
+      // BANK y figure (revenu) mais n’entre PAS dans le cash de fermeture de caisse.
       const cashCollected = appliedPayments
-        .filter((p) => p.method !== 'CREDIT')
+        .filter((p) => p.method !== PaymentMethod.CREDIT)
         .reduce((acc, p) => acc + p.amount, 0);
       if (firstCompanyId != null && cashCollected > 0.009) {
         const categoryId = await this.findOrCreateVentesPosCategoryId(tx, firstCompanyId);
+        const onlyBank =
+          appliedPayments.length > 0 &&
+          appliedPayments.every((p) => p.method === PaymentMethod.BANK);
         await tx.financeEntry.create({
           data: {
             type: FinanceType.INCOME,
             amount: cashCollected,
             description:
               cashCollected + 0.01 < total
-                ? `Encaissement partiel vente #${saleTicketNo}`
-                : `Encaissement vente #${saleTicketNo}`,
+                ? `Encaissement partiel vente #${txnNumber}`
+                : onlyBank
+                  ? `Encaissement banque vente #${txnNumber}`
+                  : `Encaissement vente #${txnNumber}`,
             userId: userId ?? null,
             categoryId,
             saleId,
           },
         });
+      }
+
+      // Comptabilité en partie double (si exercice ouvert + plan initialisé).
+      if (firstCompanyId != null) {
+        const cashAmount = appliedPayments
+          .filter((p) => p.method !== PaymentMethod.CREDIT && p.method !== PaymentMethod.BANK)
+          .reduce((acc, p) => acc + p.amount, 0);
+        const bankAmount = appliedPayments
+          .filter((p) => p.method === PaymentMethod.BANK)
+          .reduce((acc, p) => acc + p.amount, 0);
+        const costRows = await tx.saleItem.findMany({
+          where: { saleId },
+          select: { baseQuantity: true, product: { select: { cost: true } } },
+        });
+        const cogs = costRows.reduce(
+          (s, it) => s + Number(it.baseQuantity) * Number(it.product.cost ?? 0),
+          0,
+        );
+        await this.accountingPosting.postPosSale(
+          {
+            companyId: firstCompanyId,
+            saleId,
+            entryDate: new Date(),
+            total,
+            cashAmount,
+            bankAmount,
+            cogs,
+            createdById: userId,
+            txnLabel: `#${txnNumber}`,
+          },
+          tx,
+        );
       }
 
       if (clientNameRaw !== null) {
@@ -286,7 +444,7 @@ export class SalesService {
 
       const sale = {
         id: saleId,
-        ticketNo: saleTicketNo,
+        txnNumber,
         total,
         amountPaid,
         amountReceived,
@@ -298,7 +456,7 @@ export class SalesService {
         action: 'SALE_CREATED',
         entity: 'SALE',
         entityId: String(saleId),
-        metadata: { total, amountReceived, changeDue, amountPaid, ticketNo: saleTicketNo },
+        metadata: { total, amountReceived, changeDue, amountPaid },
       });
       return sale;
     });
@@ -344,87 +502,149 @@ export class SalesService {
    * Écarts cash ouverts (héritage entre sessions de caisse) :
    * - changeDue > 0 : l’entreprise doit la monnaie au client
    * - amountPaid < total : le client doit un reste
+   *
+   * Important: on filtre directement les écarts ouverts (pas un échantillon
+   * des N plus anciennes ventes, sinon les nouveaux écarts disparaissent
+   * dès que l’historique dépasse cette fenêtre).
+   *
+   * Scope entreprise/département : lignes produit OU caisse (Register) —
+   * les Remotes caissiers filtrent souvent par département ; sans le OR
+   * Register, une vente syncée sans SaleItem disparaît du panneau.
+   * On n’utilise pas Sale.clientName dans le SQL (colonne parfois absente
+   * sur un nœud cloud non migré — ça faisait planter /sales/cash-gaps).
    */
   async listCashGaps(opts: { companyId: number; departmentId?: number; take?: number }) {
     const take = Math.min(100, Math.max(1, Math.floor(opts.take ?? 50)));
-    const deptFilter =
+    // Register n’a PAS companyId : entreprise via Store (ou Department).
+    const scopeClause =
       opts.departmentId != null
-        ? {
-            items: {
-              some: {
-                deletedAt: null,
-                product: { companyId: opts.companyId, departmentId: opts.departmentId },
-              },
-            },
-          }
-        : {
-            items: {
-              some: { deletedAt: null, product: { companyId: opts.companyId } },
-            },
-          };
+        ? Prisma.sql`AND (
+            EXISTS (
+              SELECT 1 FROM "SaleItem" si
+              JOIN "Product" p ON p.id = si."productId"
+              WHERE si."saleId" = s.id
+                AND si."deletedAt" IS NULL
+                AND p."companyId" = ${opts.companyId}
+                AND p."departmentId" = ${opts.departmentId}
+            )
+            OR EXISTS (
+              SELECT 1 FROM "Register" r
+              JOIN "Store" st ON st.id = r."storeId"
+              WHERE r.id = s."registerId"
+                AND st."companyId" = ${opts.companyId}
+                AND r."departmentId" = ${opts.departmentId}
+            )
+          )`
+        : Prisma.sql`AND (
+            EXISTS (
+              SELECT 1 FROM "SaleItem" si
+              JOIN "Product" p ON p.id = si."productId"
+              WHERE si."saleId" = s.id
+                AND si."deletedAt" IS NULL
+                AND p."companyId" = ${opts.companyId}
+            )
+            OR EXISTS (
+              SELECT 1 FROM "Register" r
+              JOIN "Store" st ON st.id = r."storeId"
+              WHERE r.id = s."registerId"
+                AND st."companyId" = ${opts.companyId}
+            )
+          )`;
 
-    const rows = await this.prisma.sale.findMany({
-      where: {
-        deletedAt: null,
-        status: 'COMPLETED',
-        creditCustomerId: null,
-        ...deptFilter,
-      },
-      select: {
-        id: true,
-        total: true,
-        amountPaid: true,
-        amountReceived: true,
-        changeDue: true,
-        clientName: true,
-        cashier: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'asc' },
-      take: 300,
-    });
+    type GapRow = {
+      id: number;
+      txnNumber: number | null;
+      total: Prisma.Decimal | number;
+      amountPaid: Prisma.Decimal | number;
+      amountReceived: Prisma.Decimal | number;
+      changeDue: Prisma.Decimal | number;
+      cashier: string | null;
+      createdAt: Date;
+    };
 
-    const changeOwed = rows
-      .filter((s) => Number(s.changeDue) > 0.009)
-      .slice(0, take)
-      .map((s) => ({
+    const changeRows = await this.prisma.$queryRaw<GapRow[]>`
+      SELECT s.id, s."txnNumber" AS "txnNumber", s.total, s."amountPaid", s."amountReceived",
+             s."changeDue", s.cashier, s."createdAt"
+      FROM "Sale" s
+      WHERE s."deletedAt" IS NULL
+        AND s.status = 'COMPLETED'
+        AND s."creditCustomerId" IS NULL
+        AND s."changeDue" > 0.009
+        ${scopeClause}
+      ORDER BY s."createdAt" ASC
+      LIMIT ${take}
+    `;
+
+    const balanceRows = await this.prisma.$queryRaw<GapRow[]>`
+      SELECT s.id, s."txnNumber" AS "txnNumber", s.total, s."amountPaid", s."amountReceived",
+             s."changeDue", s.cashier, s."createdAt"
+      FROM "Sale" s
+      WHERE s."deletedAt" IS NULL
+        AND s.status = 'COMPLETED'
+        AND s."creditCustomerId" IS NULL
+        AND s."changeDue" <= 0.009
+        AND s."amountPaid" < s.total - 0.009
+        ${scopeClause}
+      ORDER BY s."createdAt" ASC
+      LIMIT ${take}
+    `;
+
+    const clientNames = await this.loadSaleClientNames([
+      ...changeRows.map((s) => s.id),
+      ...balanceRows.map((s) => s.id),
+    ]);
+
+    const changeOwed = changeRows.map((s) => ({
+      id: s.id,
+      txnNumber: s.txnNumber ?? s.id,
+      clientName: clientNames.get(s.id) ?? null,
+      cashier: s.cashier,
+      createdAt: s.createdAt,
+      total: Number(s.total),
+      amountReceived: Number(s.amountReceived),
+      amountPaid: Number(s.amountPaid),
+      changeDue: Number(s.changeDue),
+      balanceDue: 0,
+      kind: 'CHANGE_OWED' as const,
+    }));
+
+    const balanceOwed = balanceRows.map((s) => {
+      const total = Number(s.total);
+      const paid = Number(s.amountPaid);
+      return {
         id: s.id,
-        clientName: s.clientName,
+        txnNumber: s.txnNumber ?? s.id,
+        clientName: clientNames.get(s.id) ?? null,
         cashier: s.cashier,
         createdAt: s.createdAt,
-        total: Number(s.total),
+        total,
         amountReceived: Number(s.amountReceived),
-        amountPaid: Number(s.amountPaid),
-        changeDue: Number(s.changeDue),
-        balanceDue: 0,
-        kind: 'CHANGE_OWED' as const,
-      }));
-
-    const balanceOwed = rows
-      .filter((s) => {
-        const total = Number(s.total);
-        const paid = Number(s.amountPaid);
-        return Number(s.changeDue) <= 0.009 && total - paid > 0.009;
-      })
-      .slice(0, take)
-      .map((s) => {
-        const total = Number(s.total);
-        const paid = Number(s.amountPaid);
-        return {
-          id: s.id,
-          clientName: s.clientName,
-          cashier: s.cashier,
-          createdAt: s.createdAt,
-          total,
-          amountReceived: Number(s.amountReceived),
-          amountPaid: paid,
-          changeDue: 0,
-          balanceDue: this.round2(total - paid),
-          kind: 'BALANCE_OWED' as const,
-        };
-      });
+        amountPaid: paid,
+        changeDue: 0,
+        balanceDue: this.round2(total - paid),
+        kind: 'BALANCE_OWED' as const,
+      };
+    });
 
     return { changeOwed, balanceOwed };
+  }
+
+  /** Best-effort : `Sale.clientName` peut être absente sur un nœud non migré. */
+  private async loadSaleClientNames(ids: number[]): Promise<Map<number, string | null>> {
+    const map = new Map<number, string | null>();
+    const unique = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+    if (!unique.length) return map;
+    try {
+      const rows = await this.prisma.$queryRaw<Array<{ id: number; clientName: string | null }>>`
+        SELECT s.id, s."clientName" AS "clientName"
+        FROM "Sale" s
+        WHERE s.id IN (${Prisma.join(unique)})
+      `;
+      for (const r of rows) map.set(r.id, r.clientName);
+    } catch {
+      /* colonne absente — panneau cash-gaps reste utilisable */
+    }
+    return map;
   }
 
   /** Remet la monnaie due au client (sort les espèces de la caisse). */
@@ -564,7 +784,7 @@ export class SalesService {
   async cancelSale(id: number, userId?: number) {
     const sale = await this.prisma.sale.findFirst({
       where: { id, deletedAt: null },
-      include: { items: true },
+      include: { items: { include: { product: { select: { companyId: true } } } } },
     });
     if (!sale) {
       throw new NotFoundException('Sale not found');
@@ -574,7 +794,13 @@ export class SalesService {
     }
     return this.prisma.$transaction(async (tx) => {
       await this.reverseDeliveredStockForSale(tx, id, userId, 'Annulation vente');
+      await this.reverseBankDepositsForSale(tx, id);
       await tx.financeEntry.deleteMany({ where: { saleId: id } });
+      const companyId = sale.items[0]?.product?.companyId;
+      if (companyId != null) {
+        await this.accountingPosting.voidBySource(companyId, 'SALE', String(id), tx);
+        await this.accountingPosting.voidBySource(companyId, 'SALE_COGS', String(id), tx);
+      }
       const updated = await tx.sale.update({
         where: { id },
         data: { status: 'CANCELLED' },
@@ -592,7 +818,7 @@ export class SalesService {
   async refundSale(id: number, userId?: number) {
     const sale = await this.prisma.sale.findFirst({
       where: { id, deletedAt: null },
-      include: { items: true },
+      include: { items: { include: { product: { select: { companyId: true } } } } },
     });
     if (!sale) {
       throw new NotFoundException('Sale not found');
@@ -602,7 +828,13 @@ export class SalesService {
     }
     return this.prisma.$transaction(async (tx) => {
       await this.reverseDeliveredStockForSale(tx, id, userId, 'Remboursement vente');
+      await this.reverseBankDepositsForSale(tx, id);
       await tx.financeEntry.deleteMany({ where: { saleId: id } });
+      const companyId = sale.items[0]?.product?.companyId;
+      if (companyId != null) {
+        await this.accountingPosting.voidBySource(companyId, 'SALE', String(id), tx);
+        await this.accountingPosting.voidBySource(companyId, 'SALE_COGS', String(id), tx);
+      }
       const updated = await tx.sale.update({
         where: { id },
         data: { status: 'REFUNDED' },
@@ -650,6 +882,7 @@ export class SalesService {
         );
       }
 
+      await this.reverseBankDepositsForSale(tx, saleId);
       await tx.financeEntry.updateMany({
         where: { saleId, deletedAt: null },
         data: { deletedAt: now },
@@ -692,6 +925,24 @@ export class SalesService {
       data: { companyId, name },
     });
     return created.id;
+  }
+
+  /** Annule les dépôts banque liés à une vente POS (`saleTxn:{txnNumber}` / ancien `sale:{id}`). */
+  private async reverseBankDepositsForSale(tx: Prisma.TransactionClient, saleId: number) {
+    const sale = await tx.sale.findUnique({
+      where: { id: saleId },
+      select: { id: true, txnNumber: true },
+    });
+    const refs = [`sale:${saleId}`];
+    if (sale?.txnNumber != null) refs.push(`saleTxn:${sale.txnNumber}`);
+    await tx.bankTransaction.updateMany({
+      where: {
+        deletedAt: null,
+        reference: { in: refs },
+        type: BankTransactionType.DEPOSIT,
+      },
+      data: { deletedAt: new Date() },
+    });
   }
 
   /**
@@ -827,6 +1078,10 @@ export class SalesService {
           return 'Mobile money';
         case 'SPLIT':
           return 'Mixte';
+        case 'BANK':
+          return 'Banque';
+        case 'CREDIT':
+          return 'À crédit';
         default:
           return method;
       }
@@ -834,7 +1089,7 @@ export class SalesService {
 
     const doc = createPdfDoc();
     await drawReportHeader(doc, {
-      title: `Ticket de vente #${sale.ticketNo || sale.id}`,
+      title: `Ticket de vente #${sale.txnNumber ?? sale.id}`,
       brand: { companyName, logoUrl },
       metaLines: [generatedMetaLine()],
     });

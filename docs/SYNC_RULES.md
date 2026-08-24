@@ -17,15 +17,24 @@ Les deux nœuds peuvent écrire hors-ligne ; la réconciliation se fait au retou
 | `updatedAt` / `deletedAt` | LWW (`max`) |
 | `companyUuid`, `departmentUuid`, … | Parents transportés sur le fil ; le nœud cible résout → `companyId` local |
 
-Si un parent requis est introuvable, le push marque `error` et le **curseur n’avance pas** (retry).
+Si un parent requis est introuvable, le push marque `error` sur **cette** ligne.
+Le curseur **avance quand même** (poison pill) pour ne pas geler tout l’historique ;
+un redémarrage de l’agent rejoue depuis epoch et peut récupérer les lignes après arrival des parents.
 
-## Règles par famille
+Le pull utilise un curseur composite `updatedAt|uuid` pour ne pas sauter les lignes
+au même horodatage.
 
-### Ventes (`Sale`, `SaleItem`, `Payment`) — append-only
+### Ventes — `txnNumber`
 
-- Une vente créée sur un nœud **ne se modifie pas** côté sync (sauf statut CANCELLED/REFUNDED via API métier).
-- Upsert par `uuid` ou `clientUuid` : si déjà présent → **no-op** (pas de doublon).
-- Soft delete rare (admin) : propager `deletedAt`.
+- Requis côté métier (ticket / livraison).
+- Si une Sale arrive en sync **sans** `txnNumber`, le nœud cible la crée puis backfill `txnNumber = id`
+  (évite le blocage historique). Préférer corriger la source (`UPDATE … SET "txnNumber" = id`).
+
+### Crédit (`CreditCustomer`, `CreditPayment`)
+
+- `CreditCustomer` : **LWW** (comme la config) — fiche client / plafond / soft delete. Si online est plus récent que le brouillon local, online gagne.
+- `CreditPayment` : **append-only** — insert si `uuid` inconnu (acomptes / remboursements).
+- Les ventes crédit créent aussi `Sale` + `Delivery` (mêmes règles que la caisse) ; sans sync des clients crédit, ces ventes / livraisons restent bloquées (FK).
 
 ### Config (`Company`, `Department`, `DepartmentPrinterProfile`, `PackagingUnit`, `User`, `Store`, `Register`, `CreditCustomer`)
 
@@ -33,21 +42,14 @@ Si un parent requis est introuvable, le push marque `error` et le **curseur n’
 - Soft delete obligatoire pour ces DELETE métier (tombstone synchronisable). **Hard delete = invisible au sync = résurrection** depuis l’autre nœud.
 - Au pull / push : n’écraser que si `effectiveAt(incoming) > effectiveAt(existing)`.
 - Soft delete plus récent gagne ; une édition ultérieure peut « undelete » (`deletedAt: null`) si son `updatedAt` est plus récent.
-- `CreditCustomer` doit être synchronisé **avant** `Sale` (FK `Sale.creditCustomerUuid`).
 
-### Crédit (`CreditCustomer`, `CreditPayment`)
-
-- `CreditCustomer` : config LWW (fiche client AR).
-- `CreditPayment` : LWW (acomptes / remboursements) — après `Sale` et `FinanceEntry` (FK optionnelles `saleUuid`, `financeEntryUuid`).
-- Une vente crédit crée une `Sale` + `Payment(CREDIT)` + `Delivery(PENDING)` comme le POS ; le sync propage ces entités via l’ordre standard une fois le client résolu.
-
-### Catalogue / stock (`Product`, `ProductSaleUnit`, `ProductVolumePrice`, `ProductRecipe`, `RecipeComponent`)
+### Catalogue / stock (`Product`, `ProductSaleUnit`, `ProductVolumePrice`, `ProductFamily`, `ProductFamilyTier`, `ProductRecipe`, `RecipeComponent`)
 
 - LWW sur `updatedAt`.
 - Champ `stock` : **recalculé** côté réception après application des `StockMovement` append-only (ne pas LWW aveugle sur le stock).
 - Soft delete : `deletedAt` non null → exclure des listes API actives.
 
-### Mouvements & finance (`StockMovement`, `FinanceEntry`, `CashClosure`, `AuditLog`) — append-only
+### Mouvements & finance (`StockMovement`, `FinanceEntry`, `CashClosure`, `AuditLog`, `CreditPayment`) — append-only
 
 - Insert si `uuid` inconnu ; jamais écraser un mouvement existant.
 - `FinanceEntry` liée à une vente : suivre la vente (même `sale.uuid`).
@@ -66,10 +68,11 @@ Si un parent requis est introuvable, le push marque `error` et le **curseur n’
 
 - `Session` (tokens refresh locaux)
 - `SyncState` (état par nœud)
+- `Bank*` (hors périmètre sync actuel)
 
 ## API
 
-- `GET /sync/pull?entity=&since=` — deltas depuis curseur
+- `GET /sync/pull?entity=&since=` — deltas depuis curseur (`since` = ISO ou `ISO|uuid`)
 - `POST /sync/push` — batch d’enregistrements (`uuid` + payload)
 - Auth : JWT admin/service ou `SYNC_API_KEY` (header `X-Sync-Key`)
 

@@ -1,0 +1,143 @@
+# Build Android, sign with the stable release key and publish to the Eau Cascade GCS bucket.
+# Required secrets:
+# - GCP_PROJECT_ID=eau-cascade
+# - GCP_WORKLOAD_IDENTITY_PROVIDER
+# - GCP_SERVICE_ACCOUNT
+# - ANDROID_KEYSTORE_BASE64
+# - ANDROID_KEYSTORE_PASSWORD
+# - ANDROID_KEY_ALIAS
+# - ANDROID_KEY_PASSWORD
+
+name: Mobile Android - release to GCS
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Notes affichées dans l’application'
+        required: false
+        type: string
+      mandatory:
+        description: 'Mise à jour obligatoire'
+        required: true
+        default: false
+        type: boolean
+  push:
+    tags:
+      - 'mobile-v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/apps/mobile/android/app/release.keystore
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Install dependencies
+        working-directory: apps/mobile
+        run: npm ci
+
+      - name: Resolve and validate version
+        id: meta
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./apps/mobile/app.json').expo.version")"
+          VERSION_CODE="$(node -p "require('./apps/mobile/app.json').expo.android.versionCode")"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "mobile-v$VERSION" ]]; then
+            echo "Tag $GITHUB_REF_NAME incompatible avec app.json version $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          test "${{ secrets.GCP_PROJECT_ID }}" = "eau-cascade"
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+      - name: Generate Android project
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --clean
+
+      - name: Restore Android release key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          chmod 600 "$ANDROID_KEYSTORE_PATH"
+
+      - name: Build signed release APK
+        working-directory: apps/mobile
+        run: |
+          ./android/gradlew -p android assembleRelease \
+            -Dorg.gradle.jvmargs="-Xmx6144m -XX:MaxMetaspaceSize=1536m" \
+            --max-workers=2 --no-watch-fs
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: POS-Eau-Cascade-${{ steps.meta.outputs.version }}
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Authenticate to Google Cloud (WIF — Eau Cascade)
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: eau-cascade
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Configure Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Publish APK and update manifest
+        shell: pwsh
+        env:
+          RELEASE_NOTES: ${{ inputs.notes }}
+          RELEASE_MANDATORY: ${{ inputs.mandatory }}
+        run: |
+          if ('${{ secrets.GCP_PROJECT_ID }}' -ne 'eau-cascade') {
+            throw 'ABORT: projet GCP Eau Cascade attendu'
+          }
+          $notes = if ($env:RELEASE_NOTES) {
+            $env:RELEASE_NOTES
+          } else {
+            'Version ${{ steps.meta.outputs.version }}'
+          }
+          $params = @{
+            ApkPath = './apps/mobile/android/app/build/outputs/apk/release/app-release.apk'
+            Version = '${{ steps.meta.outputs.version }}'
+            VersionCode = [int] '${{ steps.meta.outputs.version_code }}'
+            Notes = $notes
+          }
+          if ($env:RELEASE_MANDATORY -eq 'true') {
+            $params.Mandatory = $true
+          }
+          & ./infra/scripts/upload-mobile-apk.ps1 @params

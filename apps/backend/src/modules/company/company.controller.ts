@@ -7,7 +7,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CompanyService } from './company.service';
@@ -20,19 +20,19 @@ export class CompanyController {
   constructor(private readonly companyService: CompanyService) {}
 
   @Get()
-  @Roles('ADMIN', 'MANAGER', 'ACCOUNTANT', 'CASHIER', 'STOCK_MANAGER')
+  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'finance.view')
   profile() {
     return this.companyService.getProfile();
   }
 
   @Patch()
-  @Roles('ADMIN')
+  @Permissions('company.manage')
   update(@Body() dto: UpdateCompanyDto) {
     return this.companyService.update(dto);
   }
 
   @Get('printer')
-  @Roles('ADMIN', 'MANAGER', 'CASHIER', 'STOCK_MANAGER', 'ACCOUNTANT', 'LIVREUR')
+  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'deliveries.view', 'finance.view')
   printer(@Query('departmentId') departmentIdRaw?: string) {
     if (departmentIdRaw === undefined || departmentIdRaw === '') {
       return this.companyService.getPrinterSettings();
@@ -45,7 +45,7 @@ export class CompanyController {
   }
 
   @Patch('printer')
-  @Roles('ADMIN', 'MANAGER')
+  @Permissions('printer.manage')
   updatePrinter(@Body() dto: UpdatePrinterDto) {
     return this.companyService.updatePrinterSettings(dto);
   }

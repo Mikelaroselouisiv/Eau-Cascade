@@ -10,7 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreatePackagingUnitDto } from './dto/create-packaging-unit.dto';
@@ -23,20 +23,20 @@ export class PackagingUnitsController {
   constructor(private readonly packagingUnitsService: PackagingUnitsService) {}
 
   @Get()
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @PermissionsAny('products.view', 'packaging.manage')
   findAll(@Query('departmentId') departmentId: string) {
     const id = Number(departmentId);
     return this.packagingUnitsService.findAll(id);
   }
 
   @Post()
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('packaging.manage')
   create(@Body() dto: CreatePackagingUnitDto) {
     return this.packagingUnitsService.create(dto);
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('packaging.manage')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePackagingUnitDto,
@@ -45,7 +45,7 @@ export class PackagingUnitsController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN', 'MANAGER')
+  @Permissions('packaging.manage')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.packagingUnitsService.remove(id);
   }

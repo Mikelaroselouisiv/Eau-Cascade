@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -10,20 +11,25 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { FinanceType } from '@prisma/client';
 import { Response } from 'express';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Permissions } from '../../common/decorators/permissions.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { formatDateFr } from '../../common/pdf/pdf-format';
+import { permissionsSatisfy } from '../../common/permissions';
+import { RolesService } from '../roles/roles.service';
 import { CloseCashDto, CreateFinanceEntryDto } from './dto/finance-entry.dto';
 import { FinanceLedgerNature, FinanceService } from './finance.service';
 
 @Controller('finance')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class FinanceController {
-  constructor(private readonly financeService: FinanceService) {}
+  constructor(
+    private readonly financeService: FinanceService,
+    private readonly rolesService: RolesService,
+  ) {}
 
   @Get('journal')
   @Permissions('finance.view')
@@ -117,8 +123,18 @@ export class FinanceController {
   }
 
   @Post('entries')
-  @Permissions('finance.write')
-  createEntry(@Body() dto: CreateFinanceEntryDto, @GetUser() user?: { id?: number }) {
+  @PermissionsAny('finance.write', 'finance.expense')
+  async createEntry(
+    @Body() dto: CreateFinanceEntryDto,
+    @GetUser() user?: { id?: number; role?: string },
+  ) {
+    if (user?.role) {
+      const perms = await this.rolesService.getPermissionsForUserRole(user.role);
+      const canFullWrite = permissionsSatisfy(perms, ['finance.write']);
+      if (!canFullWrite && dto.type !== FinanceType.EXPENSE) {
+        throw new ForbiddenException('Vous ne pouvez enregistrer que des dépenses.');
+      }
+    }
     return this.financeService.createEntry(dto, user?.id);
   }
 
@@ -129,7 +145,7 @@ export class FinanceController {
   }
 
   @Delete('ledger/:ledgerRowId')
-  @Roles('ADMIN')
+  @Permissions('finance.write')
   deleteLedgerRow(
     @Param('ledgerRowId') ledgerRowId: string,
     @Query('companyId') companyIdRaw?: string,

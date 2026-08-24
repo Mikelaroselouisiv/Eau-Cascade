@@ -1,35 +1,19 @@
+import type {
+  DesktopUpdaterPromptPayload,
+  DesktopUpdaterSnoozeOption,
+  DesktopUpdaterState,
+} from './types/updater';
+
 export {};
-
-export type UpdaterState =
-  | 'idle'
-  | 'checking'
-  | 'available'
-  | 'not-available'
-  | 'downloading'
-  | 'downloaded'
-  | 'error'
-  | 'disabled';
-
-export type UpdaterStatus = {
-  state: UpdaterState;
-  version?: string;
-  currentVersion?: string;
-  percent?: number;
-  message?: string;
-  enabled?: boolean;
-};
 
 declare global {
   interface Window {
     desktopApp?: {
       platform: string;
-      getVersion?: () => Promise<string>;
-      getEdition?: () => Promise<'server' | 'remote'>;
+      getEdition?: () => Promise<'server' | 'remote' | string>;
       printReceipt?: (saleData: {
         /** Pour nom de fichier PDF (réimpression / export). */
         saleId?: number;
-        /** Numéro de fiche affiché sur le ticket (stable sync). */
-        ticketNo?: string;
         documentType?: 'RECEIPT' | 'DISBURSEMENT_ORDER';
         companyName: string;
         companyPhone?: string | null;
@@ -53,7 +37,6 @@ declare global {
         isTest?: boolean;
         previewSampleBody?: string | null;
         description?: string;
-        detail?: string;
         amount?: number;
         entryDate?: string;
         entryId?: number;
@@ -69,10 +52,15 @@ declare global {
         cacheGet: (key: string) => Promise<string | null>;
       };
       updater?: {
-        getStatus: () => Promise<UpdaterStatus>;
-        check: () => Promise<UpdaterStatus>;
-        quitAndInstall: () => Promise<{ ok: boolean; reason?: string }>;
-        onStatus: (callback: (status: UpdaterStatus) => void) => () => void;
+        getState: () => Promise<DesktopUpdaterState>;
+        check: () => Promise<DesktopUpdaterState>;
+        download: () => Promise<DesktopUpdaterState>;
+        install: () => Promise<{ ok: boolean; error?: string }>;
+        snooze: (optionKey: string) => Promise<DesktopUpdaterState>;
+        dismiss: () => Promise<DesktopUpdaterState>;
+        getSnoozeOptions: () => Promise<DesktopUpdaterSnoozeOption[]>;
+        onState: (handler: (state: DesktopUpdaterState) => void) => () => void;
+        onOpenPrompt: (handler: (payload?: DesktopUpdaterPromptPayload) => void) => () => void;
       };
     };
   }

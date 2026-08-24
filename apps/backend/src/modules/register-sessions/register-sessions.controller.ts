@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { RegisterSessionStatus } from '@prisma/client';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import {
@@ -27,7 +27,7 @@ export class RegisterSessionsController {
   constructor(private readonly registerSessionsService: RegisterSessionsService) {}
 
   @Get('registers')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('pos.use')
   listRegisters(
     @Query('companyId') companyIdRaw?: string,
     @Query('departmentId') departmentIdRaw?: string,
@@ -42,13 +42,13 @@ export class RegisterSessionsController {
   }
 
   @Post('registers')
-  @Roles('ADMIN', 'MANAGER')
+  @Permissions('stores.manage')
   createRegister(@Body() dto: CreateRegisterDto) {
     return this.registerSessionsService.createRegister(dto);
   }
 
   @Post('registers/ensure-default')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('pos.use')
   ensureDefaultRegister(@Query('companyId') companyIdRaw: string) {
     const companyId = Number.parseInt(companyIdRaw, 10);
     if (!Number.isFinite(companyId) || companyId <= 0) {
@@ -58,13 +58,13 @@ export class RegisterSessionsController {
   }
 
   @Get('active')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('pos.use')
   getActive(@GetUser() user: { id: number }) {
     return this.registerSessionsService.getActiveSessionForUser(user.id);
   }
 
   @Get()
-  @Roles('ADMIN', 'MANAGER')
+  @Permissions('stores.manage')
   list(
     @Query('companyId') companyIdRaw?: string,
     @Query('departmentId') departmentIdRaw?: string,
@@ -105,7 +105,7 @@ export class RegisterSessionsController {
   }
 
   @Get(':id/closing-cash-preview')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('pos.use')
   closingCashPreview(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user: { id: number },
@@ -114,19 +114,19 @@ export class RegisterSessionsController {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('pos.use')
   getOne(@Param('id', ParseIntPipe) id: number) {
     return this.registerSessionsService.getSession(id);
   }
 
   @Post('open')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('pos.use')
   open(@Body() dto: OpenRegisterSessionDto, @GetUser() user: { id: number }) {
     return this.registerSessionsService.openSession(dto, user.id);
   }
 
   @Post(':id/close')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('pos.use')
   close(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CloseRegisterSessionDto,

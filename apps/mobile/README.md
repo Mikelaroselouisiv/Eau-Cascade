@@ -16,6 +16,41 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npx expo start
    ```
 
+## Publication Android et mises à jour
+
+La version **Android Release** vérifie au lancement (et au retour au premier plan) :
+
+`https://storage.googleapis.com/eau-cascade-assets/installers/mobile/android/latest.json`
+
+Si `versionCode` en ligne est plus élevé, une fenêtre **dans l’app** propose **Mettre à jour** :
+téléchargement interne, barre de progression, puis dialogue Android **Installer ?**.
+Pas de lien navigateur, pas de fichier à retrouver. iOS n’est pas concerné.
+
+Pour publier :
+
+1. augmenter `expo.version` et `expo.android.versionCode` dans `app.json` ;
+2. synchroniser la version de `package.json` ;
+3. pousser un tag `mobile-vX.Y.Z`, ou lancer manuellement le workflow
+   **Mobile Android - release to GCS**.
+
+Le workflow exige une clé Android stable et les secrets :
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+- `GCP_PROJECT_ID` (`eau-cascade` uniquement)
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_SERVICE_ACCOUNT`
+
+Publication locale après build :
+
+```powershell
+pwsh ../../infra/scripts/upload-mobile-apk.ps1 `
+  -ApkPath ./android/app/build/outputs/apk/release/app-release.apk `
+  -Notes "Résumé de la version"
+```
+
 In the output, you'll find options to open the app in a
 
 - [development build](https://docs.expo.dev/develop/development-builds/introduction/)

@@ -15,6 +15,7 @@ import {
   ymdToBusinessNoon,
 } from '../../common/utils/business-timezone';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AccountingPostingService } from '../accounting/accounting-posting.service';
 import { AuditService } from '../audit/audit.service';
 import { PurchasingService } from '../purchasing/purchasing.service';
 import { SalesService } from '../sales/sales.service';
@@ -28,6 +29,7 @@ export type FinanceLedgerRow = {
   occurredAt: string;
   amount: number;
   description: string;
+  detail: string | null;
   user: { id: number; fullName: string | null; phone: string } | null;
 };
 
@@ -38,6 +40,7 @@ export class FinanceService {
     private readonly auditService: AuditService,
     private readonly purchasingService: PurchasingService,
     private readonly salesService: SalesService,
+    private readonly accountingPosting: AccountingPostingService,
   ) {}
 
   private ymdToDateStart(ymd: string): Date {
@@ -154,6 +157,7 @@ export class FinanceService {
           occurredAt: gr.receivedAt.toISOString(),
           amount,
           description: note ? `${note} (#${gr.id})` : `Réception achat #${gr.id}`,
+          detail: null,
           user: gr.createdBy,
         });
       }
@@ -182,6 +186,7 @@ export class FinanceService {
             occurredAt: fe.createdAt.toISOString(),
             amount: Number(fe.amount),
             description: fe.description,
+            detail: fe.detail?.trim() || null,
             user: fe.user,
           });
         } else {
@@ -191,6 +196,7 @@ export class FinanceService {
             occurredAt: fe.createdAt.toISOString(),
             amount: Number(fe.amount),
             description: fe.description,
+            detail: fe.detail?.trim() || null,
             user: fe.user,
           });
         }
@@ -264,7 +270,9 @@ export class FinanceService {
           {
             date: formatDateTimeFr(row.occurredAt),
             kind: kindFr(row.kind),
-            desc: row.description,
+            desc: row.detail
+              ? `${row.description} — ${row.detail}`
+              : row.description,
             user: row.user?.fullName?.trim() || row.user?.phone || '—',
             amount: formatMoneyHtg(row.amount),
           },
@@ -304,16 +312,31 @@ export class FinanceService {
 
     const createdAt = dto.entryDate ? this.entryDateFromYmd(dto.entryDate) : undefined;
 
+    const detail = dto.detail?.trim() || null;
+
     const entry = await this.prisma.financeEntry.create({
       data: {
         type: dto.type,
         amount: dto.amount,
         description: dto.description,
+        detail,
         userId,
         categoryId,
         ...(createdAt != null ? { createdAt } : {}),
       },
     });
+
+    if (companyId != null && dto.type === FinanceType.EXPENSE) {
+      await this.accountingPosting.postExpense({
+        companyId,
+        financeEntryId: entry.id,
+        entryDate: createdAt ?? entry.createdAt,
+        amount: Number(dto.amount),
+        description: dto.description,
+        createdById: userId,
+      });
+    }
+
     await this.auditService.log({
       userId,
       action: 'FINANCE_ENTRY_CREATED',

@@ -11,7 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -25,7 +25,7 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Post()
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('products.manage')
   create(
     @Body() createProductDto: CreateProductDto,
     @GetUser() user?: { id?: number },
@@ -34,7 +34,7 @@ export class ProductsController {
   }
 
   @Get()
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER')
+  @Permissions('products.view')
   findAll(
     @Query('departmentId') departmentIdRaw?: string,
     @Query('asOf') asOf?: string,
@@ -51,7 +51,7 @@ export class ProductsController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('products.manage')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateProductDto: UpdateProductDto,
@@ -61,7 +61,7 @@ export class ProductsController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER')
+  @Permissions('products.manage')
   remove(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user?: { id?: number },

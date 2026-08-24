@@ -6,11 +6,8 @@ import {
   PurchaseOrderStatus,
 } from '@prisma/client';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
-import {
-  ymdToBusinessDayEnd,
-  ymdToBusinessDayStart,
-} from '../../common/utils/business-timezone';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AccountingPostingService } from '../accounting/accounting-posting.service';
 import { AuditService } from '../audit/audit.service';
 import type {
   CreateGoodsReceiptDto,
@@ -19,13 +16,6 @@ import type {
 } from './dto/purchasing.dto';
 
 export type ReceptionStatus = 'pending' | 'partial' | 'complete';
-
-export type PurchaseOrdersAmountSummaryFilters = {
-  dateFrom?: string;
-  dateTo?: string;
-  departmentId?: number;
-  receptionStatus?: ReceptionStatus;
-};
 
 type PoLineProgress = {
   productId: number;
@@ -39,6 +29,7 @@ export class PurchasingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly accountingPosting: AccountingPostingService,
   ) {}
 
   private sumReceivedByProduct(
@@ -179,44 +170,13 @@ export class PurchasingService {
   /**
    * Totaux estimés des commandes (qty × prix unitaire) — suivi opérationnel admin.
    * N’impacte pas la caisse / le journal : seuls les achats reçus y sont enregistrés.
-   * Filtres optionnels : période (createdAt, TZ métier), département, statut réception.
    */
-  async getPurchaseOrdersAmountSummary(
-    companyId: number,
-    filters?: PurchaseOrdersAmountSummaryFilters,
-  ) {
-    const createdAt: Prisma.DateTimeFilter = {};
-    if (filters?.dateFrom?.trim()) {
-      try {
-        createdAt.gte = ymdToBusinessDayStart(filters.dateFrom.trim());
-      } catch {
-        throw new BadRequestException('dateFrom invalide (YYYY-MM-DD)');
-      }
-    }
-    if (filters?.dateTo?.trim()) {
-      try {
-        createdAt.lte = ymdToBusinessDayEnd(filters.dateTo.trim());
-      } catch {
-        throw new BadRequestException('dateTo invalide (YYYY-MM-DD)');
-      }
-    }
-    if (
-      filters?.dateFrom?.trim() &&
-      filters?.dateTo?.trim() &&
-      filters.dateFrom.trim() > filters.dateTo.trim()
-    ) {
-      throw new BadRequestException('dateFrom doit être ≤ dateTo');
-    }
-
+  async getPurchaseOrdersAmountSummary(companyId: number) {
     const rows = await this.prisma.purchaseOrder.findMany({
       where: {
         deletedAt: null,
         companyId,
         status: { not: PurchaseOrderStatus.CANCELLED },
-        ...(filters?.departmentId != null && filters.departmentId > 0
-          ? { departmentId: filters.departmentId }
-          : {}),
-        ...(Object.keys(createdAt).length > 0 ? { createdAt } : {}),
       },
       include: {
         lines: { select: { productId: true, quantityOrdered: true, unitPriceEst: true } },
@@ -230,10 +190,7 @@ export class PurchasingService {
       orderBy: { createdAt: 'desc' },
     });
 
-    let enriched = rows.map((po) => this.enrichPurchaseOrder(po));
-    if (filters?.receptionStatus) {
-      enriched = enriched.filter((po) => po.receptionStatus === filters.receptionStatus);
-    }
+    const enriched = rows.map((po) => this.enrichPurchaseOrder(po));
     const round2 = (n: number) => Math.round(n * 100) / 100;
 
     let amountOrderedEst = 0;
@@ -256,10 +213,6 @@ export class PurchasingService {
 
     return {
       companyId,
-      dateFrom: filters?.dateFrom?.trim() || null,
-      dateTo: filters?.dateTo?.trim() || null,
-      departmentId: filters?.departmentId ?? null,
-      receptionStatus: filters?.receptionStatus ?? null,
       orderCount: enriched.length,
       pendingCount,
       partialCount,
@@ -636,6 +589,22 @@ export class PurchasingService {
           data: { status: PurchaseOrderStatus.CLOSED },
         });
       }
+
+      const amount = gr.lines.reduce(
+        (s, l) => s + Number(l.quantity) * Number(l.unitCost),
+        0,
+      );
+      await this.accountingPosting.postPurchaseReceipt(
+        {
+          companyId: po.companyId,
+          goodsReceiptId: id,
+          entryDate: gr.receivedAt ?? new Date(),
+          amount,
+          supplierName: po.supplierName,
+          createdById: userId,
+        },
+        tx,
+      );
     });
 
     const posted = await this.getGoodsReceipt(id);

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import type { FormEvent } from 'react';
 import {
   type CompanyCreatePayload,
@@ -38,6 +37,7 @@ import { formatQuantity } from '../utils/formatQuantity';
 import { PasswordField } from '../components/PasswordField';
 import { BanksConfigSection } from '../components/BanksConfigSection';
 import { useAuth } from '../context/AuthContext';
+import { PERMISSION_GROUPS } from '../utils/permissionGroups';
 import {
   type AutoClearMessageOptions,
   useAutoClearMessage,
@@ -82,9 +82,10 @@ type PrinterDocType = 'RECEIPT' | 'DISBURSEMENT_ORDER';
 
 export function ConfigPage() {
   const { can, canPerm } = useAuth();
-  const isAdmin = can(['ADMIN']) || canPerm('*');
-  const canManageRoles = canPerm('roles.manage');
-  const canViewUsers = canPerm('users.view') || canPerm('users.manage');
+  const isAdmin = can(['ADMIN']);
+  const canManageRoles = isAdmin || canPerm('roles.manage');
+  const canManageUsers = isAdmin || canPerm('users.manage') || canPerm('users.view');
+  const canSeeBanks = isAdmin || canPerm('banks.view') || canPerm('banks.manage');
   const [tab, setTab] = useState<Tab>('company');
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -108,14 +109,20 @@ export function ConfigPage() {
     setCompanies(co);
     setDepartments(d);
     setAppRoles(roles.filter((r) => r.isActive));
-    if (isAdmin) {
+    if (canManageUsers) {
       setUsers(await getUsers());
     }
   };
 
   useEffect(() => {
     void load().catch(() => setMsg('Erreur chargement configuration', { persist: true }));
-  }, [isAdmin]);
+  }, [isAdmin, canManageUsers]);
+
+  useEffect(() => {
+    if (tab === 'banques' && !canSeeBanks) setTab('company');
+    if (tab === 'users' && !canManageUsers) setTab('company');
+    if (tab === 'roles' && !canManageRoles) setTab('company');
+  }, [tab, canSeeBanks, canManageUsers, canManageRoles]);
 
   // Rafraîchir les listes partagées (imprimantes / utilisateurs) à chaque changement d’onglet
   useEffect(() => {
@@ -373,8 +380,8 @@ export function ConfigPage() {
             ['company', 'Entreprise'],
             ['printer', 'Imprimante'],
             ['packaging', 'Conditionnement'],
-            ['banques', 'Banques'],
-            ...(canViewUsers ? [['users', 'Utilisateurs'] as const] : []),
+            ...(canSeeBanks ? [['banques', 'Banques'] as const] : []),
+            ...(canManageUsers ? [['users', 'Utilisateurs'] as const] : []),
             ...(canManageRoles ? [['roles', 'Rôles & autorisations'] as const] : []),
           ] as const
         ).map(([id, label]) => (
@@ -753,11 +760,11 @@ export function ConfigPage() {
 
       {tab === 'packaging' && <PackagingSection />}
 
-      {tab === 'banques' && (
+      {tab === 'banques' && canSeeBanks && (
         <BanksConfigSection onMessage={(m, o) => setMsg(m, o)} />
       )}
 
-      {tab === 'users' && canViewUsers && (
+      {tab === 'users' && canManageUsers && (
         <UsersSection
           items={users}
           companies={companies}
@@ -848,9 +855,9 @@ function CompaniesSection({
   onCatalogChanged: () => Promise<void>;
 }) {
   const { can, canPerm } = useAuth();
-  const canCreate = canPerm('company.manage');
+  const canCreate = can(['ADMIN']) || canPerm('company.manage');
   const canEdit = canPerm('company.manage');
-  const canDelete = can(['ADMIN']) || canPerm('*');
+  const canDelete = can(['ADMIN']);
 
   const [rows, setRows] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1092,7 +1099,7 @@ function CompanyFormModal({
     }
   }
 
-  return createPortal(
+  return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
         className="modal card modal-company"
@@ -1178,8 +1185,7 @@ function CompanyFormModal({
           <p className="dept-hint dept-embedded">Enregistrez l’entreprise pour ajouter des départements.</p>
         )}
       </div>
-    </div>,
-    document.body,
+    </div>
   );
 }
 
@@ -1561,7 +1567,7 @@ function CompanyDepartmentsPanel({
 }) {
   const { can, canPerm } = useAuth();
   const canEdit = canPerm('departments.manage');
-  const canDelete = can(['ADMIN']) || canPerm('*');
+  const canDelete = can(['ADMIN']);
 
   const [items, setItems] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2411,7 +2417,6 @@ function RolesSection({
   onChange: () => Promise<void>;
   onMessage: (m: string, options?: AutoClearMessageOptions) => void;
 }) {
-  const { refreshUser } = useAuth();
   const [permissions, setPermissions] = useState<PermissionDefinition[]>([]);
   const [editRole, setEditRole] = useState<AppRoleRow | null>(null);
   const [editPerms, setEditPerms] = useState<string[]>([]);
@@ -2441,8 +2446,7 @@ function RolesSection({
       await updateRole(editRole.id, { permissions: editPerms });
       setEditRole(null);
       await onChange();
-      await refreshUser().catch(() => undefined);
-      onMessage('Rôle mis à jour. Session rafraîchie pour votre compte.');
+      onMessage('Rôle mis à jour.');
     } catch (err) {
       onMessage(formatApiError(err, 'Enregistrement impossible.'), { persist: true });
     } finally {
@@ -2496,10 +2500,9 @@ function RolesSection({
       <div className="card">
         <h2>Rôles et autorisations</h2>
         <p className="dept-hint">
-          Les autorisations du Gérant (et des autres rôles) sont appliquées à l’API et à l’interface.
-          Retirer un droit (ex. crédit, finance, vente spéciale) bloque réellement l’accès. Les rôles
-          système ne peuvent pas être supprimés. Après modification, les utilisateurs concernés doivent
-          se reconnecter (ou rafraîchir la session).
+          Cochez ou décochez les droits par groupe. Les changements s’appliquent dès qu’un utilisateur se
+          reconnecte (ou après actualisation de sa session). Les rôles système (Administrateur, Gérant,
+          etc.) ne peuvent pas être supprimés.
         </p>
 
         <div className="table-wrap">
@@ -2655,44 +2658,142 @@ function PermissionPicker({
   onChange: (next: string[]) => void;
 }) {
   const hasStar = selected.includes('*');
+  const byCode = useMemo(() => {
+    const m = new Map(permissions.map((p) => [p.code, p]));
+    return m;
+  }, [permissions]);
+
+  const grouped = useMemo(() => {
+    const used = new Set<string>();
+    const sections: Array<{ id: string; label: string; items: PermissionDefinition[] }> = [];
+    for (const g of PERMISSION_GROUPS) {
+      const items = g.codes
+        .map((code) => byCode.get(code))
+        .filter((p): p is PermissionDefinition => !!p);
+      for (const it of items) used.add(it.code);
+      if (items.length) sections.push({ id: g.id, label: g.label, items });
+    }
+    const orphan = permissions.filter((p) => !used.has(p.code));
+    if (orphan.length) {
+      sections.push({ id: 'other', label: 'Autres', items: orphan });
+    }
+    return sections;
+  }, [permissions, byCode]);
+
+  function toggle(code: string, checked: boolean) {
+    if (code === '*') {
+      onChange(checked ? ['*'] : []);
+      return;
+    }
+    onChange(
+      checked
+        ? [...selected.filter((x) => x !== '*'), code]
+        : selected.filter((x) => x !== code),
+    );
+  }
+
+  function toggleGroup(codes: string[], checked: boolean) {
+    if (hasStar && !codes.includes('*')) return;
+    const set = new Set(selected.filter((x) => x !== '*'));
+    for (const c of codes) {
+      if (c === '*') continue;
+      if (checked) set.add(c);
+      else set.delete(c);
+    }
+    onChange(Array.from(set));
+  }
+
   return (
     <div className="role-permissions-grid" style={{ gridColumn: '1 / -1' }}>
       <p className="dept-hint" style={{ margin: '0 0 0.5rem' }}>
-        Cochez les actions autorisées pour ce rôle :
+        Activez ou désactivez les capacités par catégorie (ex. banque, comptabilité, synthèse) :
       </p>
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(14rem, 1fr))',
-          gap: '0.35rem 1rem',
-          maxHeight: '280px',
+          gap: '0.75rem',
+          maxHeight: '420px',
           overflow: 'auto',
           padding: '0.5rem',
           border: '1px solid #e2e8f0',
           borderRadius: '8px',
         }}
       >
-        {permissions.map((p) => (
-          <label key={p.code} style={{ display: 'flex', gap: '0.4rem', alignItems: 'flex-start', fontSize: '0.85rem' }}>
-            <input
-              type="checkbox"
-              checked={hasStar || selected.includes(p.code)}
-              disabled={hasStar && p.code !== '*'}
-              onChange={(e) => {
-                if (p.code === '*') {
-                  onChange(e.target.checked ? ['*'] : []);
-                  return;
-                }
-                onChange(
-                  e.target.checked
-                    ? [...selected.filter((x) => x !== '*'), p.code]
-                    : selected.filter((x) => x !== p.code),
-                );
-              }}
-            />
-            <span>{p.label}</span>
-          </label>
-        ))}
+        {grouped.map((section) => {
+          const codes = section.items.map((p) => p.code).filter((c) => c !== '*');
+          const allOn =
+            hasStar || (codes.length > 0 && codes.every((c) => selected.includes(c)));
+          const someOn = codes.some((c) => selected.includes(c));
+          return (
+            <section key={section.id} style={{ display: 'grid', gap: '0.35rem' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  borderBottom: '1px solid #eef2f7',
+                  paddingBottom: '0.25rem',
+                }}
+              >
+                <strong style={{ fontSize: '0.9rem' }}>{section.label}</strong>
+                {codes.length > 0 ? (
+                  <label
+                    style={{
+                      display: 'flex',
+                      gap: '0.35rem',
+                      alignItems: 'center',
+                      fontSize: '0.8rem',
+                      color: '#64748b',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={allOn}
+                      ref={(el) => {
+                        if (el) el.indeterminate = !allOn && someOn;
+                      }}
+                      disabled={hasStar}
+                      onChange={(e) => toggleGroup(codes, e.target.checked)}
+                    />
+                    Tout le groupe
+                  </label>
+                ) : null}
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(14rem, 1fr))',
+                  gap: '0.35rem 1rem',
+                }}
+              >
+                {section.items.map((p) => (
+                  <label
+                    key={p.code}
+                    style={{
+                      display: 'flex',
+                      gap: '0.4rem',
+                      alignItems: 'flex-start',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={hasStar || selected.includes(p.code)}
+                      disabled={hasStar && p.code !== '*'}
+                      onChange={(e) => toggle(p.code, e.target.checked)}
+                    />
+                    <span>
+                      {p.label}
+                      <br />
+                      <small style={{ color: '#94a3b8' }}>{p.code}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          );
+        })}
       </div>
     </div>
   );

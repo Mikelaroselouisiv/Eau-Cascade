@@ -36,6 +36,12 @@ export const ENTITY_FK_MAP: Partial<Record<SyncEntityName, SyncFkRef[]>> = {
   Product: [
     { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: true },
     { uuidField: 'departmentUuid', idField: 'departmentId', parent: 'Department', required: false },
+    {
+      uuidField: 'productFamilyUuid',
+      idField: 'productFamilyId',
+      parent: 'ProductFamily',
+      required: false,
+    },
     { uuidField: 'createdByUuid', idField: 'createdById', parent: 'User', required: false },
     { uuidField: 'updatedByUuid', idField: 'updatedById', parent: 'User', required: false },
   ],
@@ -48,6 +54,17 @@ export const ENTITY_FK_MAP: Partial<Record<SyncEntityName, SyncFkRef[]>> = {
       uuidField: 'productSaleUnitUuid',
       idField: 'productSaleUnitId',
       parent: 'ProductSaleUnit',
+      required: true,
+    },
+  ],
+  ProductFamily: [
+    { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: true },
+  ],
+  ProductFamilyTier: [
+    {
+      uuidField: 'productFamilyUuid',
+      idField: 'productFamilyId',
+      parent: 'ProductFamily',
       required: true,
     },
   ],
@@ -97,6 +114,28 @@ export const ENTITY_FK_MAP: Partial<Record<SyncEntityName, SyncFkRef[]>> = {
   ],
   Payment: [
     { uuidField: 'saleUuid', idField: 'saleId', parent: 'Sale', required: true },
+    {
+      uuidField: 'bankAccountUuid',
+      idField: 'bankAccountId',
+      parent: 'BankAccount',
+      required: false,
+    },
+  ],
+  Bank: [
+    { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: true },
+  ],
+  BankAccount: [
+    { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: true },
+    { uuidField: 'bankUuid', idField: 'bankId', parent: 'Bank', required: true },
+  ],
+  BankTransaction: [
+    {
+      uuidField: 'bankAccountUuid',
+      idField: 'bankAccountId',
+      parent: 'BankAccount',
+      required: true,
+    },
+    { uuidField: 'userUuid', idField: 'userId', parent: 'User', required: false },
   ],
   Delivery: [
     { uuidField: 'saleUuid', idField: 'saleId', parent: 'Sale', required: true },
@@ -142,6 +181,12 @@ export const ENTITY_FK_MAP: Partial<Record<SyncEntityName, SyncFkRef[]>> = {
       uuidField: 'financeEntryUuid',
       idField: 'financeEntryId',
       parent: 'FinanceEntry',
+      required: false,
+    },
+    {
+      uuidField: 'bankAccountUuid',
+      idField: 'bankAccountId',
+      parent: 'BankAccount',
       required: false,
     },
   ],
@@ -228,6 +273,9 @@ export const RELATION_OBJECT_KEYS = new Set([
   'components',
   'entries',
   'financeEntry',
+  'creditCustomer',
+  'creditPayment',
+  'creditPayments',
   'delivery',
   'deliveryItem',
   'deliveredBy',
@@ -235,12 +283,17 @@ export const RELATION_OBJECT_KEYS = new Set([
   'stockMovements',
   'saleUnits',
   'volumePrices',
+  'productFamily',
+  'tiers',
   'products',
   'users',
   'departments',
   'stores',
   'printerProfile',
   'packagingUnits',
-  'creditCustomer',
-  'creditPayments',
+  'bank',
+  'banks',
+  'bankAccount',
+  'accounts',
+  'transactions',
 ]);

@@ -11,7 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { DepartmentsService } from './departments.service';
@@ -24,7 +24,7 @@ export class DepartmentsController {
   constructor(private readonly departmentsService: DepartmentsService) {}
 
   @Get()
-  @Roles('ADMIN', 'MANAGER', 'STOCK_MANAGER', 'ACCOUNTANT', 'CASHIER', 'LIVREUR')
+  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'deliveries.view', 'finance.view')
   findAll(@Query('companyId') companyIdRaw?: string) {
     if (companyIdRaw === undefined || companyIdRaw === '') {
       return this.departmentsService.findAll();
@@ -37,19 +37,19 @@ export class DepartmentsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'MANAGER')
+  @Permissions('departments.manage')
   create(@Body() dto: CreateDepartmentDto) {
     return this.departmentsService.create(dto);
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'MANAGER')
+  @Permissions('departments.manage')
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateDepartmentDto) {
     return this.departmentsService.update(id, dto);
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @Permissions('departments.manage')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.departmentsService.remove(id);
   }

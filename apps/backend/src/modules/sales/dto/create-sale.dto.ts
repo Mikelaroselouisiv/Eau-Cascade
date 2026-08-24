@@ -45,6 +45,13 @@ export class CreatePaymentDto {
 
   @IsOptional()
   reference?: string;
+
+  /** Requis si method = BANK : compte à créditer. */
+  @ValidateIf((o: CreatePaymentDto) => o.method === PaymentMethod.BANK)
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  bankAccountId?: number;
 }
 
 export class CreateSaleDto {
@@ -90,7 +97,7 @@ export class CreateSaleDto {
   specialSale?: boolean;
 
   /**
-   * Espèces réellement tendues par le client (vente classique).
+   * Espèces réellement tendues par le client (vente classique ou spéciale).
    * Si fourni : peut être > ou < au total (monnaie due / reste à payer).
    */
   @IsOptional()

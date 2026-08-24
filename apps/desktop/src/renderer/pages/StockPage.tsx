@@ -7,6 +7,7 @@ import {
   getCompanies,
   getDepartments,
   getPackagingUnits,
+  getProductFamilies,
   getProducts,
   getRecipeByProduct,
   stockAdjust,
@@ -19,10 +20,12 @@ import type {
   Department,
   PackagingUnit,
   Product,
+  ProductFamily,
 } from '../types/api';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { useAuth } from '../context/AuthContext';
 import { MoneyField } from '../components/MoneyField';
+import { ProductFamiliesSection } from '../components/ProductFamiliesSection';
 import { PurchasingSection } from '../components/PurchasingSection';
 import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
@@ -51,7 +54,7 @@ function formatApiError(err: unknown, fallback: string): string {
   return fallback;
 }
 
-type StockTab = 'catalog' | 'operations' | 'purchases';
+type StockTab = 'catalog' | 'operations' | 'purchases' | 'families';
 
 function defaultSaleUnit(p: Product) {
   return p.saleUnits?.find((s) => s.isDefault) ?? p.saleUnits?.[0];
@@ -128,6 +131,8 @@ export function StockPage() {
   const [price, setPrice] = useState('');
   const [packId, setPackId] = useState<number | ''>('');
   const [volumeTiers, setVolumeTiers] = useState<TierDraft[]>([]);
+  const [productFamilyId, setProductFamilyId] = useState<number | ''>('');
+  const [productFamilies, setProductFamilies] = useState<ProductFamily[]>([]);
   const [msg, setMsg] = useAutoClearMessage();
   const [tab, setTab] = useState<StockTab>('purchases');
   const [opProductId, setOpProductId] = useState<number | ''>('');
@@ -226,6 +231,8 @@ export function StockPage() {
     if (companyId === '') {
       setDepartments([]);
       setDepartmentId('');
+      setProductFamilies([]);
+      setProductFamilyId('');
       return;
     }
     void getDepartments(companyId).then((d) => {
@@ -236,6 +243,17 @@ export function StockPage() {
         return ok ? prev : '';
       });
     });
+    void getProductFamilies(companyId)
+      .then((rows) => {
+        setProductFamilies(rows);
+        setProductFamilyId((prev) =>
+          prev !== '' && rows.some((f) => f.id === prev) ? prev : '',
+        );
+      })
+      .catch(() => {
+        setProductFamilies([]);
+        setProductFamilyId('');
+      });
   }, [companyId]);
 
   useEffect(() => {
@@ -354,6 +372,7 @@ export function StockPage() {
         cardColor,
         companyId: cid,
         departmentId,
+        productFamilyId: productFamilyId === '' ? null : productFamilyId,
         trackStock: true,
         isService: false,
         saleUnits: [
@@ -368,6 +387,7 @@ export function StockPage() {
       setName('');
       setPrice('');
       setVolumeTiers([]);
+      setProductFamilyId('');
       // Entreprise, département et couleur restent pour enchaîner les créations.
       setMsg('Produit créé (stock initial à 0 — ajustez le stock après réception).');
       await load();
@@ -472,7 +492,44 @@ export function StockPage() {
         >
           Produits
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'families'}
+          className={`tab ${tab === 'families' ? 'active' : ''}`}
+          onClick={() => setTab('families')}
+        >
+          Familles de produits
+        </button>
       </div>
+
+      {tab === 'families' ? (
+        <ProductFamiliesSection
+          companyId={companyId !== '' ? companyId : catalogFilterCompanyId}
+          companies={companies}
+          products={products}
+          onCompanyChange={(id) => {
+            if (id === '') {
+              setCompanyId('');
+              setCatalogFilterCompanyId('');
+              return;
+            }
+            setCompanyId(id);
+            setCatalogFilterCompanyId(id);
+          }}
+          onChanged={async () => {
+            await load();
+            const cid = companyId !== '' ? companyId : catalogFilterCompanyId;
+            if (cid !== '') {
+              try {
+                setProductFamilies(await getProductFamilies(Number(cid)));
+              } catch {
+                setProductFamilies([]);
+              }
+            }
+          }}
+        />
+      ) : null}
 
       {tab === 'catalog' ? (
         <>
@@ -553,6 +610,22 @@ export function StockPage() {
                 onChange={(e) => setPrice(e.target.value)}
                 required
               />
+              <label>
+                Famille de produits
+                <select
+                  value={productFamilyId === '' ? '' : String(productFamilyId)}
+                  onChange={(e) =>
+                    setProductFamilyId(e.target.value ? Number(e.target.value) : '')
+                  }
+                >
+                  <option value="">— Aucune —</option>
+                  {productFamilies.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div className="volume-tiers-block catalog-volume-tiers">
                 {volumeTiers.map((row, idx) => (
                   <div key={idx} className="volume-tier-row">
@@ -714,6 +787,11 @@ export function StockPage() {
                         <td>
                           <strong>{p.name}</strong>
                           {p.isService ? <small> (service)</small> : null}
+                          {p.productFamily?.name ? (
+                            <small className="dept-hint" style={{ display: 'block' }}>
+                              Famille : {p.productFamily.name}
+                            </small>
+                          ) : null}
                         </td>
                         <td>{p.sku ?? '—'}</td>
                         <td className="journal-amt">{dp != null ? formatMoney(dp) : '—'}</td>
@@ -886,6 +964,13 @@ export function StockPage() {
           onSaved={async () => {
             setEditProduct(null);
             await load();
+            if (companyId !== '') {
+              try {
+                setProductFamilies(await getProductFamilies(Number(companyId)));
+              } catch {
+                /* ignore */
+              }
+            }
           }}
         />
       ) : null}
@@ -940,6 +1025,10 @@ function EditProductModal({
   const [packagingList, setPackagingList] = useState<PackagingUnit[]>([]);
   const [packagingUnitId, setPackagingUnitId] = useState<number | ''>(su0?.packagingUnitId ?? '');
   const [saleLabelOverride, setSaleLabelOverride] = useState(su0?.labelOverride ?? '');
+  const [familyId, setFamilyId] = useState<number | ''>(
+    product.productFamilyId ?? product.productFamily?.id ?? '',
+  );
+  const [families, setFamilies] = useState<ProductFamily[]>([]);
 
   const mpChoices = useMemo(
     () =>
@@ -981,6 +1070,12 @@ function EditProductModal({
         return d.some((x) => x.id === Number(prev)) ? prev : '';
       });
     });
+    void getProductFamilies(companyId)
+      .then((rows) => {
+        setFamilies(rows);
+        setFamilyId((prev) => (prev !== '' && rows.some((f) => f.id === prev) ? prev : ''));
+      })
+      .catch(() => setFamilies([]));
   }, [companyId]);
 
   useEffect(() => {
@@ -1052,6 +1147,7 @@ function EditProductModal({
         stock: Number(stock),
         stockMin: Number(stockMin),
         departmentId: deptId === '' ? null : Number(deptId),
+        productFamilyId: familyId === '' ? null : familyId,
         isService,
         trackStock,
         salePrice: sp,
@@ -1186,6 +1282,20 @@ function EditProductModal({
             onChange={(e) => setSalePrice(e.target.value)}
             required
           />
+          <label>
+            Famille de produits
+            <select
+              value={familyId === '' ? '' : String(familyId)}
+              onChange={(e) => setFamilyId(e.target.value ? Number(e.target.value) : '')}
+            >
+              <option value="">— Aucune —</option>
+              {families.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="volume-tiers-block">
             {priceTiers.map((row, idx) => (
               <div key={idx} className="volume-tier-row">

@@ -7,6 +7,7 @@ import { BankTransactionType, Prisma } from '@prisma/client';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
 import { ymdToDateStart } from '../../common/time/timezone';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AccountingPostingService } from '../accounting/accounting-posting.service';
 import { AuditService } from '../audit/audit.service';
 import {
   CreateBankAccountDto,
@@ -21,6 +22,7 @@ export class BanksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly accountingPosting: AccountingPostingService,
   ) {}
 
   private round2(n: number) {
@@ -37,6 +39,8 @@ export class BanksService {
 
   async listBanks(companyId: number, includeInactive = false) {
     await this.ensureCompany(companyId);
+    // Répare les dépôts manquants (paiements BANK sans BankTransaction).
+    await this.reconcileMissingDeposits(companyId);
     const banks = await this.prisma.bank.findMany({
       where: {
         companyId,
@@ -304,6 +308,16 @@ export class BanksService {
       },
     });
 
+    await this.accountingPosting.postBankTransaction({
+      companyId: account.companyId,
+      transactionId: row.id,
+      entryDate: occurredAt,
+      amount,
+      type: dto.type,
+      description: dto.description.trim(),
+      createdById: userId,
+    });
+
     await this.auditService.log({
       userId,
       action: 'BANK_TRANSACTION_CREATED',
@@ -385,5 +399,116 @@ export class BanksService {
       }
     }
     return map;
+  }
+
+  /**
+   * Crée les BankTransaction DEPOSIT manquants pour les paiements BANK
+   * (POS + crédit) qui ont déjà un bankAccountId. Idempotent via reference.
+   */
+  async reconcileMissingDeposits(companyId: number): Promise<number> {
+    let created = 0;
+
+    const payments = await this.prisma.payment.findMany({
+      where: {
+        deletedAt: null,
+        method: 'BANK',
+        bankAccountId: { not: null },
+        amount: { gt: 0.009 },
+        bankAccount: { companyId, deletedAt: null },
+        sale: { deletedAt: null, status: 'COMPLETED' },
+      },
+      select: {
+        id: true,
+        amount: true,
+        bankAccountId: true,
+        saleId: true,
+        createdAt: true,
+        sale: { select: { id: true, txnNumber: true } },
+        bankAccount: {
+          select: { id: true, name: true, bank: { select: { name: true } } },
+        },
+      },
+      take: 500,
+      orderBy: { id: 'asc' },
+    });
+
+    for (const p of payments) {
+      if (p.bankAccountId == null || !p.bankAccount) continue;
+      const txnRef =
+        p.sale.txnNumber != null ? `saleTxn:${p.sale.txnNumber}` : `sale:${p.saleId}`;
+      const refs = [`sale:${p.saleId}`, txnRef];
+      const existing = await this.prisma.bankTransaction.findFirst({
+        where: {
+          deletedAt: null,
+          type: BankTransactionType.DEPOSIT,
+          reference: { in: refs },
+        },
+        select: { id: true },
+      });
+      if (existing) continue;
+      await this.prisma.bankTransaction.create({
+        data: {
+          bankAccountId: p.bankAccountId,
+          type: BankTransactionType.DEPOSIT,
+          amount: p.amount,
+          description: `Vente #${p.sale.txnNumber ?? p.saleId} — ${p.bankAccount.bank.name} / ${p.bankAccount.name}`,
+          reference: txnRef,
+          occurredAt: p.createdAt,
+        },
+      });
+      created += 1;
+    }
+
+    const creditPays = await this.prisma.creditPayment.findMany({
+      where: {
+        deletedAt: null,
+        method: 'BANK',
+        bankAccountId: { not: null },
+        amount: { gt: 0.009 },
+        bankAccount: { companyId, deletedAt: null },
+      },
+      select: {
+        id: true,
+        uuid: true,
+        amount: true,
+        bankAccountId: true,
+        createdAt: true,
+        userId: true,
+        creditCustomer: { select: { name: true } },
+        bankAccount: {
+          select: { id: true, name: true, bank: { select: { name: true } } },
+        },
+      },
+      take: 500,
+      orderBy: { id: 'asc' },
+    });
+
+    for (const cp of creditPays) {
+      if (cp.bankAccountId == null || !cp.bankAccount) continue;
+      const ref = `creditPayment:${cp.uuid}`;
+      const existing = await this.prisma.bankTransaction.findFirst({
+        where: {
+          deletedAt: null,
+          type: BankTransactionType.DEPOSIT,
+          reference: ref,
+        },
+        select: { id: true },
+      });
+      if (existing) continue;
+      await this.prisma.bankTransaction.create({
+        data: {
+          bankAccountId: cp.bankAccountId,
+          type: BankTransactionType.DEPOSIT,
+          amount: cp.amount,
+          description: `Remboursement crédit — ${cp.creditCustomer.name} — ${cp.bankAccount.bank.name} / ${cp.bankAccount.name}`,
+          reference: ref,
+          occurredAt: cp.createdAt,
+          userId: cp.userId,
+        },
+      });
+      created += 1;
+    }
+
+    return created;
   }
 }

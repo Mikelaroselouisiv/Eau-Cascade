@@ -1,0 +1,14 @@
+{
+  "name": "thermal-printer",
+  "version": "1.0.0",
+  "description": "Impression ESC/POS Bluetooth (Android Classic / iOS BLE) pour tickets POS",
+  "main": "src/index.ts",
+  "license": "UNLICENSED",
+  "author": "Eau Cascade",
+  "homepage": "https://github.com/Mikelaroselouisiv/Eau-Cascade",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

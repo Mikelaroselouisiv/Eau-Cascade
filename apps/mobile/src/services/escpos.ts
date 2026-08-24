@@ -1,7 +1,5 @@
-// Port TS pur de apps/desktop/src/main/thermal-printer.cjs — mêmes règles de mise en
-// page et mêmes octets ESC/POS. Le rendu du logo en bitmap raster (escPosRasterFromDataUrl,
-// dépendant de `nativeImage` Electron) est explicitement exclu de la Phase 1 ; le
-// placeholder texte '[Logo sur ticket]' déjà utilisé par le desktop en repli est conservé.
+import { encodeEscPosText, ESC_SELECT_PC850 } from './escpos-encode';
+import { escPosRasterFromUrl } from './escpos-logo';
 
 export interface ReceiptItem {
   name: string;
@@ -21,6 +19,7 @@ export interface SaleReceiptData {
   cashier?: string;
   isTest?: boolean;
   previewSampleBody?: string | null;
+  saleRef?: number;
   items?: ReceiptItem[];
   total?: number;
   paymentMode?: string;
@@ -31,14 +30,16 @@ export interface SaleReceiptData {
 
 const ESC_INIT = [0x1b, 0x40];
 const ESC_ALIGN_LEFT = [0x1b, 0x61, 0x00];
+const ESC_NORMAL_SIZE = [0x1d, 0x21, 0x00];
+const ESC_FEED_LINES = [0x1b, 0x64, 0x04];
 const GS_CUT = [0x1d, 0x56, 0x00];
 
 const APP_TIMEZONE = 'America/Port-au-Prince';
 
 function formatDateTimePap(value: Date | string | number = new Date()): string {
   const d = value instanceof Date ? value : new Date(value);
-  if (!Number.isFinite(d.getTime())) return '—';
-  return new Intl.DateTimeFormat('fr-HT', {
+  if (!Number.isFinite(d.getTime())) return '-';
+  const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: APP_TIMEZONE,
     day: '2-digit',
     month: '2-digit',
@@ -46,16 +47,18 @@ function formatDateTimePap(value: Date | string | number = new Date()): string {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).format(d);
+  }).formatToParts(d);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('day')}/${get('month')}/${get('year')} ${get('hour')}:${get('minute')}`;
 }
 
 function formatMoney(value: number | undefined): string {
-  return Number(value ?? 0).toFixed(2);
+  return `${Number(value ?? 0).toFixed(2)} HTG`;
 }
 
 function clipLine(text: unknown, lineWidth: number): string {
   const t = String(text ?? '');
-  return t.length <= lineWidth ? t : t.slice(0, lineWidth - 1) + '…';
+  return t.length <= lineWidth ? t : `${t.slice(0, lineWidth - 3)}...`;
 }
 
 export function buildTicketText(saleData: SaleReceiptData, width: 58 | 80 = 58): string {
@@ -78,15 +81,14 @@ export function buildTicketText(saleData: SaleReceiptData, width: 58 | 80 = 58):
   if (addr) lines.push(clipLine(addr, lineWidth));
 
   const phone = String(saleData.companyPhone ?? '').trim();
-  if (phone) lines.push(clipLine(`Tél: ${phone}`, lineWidth));
-
-  if (saleData.showLogoOnReceipt && saleData.receiptLogoUrl) {
-    lines.push(clipLine('[Logo sur ticket]', lineWidth));
-  }
+  if (phone) lines.push(clipLine(`Tel: ${phone}`, lineWidth));
 
   lines.push(separator);
   if (saleData.receiptClientName) {
     lines.push(clipLine(`Client: ${saleData.receiptClientName}`, lineWidth));
+  }
+  if (saleData.saleRef != null) {
+    lines.push(clipLine(`Ticket #${saleData.saleRef}`, lineWidth));
   }
   lines.push(`Caissier: ${saleData.cashier ?? 'N/A'}`);
   lines.push(`Date: ${date}`);
@@ -96,7 +98,7 @@ export function buildTicketText(saleData: SaleReceiptData, width: 58 | 80 = 58):
   const sampleBody = (saleData.previewSampleBody || '').trim();
 
   if (isTest && sampleBody) {
-    lines.push(clipLine('--- Zone test (aperçu) ---', lineWidth));
+    lines.push(clipLine('--- Zone test ---', lineWidth));
     for (const raw of sampleBody.split('\n')) {
       const s = raw.trimEnd();
       if (s) lines.push(clipLine(s, lineWidth));
@@ -134,13 +136,27 @@ export function buildTicketText(saleData: SaleReceiptData, width: 58 | 80 = 58):
   return lines.join('\n');
 }
 
-/** Construit le buffer d'octets ESC/POS complet à écrire tel quel sur le socket Bluetooth. */
-export function buildEscPosPayload(saleData: SaleReceiptData): Uint8Array {
+/** Construit le buffer ESC/POS (PC850 + logo raster si disponible). */
+export async function buildEscPosPayload(saleData: SaleReceiptData): Promise<Uint8Array> {
   const width: 58 | 80 = saleData.paperWidth === 80 ? 80 : 58;
   const text = buildTicketText(saleData, width);
-  const textBytes = Array.from(new TextEncoder().encode(text));
   const doCut = saleData.autoCut !== false;
 
-  const bytes = [...ESC_INIT, ...ESC_ALIGN_LEFT, ...textBytes, ...(doCut ? GS_CUT : [])];
+  const bytes: number[] = [
+    ...ESC_INIT,
+    ...ESC_SELECT_PC850,
+    ...ESC_NORMAL_SIZE,
+    ...ESC_ALIGN_LEFT,
+  ];
+
+  if (saleData.showLogoOnReceipt && saleData.receiptLogoUrl) {
+    const raster = await escPosRasterFromUrl(saleData.receiptLogoUrl, width);
+    if (raster) {
+      bytes.push(...raster, 0x0a);
+    }
+  }
+
+  bytes.push(...encodeEscPosText(text), ...ESC_FEED_LINES);
+  if (doCut) bytes.push(...GS_CUT);
   return new Uint8Array(bytes);
 }
