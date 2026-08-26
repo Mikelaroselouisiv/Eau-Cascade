@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
+import { ChipScroll } from '@/components/ChipScroll';
 import { ModalShell } from '@/components/ModalShell';
 import { MoneyText } from '@/components/MoneyText';
 import { RegisterSessionBar } from '@/components/pos/RegisterSessionBar';
@@ -26,6 +27,8 @@ import { isLikelyNetworkError } from '@/services/api-errors';
 import {
   collectSaleBalance,
   createSale,
+  getCompanies,
+  getDepartments,
   listBanks,
   listSaleCashGaps,
   settleSaleChange,
@@ -37,7 +40,9 @@ import { loadProductsWithCache } from '@/services/product-cache';
 import { buildSaleReceiptData } from '@/services/receipt';
 import type {
   BankRow,
+  CompanyListItem,
   CreateSalePayload,
+  Department,
   Product,
   RegisterSessionDetail,
   SaleCashGapRow,
@@ -98,14 +103,18 @@ type PosWorkspaceProps = {
 
 export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const { user, can, canPerm } = useAuth();
-  const { companyId } = useCompanyScope();
+  const { companyId: scopedCompanyId } = useCompanyScope();
   const cashierLabel = user?.fullName?.trim() || user?.phone || 'Caissier';
-  const departmentId = typeof user?.departmentId === 'number' ? user.departmentId : undefined;
+  const isCashier = user?.role === 'CASHIER';
   const canUsePos = canPerm('pos.use') || can(['ADMIN', 'MANAGER', 'CASHIER']);
   const canSpecial = canPerm('sales.special_price') || can(['ADMIN', 'MANAGER']);
   const canSell = canPerm('sales.create') || canUsePos;
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [companies, setCompanies] = useState<CompanyListItem[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number | ''>('');
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<number | ''>('');
   const [drafts, setDrafts] = useState<SaleDraft[]>(() => [emptyDraft('d1')]);
   const [activeDraftId, setActiveDraftId] = useState('d1');
   const [amountReceived, setAmountReceived] = useState('');
@@ -120,6 +129,26 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const [cashGapBusyId, setCashGapBusyId] = useState<number | null>(null);
   const [cashGapQuery, setCashGapQuery] = useState('');
   const [banks, setBanks] = useState<BankRow[]>([]);
+
+  const companyId = isCashier
+    ? typeof user?.companyId === 'number'
+      ? user.companyId
+      : (scopedCompanyId ?? undefined)
+    : registerSession
+      ? registerSession.department.company.id
+      : selectedCompanyId === ''
+        ? undefined
+        : selectedCompanyId;
+
+  const departmentId = isCashier
+    ? typeof user?.departmentId === 'number'
+      ? user.departmentId
+      : undefined
+    : registerSession
+      ? registerSession.departmentId
+      : selectedDepartmentId === ''
+        ? undefined
+        : selectedDepartmentId;
 
   const activeDraft = useMemo(
     () => drafts.find((d) => d.id === activeDraftId) ?? drafts[0],
@@ -141,10 +170,14 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const salesEnabled = registerSession != null;
 
   const loadProducts = useCallback(() => {
+    if (!isCashier && departmentId == null) {
+      setProducts([]);
+      return;
+    }
     loadProductsWithCache(departmentId)
       .then(setProducts)
       .catch(() => setStatus('Catalogue indisponible (hors ligne, pas de cache)'));
-  }, [departmentId]);
+  }, [departmentId, isCashier]);
 
   const refreshCashGaps = useCallback(async () => {
     if (companyId == null) {
@@ -163,6 +196,75 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       // panneau secondaire
     }
   }, [companyId, departmentId]);
+
+  useEffect(() => {
+    if (isCashier) return;
+    let cancelled = false;
+    void getCompanies()
+      .then((list) => {
+        if (cancelled) return;
+        setCompanies(list);
+        setSelectedCompanyId((prev) => {
+          if (prev !== '' && list.some((c) => c.id === prev)) return prev;
+          if (typeof user?.companyId === 'number' && list.some((c) => c.id === user.companyId)) {
+            return user.companyId;
+          }
+          return list[0]?.id ?? '';
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setCompanies([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCashier, user?.id, user?.companyId]);
+
+  useEffect(() => {
+    if (isCashier || companyId == null) return;
+    let cancelled = false;
+    void getDepartments(companyId)
+      .then((depts) => {
+        if (cancelled) return;
+        setDepartments(depts);
+        setSelectedDepartmentId((prev) => {
+          if (typeof prev === 'number' && depts.some((d) => d.id === prev)) return prev;
+          if (
+            typeof user?.departmentId === 'number' &&
+            depts.some((d) => d.id === user.departmentId)
+          ) {
+            return user.departmentId;
+          }
+          return depts[0]?.id ?? '';
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDepartments([]);
+          setSelectedDepartmentId('');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCashier, companyId, user?.departmentId]);
+
+  const displayedProducts = useMemo(() => {
+    const rows = isCashier
+      ? products
+      : products.filter((p) => {
+          const productCompanyId = p.companyId ?? p.company?.id;
+          const productDeptId = p.department?.id;
+          if (companyId != null && productCompanyId != null && productCompanyId !== companyId) {
+            return false;
+          }
+          if (departmentId != null && productDeptId != null && productDeptId !== departmentId) {
+            return false;
+          }
+          return true;
+        });
+    return [...rows].sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+  }, [products, isCashier, companyId, departmentId]);
 
   useEffect(() => {
     loadProducts();
@@ -206,6 +308,35 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     setAmountReceived('');
     setQtyDrafts({});
   }, [mode]);
+
+  const handleSessionChange = useCallback((session: RegisterSessionDetail | null) => {
+    setRegisterSession(session);
+    if (session && !isCashier) {
+      setSelectedCompanyId(session.department.company.id);
+      setSelectedDepartmentId(session.departmentId);
+    }
+  }, [isCashier]);
+
+  function resetCartDrafts() {
+    const d = emptyDraft('d1');
+    setDrafts([d]);
+    setActiveDraftId(d.id);
+    setAmountReceived('');
+    setQtyDrafts({});
+    setCartVisible(false);
+  }
+
+  function selectCompany(id: number) {
+    if (registerSession != null || id === companyId) return;
+    setSelectedCompanyId(id);
+    resetCartDrafts();
+  }
+
+  function selectDepartment(id: number) {
+    if (registerSession != null || id === departmentId) return;
+    setSelectedDepartmentId(id);
+    resetCartDrafts();
+  }
 
   function updateActiveDraft(next: (d: SaleDraft) => SaleDraft) {
     setDrafts((prev) => prev.map((d) => (d.id === activeDraftId ? next(d) : d)));
@@ -605,12 +736,73 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   return (
     <Screen style={styles.container}>
       <RegisterSessionBar
-        companyId={companyId ?? undefined}
+        companyId={companyId}
         departmentId={departmentId}
         session={registerSession}
-        onSessionChange={setRegisterSession}
+        onSessionChange={handleSessionChange}
         onStatus={setStatus}
       />
+
+      {!isCashier ? (
+        <View style={styles.scopeBlock}>
+          <Text style={styles.scopeLabel}>Entreprise</Text>
+          <ChipScroll>
+            {companies.length === 0 ? (
+              <Text style={styles.scopeHint}>Chargement…</Text>
+            ) : (
+              companies.map((c) => {
+                const active = companyId === c.id;
+                return (
+                  <Pressable
+                    key={c.id}
+                    disabled={registerSession != null}
+                    onPress={() => selectCompany(c.id)}
+                    style={[
+                      styles.scopeChip,
+                      active && styles.scopeChipActive,
+                      registerSession != null && styles.scopeChipLocked,
+                    ]}>
+                    <Text
+                      style={[styles.scopeChipText, active && styles.scopeChipTextActive]}
+                      numberOfLines={1}>
+                      {c.name}
+                    </Text>
+                  </Pressable>
+                );
+              })
+            )}
+          </ChipScroll>
+          <Text style={styles.scopeLabel}>Département</Text>
+          <ChipScroll>
+            {departments.length === 0 ? (
+              <Text style={styles.scopeHint}>
+                {companyId == null ? 'Choisissez une entreprise' : 'Aucun département'}
+              </Text>
+            ) : (
+              departments.map((d) => {
+                const active = departmentId === d.id;
+                return (
+                  <Pressable
+                    key={d.id}
+                    disabled={registerSession != null}
+                    onPress={() => selectDepartment(d.id)}
+                    style={[
+                      styles.scopeChip,
+                      active && styles.scopeChipActive,
+                      registerSession != null && styles.scopeChipLocked,
+                    ]}>
+                    <Text
+                      style={[styles.scopeChipText, active && styles.scopeChipTextActive]}
+                      numberOfLines={1}>
+                      {d.name}
+                    </Text>
+                  </Pressable>
+                );
+              })
+            )}
+          </ChipScroll>
+        </View>
+      ) : null}
 
       {status ? (
         <View style={styles.status}>
@@ -674,7 +866,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       </View>
 
       <FlatList
-        data={products}
+        data={displayedProducts}
         keyExtractor={(p) => String(p.id)}
         numColumns={2}
         style={styles.productList}
@@ -714,7 +906,11 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Ionicons name="storefront-outline" size={40} color="#9AA0A6" />
-            <Text style={styles.emptyStateText}>Aucun produit disponible</Text>
+            <Text style={styles.emptyStateText}>
+              {!isCashier && departmentId == null
+                ? 'Choisissez une entreprise et un département'
+                : 'Aucun produit disponible'}
+            </Text>
           </View>
         }
       />
@@ -1094,6 +1290,26 @@ const styles = StyleSheet.create({
     backgroundColor: BrandColors.primarySoft,
   },
   modeBannerText: { color: BrandColors.primaryHover, fontWeight: '700', fontSize: 13 },
+  scopeBlock: {
+    marginHorizontal: Spacing.three,
+    marginTop: Spacing.two,
+    gap: 6,
+  },
+  scopeLabel: { fontSize: 12, fontWeight: '700', color: BrandColors.textMuted },
+  scopeHint: { color: BrandColors.textMuted, fontSize: 13, paddingVertical: 6 },
+  scopeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    backgroundColor: BrandColors.surface,
+    maxWidth: 220,
+  },
+  scopeChipActive: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
+  scopeChipLocked: { opacity: 0.7 },
+  scopeChipText: { color: BrandColors.text, fontSize: 13, fontWeight: '600' },
+  scopeChipTextActive: { color: '#fff' },
   productList: { flex: 1 },
   grid: { padding: Spacing.three, flexGrow: 1 },
   gridRow: { gap: Spacing.three },

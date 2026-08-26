@@ -17,18 +17,22 @@ import {
   ensureDefaultRegister,
   getActiveRegisterSession,
   getInventoryCountSheet,
+  getProducts,
   getRegisterClosingCashPreview,
   listRegisters,
   openRegisterSession,
 } from '@/services/api';
+import { formatApiError } from '@/services/api-errors';
 import type {
   InventoryCountSheetRow,
+  Product,
   RegisterClosingCashPreview,
   RegisterInventoryLinePayload,
   RegisterListItem,
   RegisterSessionDetail,
 } from '@/types/api';
 import { formatMoney } from '@/utils/datetime';
+import { stockPackagingLabel } from '@/utils/packaging';
 
 type PanelMode = 'open' | 'close' | null;
 
@@ -46,6 +50,43 @@ function parseQty(raw: string): number | null {
   const n = Number(trimmed);
   if (!Number.isFinite(n) || n < 0) return null;
   return n;
+}
+
+function productToCountRow(p: Product): InventoryCountSheetRow {
+  return {
+    id: p.id,
+    name: p.name,
+    sku: p.sku ?? null,
+    stock: Number(p.stock) || 0,
+    unitLabel: stockPackagingLabel(p),
+  };
+}
+
+/**
+ * Feuille de comptage pour ouvrir/fermer la caisse.
+ * `/inventory/count-sheet` exige `inventory.physical` (absent chez le caissier).
+ * Fallback : catalogue `products.view`, déjà autorisé pour la caisse.
+ */
+async function loadRegisterCountRows(departmentId: number): Promise<{
+  products: InventoryCountSheetRow[];
+  companyId?: number;
+}> {
+  try {
+    const sheet = await getInventoryCountSheet(departmentId);
+    return {
+      products: sheet.products,
+      companyId: sheet.department.company.id,
+    };
+  } catch {
+    const catalog = await getProducts(departmentId);
+    const products = catalog
+      .filter((p) => p.trackStock && !p.isService)
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }))
+      .map(productToCountRow);
+    const companyId = catalog.find((p) => p.companyId != null)?.companyId
+      ?? catalog.find((p) => p.company?.id != null)?.company?.id;
+    return { products, companyId };
+  }
 }
 
 export function RegisterSessionBar({
@@ -89,32 +130,44 @@ export function RegisterSessionBar({
     setError('');
     setBusy(true);
     try {
-      let regs = await listRegisters({ companyId, departmentId });
-      if (regs.length === 0 && companyId != null) {
-        await ensureDefaultRegister(companyId);
-        regs = await listRegisters({ companyId, departmentId });
+      const sheet = await loadRegisterCountRows(departmentId);
+      const resolvedCompanyId = companyId ?? sheet.companyId;
+
+      let regs = await listRegisters({
+        companyId: resolvedCompanyId,
+        departmentId,
+      });
+      if (regs.length === 0 && resolvedCompanyId != null) {
+        await ensureDefaultRegister(resolvedCompanyId);
+        regs = await listRegisters({
+          companyId: resolvedCompanyId,
+          departmentId,
+        });
       }
       setRegisters(regs);
       setSelectedRegisterId(regs[0]?.id ?? null);
-
-      const sheet = await getInventoryCountSheet(departmentId);
       setCountProducts(sheet.products);
-      setCounts(
-        Object.fromEntries(sheet.products.map((p) => [p.id, String(p.stock)])),
-      );
+      setCounts(Object.fromEntries(sheet.products.map((p) => [p.id, String(p.stock)])));
 
       if (mode === 'open') {
         setOpeningCash('');
         setClosingPreview(null);
       } else if (session) {
-        const preview = await getRegisterClosingCashPreview(session.id);
-        setClosingPreview(preview);
-        setClosingExpected(String(preview.expected));
-        setClosingCounted(String(preview.expected));
+        try {
+          const preview = await getRegisterClosingCashPreview(session.id);
+          setClosingPreview(preview);
+          setClosingExpected(String(preview.expected));
+          setClosingCounted(String(preview.expected));
+        } catch {
+          setClosingPreview(null);
+          const opening = Number(session.openingCashAmount ?? 0);
+          setClosingExpected(Number.isFinite(opening) ? String(opening) : '0');
+          setClosingCounted(Number.isFinite(opening) ? String(opening) : '0');
+        }
       }
       setPanel(mode);
-    } catch {
-      onStatus('Impossible de charger la caisse');
+    } catch (err) {
+      onStatus(formatApiError(err, 'Impossible de charger la caisse'));
     } finally {
       setBusy(false);
     }
@@ -140,6 +193,10 @@ export function RegisterSessionBar({
       setError('Complétez le comptage stock');
       return;
     }
+    if (lines.length === 0) {
+      setError('Aucun produit suivi en stock dans ce département');
+      return;
+    }
     const cashRaw = openingCash.trim().replace(',', '.');
     const openingCashAmount =
       cashRaw === '' ? undefined : Number.isFinite(Number(cashRaw)) ? Number(cashRaw) : undefined;
@@ -159,8 +216,8 @@ export function RegisterSessionBar({
       onSessionChange(next);
       setPanel(null);
       onStatus('Caisse ouverte');
-    } catch {
-      setError('Ouverture impossible');
+    } catch (err) {
+      setError(formatApiError(err, 'Ouverture impossible'));
     } finally {
       setBusy(false);
     }
@@ -171,6 +228,10 @@ export function RegisterSessionBar({
     const lines = buildLines();
     if (!lines) {
       setError('Complétez le comptage stock');
+      return;
+    }
+    if (lines.length === 0) {
+      setError('Aucun produit suivi en stock dans ce département');
       return;
     }
     const expected = Number(closingExpected.replace(',', '.'));
@@ -190,8 +251,8 @@ export function RegisterSessionBar({
       onSessionChange(null);
       setPanel(null);
       onStatus('Caisse fermée');
-    } catch {
-      setError('Fermeture impossible');
+    } catch (err) {
+      setError(formatApiError(err, 'Fermeture impossible'));
     } finally {
       setBusy(false);
     }
@@ -208,6 +269,8 @@ export function RegisterSessionBar({
           </Text>
           {session ? (
             <Text style={styles.barMeta}>{session.department.name}</Text>
+          ) : departmentId == null ? (
+            <Text style={styles.barMeta}>Choisissez un département pour ouvrir</Text>
           ) : (
             <Text style={styles.barMeta}>Ouvrez la caisse pour encaisser</Text>
           )}
