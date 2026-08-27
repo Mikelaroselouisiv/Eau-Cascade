@@ -80,6 +80,11 @@ else
   exit 1
 fi
 "${COMPOSE_CMD[@]}" -f docker-compose.gcp.yml --env-file .env.prod pull backend
+# Évite le race compose recreate vs nom pos_backend_prod (double CI push+dispatch).
+ids=$(docker ps -aq --filter name=pos_backend_prod || true)
+if [[ -n "${ids}" ]]; then
+  docker rm -f ${ids} || true
+fi
 "${COMPOSE_CMD[@]}" -f docker-compose.gcp.yml --env-file .env.prod up -d --no-deps --force-recreate backend
 "${COMPOSE_CMD[@]}" -f docker-compose.gcp.yml --env-file .env.prod ps
 EOS

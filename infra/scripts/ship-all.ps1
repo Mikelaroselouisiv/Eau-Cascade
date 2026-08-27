@@ -352,7 +352,16 @@ $gh = Get-GhExe
 if (-not $SkipBackend) {
   Write-Step "Backend → GCP (Artifact Registry + VM)"
   if ($UseCI -or $Commit) {
-    if ($gh -and -not $SkipPush) {
+    $backendAlreadyQueued = $false
+    if ($Commit -and -not $SkipPush -and -not $DryRun) {
+      $changed = @(& $git diff-tree --no-commit-id --name-only -r HEAD)
+      $backendAlreadyQueued = $null -ne ($changed | Where-Object {
+        $_ -match '^(apps/backend/|infra/docker/Dockerfile|infra/docker/docker-compose\.gcp\.yml|infra/scripts/gcp-deploy-remote\.sh|\.github/workflows/backend-gcp\.yml)'
+      })
+    }
+    if ($backendAlreadyQueued) {
+      Write-Host "Push main a deja declenche le backend CI - pas de workflow_dispatch (evite un race VM)."
+    } elseif ($gh -and -not $SkipPush) {
       $ref = (& $git branch --show-current)
       Invoke-OrDry "gh workflow run `"Backend - build and push to GCP`"" {
         & $gh workflow run "Backend - build and push to GCP" --ref $ref
@@ -437,8 +446,8 @@ Write-Host "  Server: https://storage.googleapis.com/$AssetsBucket/installers/se
 Write-Host "API cloud  : $PublicApi"
 Write-Host "GitHub     : $GitHubRepo"
 Write-Host ""
-Write-Host "Sur les machines installées : bouton Mise à jour → télécharger → redémarrer."
+Write-Host "Sur les machines installees : bouton Mise a jour -> telecharger -> redemarrer."
 Write-Host "Les postes Remote vérifient aussi au démarrage et toutes les 4 h."
 if ($DryRun) {
-  Write-Host "(DryRun : aucune action réelle.)" -ForegroundColor Yellow
+  Write-Host "(DryRun : aucune action reelle.)" -ForegroundColor Yellow
 }
