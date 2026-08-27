@@ -154,6 +154,7 @@ export class AuthService {
     isActive?: boolean;
     companyId?: number | null;
     departmentId?: number | null;
+    departmentIds?: number[];
     createdAt?: Date;
   }) {
     const roleRow = await this.prisma.appRole.findFirst({
@@ -164,6 +165,18 @@ export class AuthService {
     // Filet de sécurité : un ADMIN système sans ligne AppRole garde l’accès complet.
     if ((!permissions || permissions.length === 0) && user.role === 'ADMIN') {
       permissions = ['*'];
+    }
+    let departmentIds = user.departmentIds ?? [];
+    if (!departmentIds.length) {
+      const links = await this.prisma.userDepartment.findMany({
+        where: { userId: user.id, deletedAt: null },
+        select: { departmentId: true },
+        orderBy: { id: 'asc' },
+      });
+      departmentIds = links.map((l) => l.departmentId);
+    }
+    if (user.departmentId != null && !departmentIds.includes(user.departmentId)) {
+      departmentIds = [user.departmentId, ...departmentIds];
     }
     return {
       id: user.id,
@@ -176,6 +189,7 @@ export class AuthService {
       isActive: user.isActive ?? true,
       companyId: user.companyId ?? null,
       departmentId: user.departmentId ?? null,
+      departmentIds,
       createdAt: user.createdAt,
     };
   }

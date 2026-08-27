@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
@@ -47,12 +48,14 @@ export function UsersConfigScreen() {
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState('CASHIER');
   const [deptId, setDeptId] = useState<number | ''>('');
+  const [extraDeptIds, setExtraDeptIds] = useState<number[]>([]);
 
   const [edit, setEdit] = useState<SessionUser | null>(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editRole, setEditRole] = useState('CASHIER');
   const [editDeptId, setEditDeptId] = useState<number | ''>('');
+  const [editExtraDeptIds, setEditExtraDeptIds] = useState<number[]>([]);
   const [editPassword, setEditPassword] = useState('');
 
   const load = useCallback(async () => {
@@ -88,9 +91,15 @@ export function UsersConfigScreen() {
   }
 
   async function submitCreate() {
-    if (role !== 'ADMIN' && deptId === '') {
-      setStatus('Département requis (sauf ADMIN)');
-      return;
+    if (role !== 'ADMIN') {
+      if (role === 'MANAGER' && extraDeptIds.length === 0) {
+        setStatus('Cochez au moins un département');
+        return;
+      }
+      if (role !== 'MANAGER' && deptId === '') {
+        setStatus('Département requis (sauf ADMIN)');
+        return;
+      }
     }
     if (password !== passwordConfirm) {
       setStatus('Mots de passe différents');
@@ -108,7 +117,13 @@ export function UsersConfigScreen() {
         password,
         role,
         fullName: fullName.trim() || undefined,
-        departmentId: role === 'ADMIN' ? undefined : Number(deptId),
+        departmentId: role === 'ADMIN' ? undefined : role === 'MANAGER' ? extraDeptIds[0] : Number(deptId),
+        departmentIds:
+          role === 'ADMIN'
+            ? undefined
+            : role === 'MANAGER'
+              ? extraDeptIds
+              : [Number(deptId)],
       });
       setShowCreate(false);
       setPhone('');
@@ -117,6 +132,7 @@ export function UsersConfigScreen() {
       setFullName('');
       setRole('CASHIER');
       setDeptId('');
+      setExtraDeptIds([]);
       setStatus('Utilisateur créé');
       await load();
     } catch {
@@ -132,15 +148,31 @@ export function UsersConfigScreen() {
     setEditPhone(u.phone);
     setEditRole(u.role);
     setEditDeptId(u.departmentId ?? '');
+    setEditExtraDeptIds(
+      u.role === 'MANAGER'
+        ? Array.from(
+            new Set([
+              ...(u.departmentIds ?? []),
+              ...(u.departmentId != null ? [u.departmentId] : []),
+            ]),
+          )
+        : [],
+    );
     setEditPassword('');
     setStatus(null);
   }
 
   async function submitEdit() {
     if (!edit) return;
-    if (editRole !== 'ADMIN' && editDeptId === '') {
-      setStatus('Département requis (sauf ADMIN)');
-      return;
+    if (editRole !== 'ADMIN') {
+      if (editRole === 'MANAGER' && editExtraDeptIds.length === 0) {
+        setStatus('Cochez au moins un département');
+        return;
+      }
+      if (editRole !== 'MANAGER' && editDeptId === '') {
+        setStatus('Département requis (sauf ADMIN)');
+        return;
+      }
     }
     setBusy(true);
     try {
@@ -148,7 +180,20 @@ export function UsersConfigScreen() {
         phone: editPhone.trim(),
         fullName: editName.trim(),
         role: editRole,
-        departmentId: editRole === 'ADMIN' ? null : Number(editDeptId),
+        departmentId:
+          editRole === 'ADMIN'
+            ? null
+            : editRole === 'MANAGER'
+              ? typeof editDeptId === 'number' && editExtraDeptIds.includes(editDeptId)
+                ? editDeptId
+                : editExtraDeptIds[0]
+              : Number(editDeptId),
+        departmentIds:
+          editRole === 'ADMIN'
+            ? []
+            : editRole === 'MANAGER'
+              ? editExtraDeptIds
+              : [Number(editDeptId)],
         ...(editPassword.trim() ? { password: editPassword.trim() } : {}),
       });
       setEdit(null);
@@ -286,24 +331,40 @@ export function UsersConfigScreen() {
                   key={code}
                   label={roleLabel(code)}
                   active={role === code}
-                  onPress={() => setRole(code)}
+                  onPress={() => {
+                    setRole(code);
+                    if (code === 'MANAGER' && deptId !== '') {
+                      setExtraDeptIds((prev) => (prev.length ? prev : [deptId]));
+                    }
+                  }}
                 />
               ))}
             </ScrollView>
             {role !== 'ADMIN' ? (
-              <>
-                <Text style={styles.fieldLabel}>Département</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
-                  {departments.map((d) => (
-                    <Chip
-                      key={d.id}
-                      label={d.name}
-                      active={deptId === d.id}
-                      onPress={() => setDeptId(d.id)}
-                    />
-                  ))}
-                </ScrollView>
-              </>
+              role === 'MANAGER' ? (
+                <>
+                  <Text style={styles.fieldLabel}>Départements gérés</Text>
+                  <DeptCheckboxList
+                    departments={departments}
+                    selected={extraDeptIds}
+                    onChange={setExtraDeptIds}
+                  />
+                </>
+              ) : (
+                <>
+                  <Text style={styles.fieldLabel}>Département</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+                    {departments.map((d) => (
+                      <Chip
+                        key={d.id}
+                        label={d.name}
+                        active={deptId === d.id}
+                        onPress={() => setDeptId(d.id)}
+                      />
+                    ))}
+                  </ScrollView>
+                </>
+              )
             ) : null}
           </ScrollView>
         }
@@ -365,24 +426,40 @@ export function UsersConfigScreen() {
                   key={code}
                   label={roleLabel(code)}
                   active={editRole === code}
-                  onPress={() => setEditRole(code)}
+                  onPress={() => {
+                    setEditRole(code);
+                    if (code === 'MANAGER' && editDeptId !== '') {
+                      setEditExtraDeptIds((prev) => (prev.length ? prev : [editDeptId]));
+                    }
+                  }}
                 />
               ))}
             </ScrollView>
             {editRole !== 'ADMIN' ? (
-              <>
-                <Text style={styles.fieldLabel}>Département</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
-                  {departments.map((d) => (
-                    <Chip
-                      key={d.id}
-                      label={d.name}
-                      active={editDeptId === d.id}
-                      onPress={() => setEditDeptId(d.id)}
-                    />
-                  ))}
-                </ScrollView>
-              </>
+              editRole === 'MANAGER' ? (
+                <>
+                  <Text style={styles.fieldLabel}>Départements gérés</Text>
+                  <DeptCheckboxList
+                    departments={departments}
+                    selected={editExtraDeptIds}
+                    onChange={setEditExtraDeptIds}
+                  />
+                </>
+              ) : (
+                <>
+                  <Text style={styles.fieldLabel}>Département</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+                    {departments.map((d) => (
+                      <Chip
+                        key={d.id}
+                        label={d.name}
+                        active={editDeptId === d.id}
+                        onPress={() => setEditDeptId(d.id)}
+                      />
+                    ))}
+                  </ScrollView>
+                </>
+              )
             ) : null}
           </ScrollView>
         }
@@ -408,6 +485,49 @@ export function UsersConfigScreen() {
         </View>
       </ModalShell>
     </Screen>
+  );
+}
+
+function DeptCheckboxList({
+  departments,
+  selected,
+  onChange,
+}: {
+  departments: Department[];
+  selected: number[];
+  onChange: (ids: number[]) => void;
+}) {
+  function toggle(dept: Department) {
+    const checked = selected.includes(dept.id);
+    if (checked) {
+      onChange(selected.filter((id) => id !== dept.id));
+      return;
+    }
+    const first = departments.find((d) => selected.includes(d.id));
+    if (first && first.companyId !== dept.companyId) {
+      onChange([dept.id]);
+      return;
+    }
+    onChange([...selected, dept.id]);
+  }
+
+  return (
+    <View style={styles.checkList}>
+      {departments.map((d) => {
+        const checked = selected.includes(d.id);
+        const label = d.company ? `${d.company.name} — ${d.name}` : d.name;
+        return (
+          <Pressable key={d.id} style={styles.checkRow} onPress={() => toggle(d)}>
+            <Ionicons
+              name={checked ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={BrandColors.primary}
+            />
+            <Text style={styles.checkLabel}>{label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -482,6 +602,19 @@ const styles = StyleSheet.create({
   },
   fieldLabel: { fontWeight: '600', color: BrandColors.textMuted, fontSize: 13 },
   chips: { flexGrow: 0 },
+  checkList: { gap: 6, marginTop: 4 },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BrandColors.border,
+    backgroundColor: BrandColors.surface,
+  },
+  checkLabel: { flex: 1, fontWeight: '600', color: BrandColors.text, fontSize: 14 },
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 8,

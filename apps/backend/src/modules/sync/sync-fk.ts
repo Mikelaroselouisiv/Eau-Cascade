@@ -84,6 +84,10 @@ export const ENTITY_FK_MAP: Partial<Record<SyncEntityName, SyncFkRef[]>> = {
     { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: false },
     { uuidField: 'departmentUuid', idField: 'departmentId', parent: 'Department', required: false },
   ],
+  UserDepartment: [
+    { uuidField: 'userUuid', idField: 'userId', parent: 'User', required: true },
+    { uuidField: 'departmentUuid', idField: 'departmentId', parent: 'Department', required: true },
+  ],
   ExpenseCategory: [
     { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: true },
   ],
@@ -287,6 +291,8 @@ export const RELATION_OBJECT_KEYS = new Set([
   'tiers',
   'products',
   'users',
+  'managedDepartments',
+  'managerLinks',
   'departments',
   'stores',
   'printerProfile',

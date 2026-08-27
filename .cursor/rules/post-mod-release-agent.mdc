@@ -5,7 +5,13 @@ alwaysApply: true
 
 # Agent post-modification — POS Eau Cascade
 
-Quand l’utilisateur dit qu’il a **fini de modifier le code** (ou demande commit / push / deploy / release), exécuter **tout le pipeline** ci-dessous sans attendre d’autres instructions, sauf s’il limite explicitement le scope (ex. « commit seulement »).
+Quand l’utilisateur dit qu’il a **fini de modifier le code** (ou demande commit / push / deploy / release / ship-all), exécuter **ship-all** sans recoller les étapes à la main, sauf s’il limite explicitement le scope (ex. « commit seulement »).
+
+```powershell
+powershell -ExecutionPolicy Bypass -File infra/scripts/ship-all.ps1 -Bump patch -Commit
+```
+
+Skill : `.cursor/skills/ship-all/SKILL.md`
 
 ## Isolation (obligatoire)
 
@@ -14,6 +20,8 @@ Quand l’utilisateur dit qu’il a **fini de modifier le code** (ou demande com
 3. Jamais Israel / Frères Baziles (voir `tenant-isolation-eau-cascade.mdc`)
 
 ## Pipeline standard
+
+`ship-all.ps1` fait tout ça. Le détail ci-dessous sert de repli si le script est indisponible.
 
 ### 1. Préparer
 
@@ -27,7 +35,7 @@ Quand l’utilisateur dit qu’il a **fini de modifier le code** (ou demande com
 - Branche attendue : `main` (repo `Eau-Cascade`)
 - Message commit : style repo, focus « why », 1–2 phrases
 - `git push -u origin HEAD` (droits réseau / credentials requis)
-- `gh` Windows : `"C:\Program Files\GitHub CLI\gh.exe"` si pas dans le PATH
+- `gh` Windows : scoop shim `gh` ou `"C:\Program Files\GitHub CLI\gh.exe"` si pas dans le PATH. Réparer le PATH Machine+User si le shell Cursor est vide.
 
 ### 3. Backend → Artifact Registry → VM GCP
 
@@ -36,26 +44,12 @@ Quand l’utilisateur dit qu’il a **fini de modifier le code** (ou demande com
 - Surveiller : `gh run watch` / `gh run list --workflow=backend-gcp.yml`
 - API publique attendue : `http://35.203.5.250` (projet `eau-cascade` uniquement)
 
-### 4. Desktop → build CI → GCS (notifications MAJ)
+### 4. Desktop → GCS (notifications MAJ)
 
-Workflow **`Desktop - release to GCS`** (`.github/workflows/desktop-release-gcp.yml`) :
-
-```powershell
-& "C:\Program Files\GitHub CLI\gh.exe" workflow run "Desktop - release to GCS" --ref main -f edition=remote
-& "C:\Program Files\GitHub CLI\gh.exe" workflow run "Desktop - release to GCS" --ref main -f edition=server
-```
-
-- **Remote** : upload `exe` + `latest.yml` + `blockmap` → `gs://eau-cascade-assets/installers/remote/`  
-  → les apps Remote détectent la MAJ (démarrage + toutes les 4 h), bannière + « Redémarrer et mettre à jour »
-- **Remote** : CI GitHub Windows OK (retry intégré pour flakes NSIS). Feed → notifications auto-update.
-- **Server** : le runner GitHub **n’a pas Docker** — buildez en **local** (Docker requis pour les images offline) puis upload :
-  ```powershell
-  cd apps/desktop
-  npm run dist:win:server
-  powershell -ExecutionPolicy Bypass -File ../../infra/scripts/upload-desktop-installer.ps1 -Edition server
-  ```
+- **Remote** : `dist:win:remote` (local ou CI `edition=remote`) → `gs://eau-cascade-assets/installers/remote/`
+- **Server** : **toujours local** (le runner GitHub n’a pas Docker). Attendre AR `backend:latest`, puis `dist:win:server` (embarque Postgres + API + sync-agent) et upload `-Edition server`
+- Ne **pas** déclencher le workflow GitHub `edition=server`
 - Cache : `upload-desktop-installer.ps1` met `Cache-Control: no-cache` sur `latest.yml`
-- Alternative locale Remote : `npm run dist:win:remote` puis upload `-Edition remote` **après** assert GCP Eau Cascade
 
 ### 5. Vérifications de fin
 

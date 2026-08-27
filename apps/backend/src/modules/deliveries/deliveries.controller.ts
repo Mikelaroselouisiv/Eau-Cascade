@@ -9,7 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Permissions } from '../../common/decorators/permissions.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { DeliveriesService } from './deliveries.service';
@@ -20,6 +20,7 @@ type AuthUser = {
   role?: string;
   companyId?: number | null;
   departmentId?: number | null;
+  departmentIds?: number[] | null;
 };
 
 @Controller('deliveries')
@@ -34,6 +35,7 @@ export class DeliveriesController {
     @Query('companyId') companyId?: string,
     @Query('departmentId') departmentId?: string,
     @Query('status') status?: string,
+    @Query('fulfillmentType') fulfillmentType?: string,
     @Query('q') q?: string,
     @Query('skip') skip?: string,
     @Query('take') take?: string,
@@ -42,6 +44,7 @@ export class DeliveriesController {
       companyId: DeliveriesController.parsePositiveInt(companyId),
       departmentId: DeliveriesController.parsePositiveInt(departmentId),
       status,
+      fulfillmentType,
       q,
       skip: DeliveriesController.parseNonNegativeInt(skip),
       take: DeliveriesController.parsePositiveInt(take),
@@ -55,7 +58,7 @@ export class DeliveriesController {
   }
 
   @Patch(':id')
-  @Permissions('deliveries.manage')
+  @PermissionsAny('deliveries.manage', 'deliveries.manage_onsite', 'deliveries.manage_home')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateDeliveryDto,

@@ -42,6 +42,7 @@ export class DepartmentsService {
         companyId,
         name: dto.name.trim(),
         description: dto.description?.trim(),
+        offersHomeDelivery: dto.offersHomeDelivery === true,
       },
       include: { company: { select: { id: true, name: true } } },
     });
@@ -60,6 +61,9 @@ export class DepartmentsService {
         ...(dto.name !== undefined && { name: dto.name.trim() }),
         ...(dto.description !== undefined && {
           description: dto.description?.trim() ?? null,
+        }),
+        ...(dto.offersHomeDelivery !== undefined && {
+          offersHomeDelivery: dto.offersHomeDelivery,
         }),
       },
       include: { company: { select: { id: true, name: true } } },

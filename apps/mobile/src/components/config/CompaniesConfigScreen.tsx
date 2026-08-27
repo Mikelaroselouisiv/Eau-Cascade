@@ -51,6 +51,7 @@ export function CompaniesConfigScreen() {
   const [phone, setPhone] = useState('');
   const [depts, setDepts] = useState<Department[]>([]);
   const [newDept, setNewDept] = useState('');
+  const [newDeptHome, setNewDeptHome] = useState(false);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
@@ -78,6 +79,7 @@ export function CompaniesConfigScreen() {
     setPhone('');
     setDepts([]);
     setNewDept('');
+    setNewDeptHome(false);
     setStatus(null);
     setModal('create');
   }
@@ -89,6 +91,7 @@ export function CompaniesConfigScreen() {
     setCity(row.city ?? '');
     setPhone(row.phone ?? '');
     setNewDept('');
+    setNewDeptHome(false);
     setStatus(null);
     setModal('edit');
     try {
@@ -135,8 +138,13 @@ export function CompaniesConfigScreen() {
     if (editId == null || !newDept.trim()) return;
     setBusy(true);
     try {
-      await createDepartment({ companyId: editId, name: newDept.trim() });
+      await createDepartment({
+        companyId: editId,
+        name: newDept.trim(),
+        offersHomeDelivery: newDeptHome,
+      });
       setNewDept('');
+      setNewDeptHome(false);
       setDepts(await getDepartments(editId));
       await load();
     } catch {
@@ -311,7 +319,20 @@ export function CompaniesConfigScreen() {
                       </>
                     ) : (
                       <>
-                        <Text style={styles.flex}>{d.name}</Text>
+                        <Text style={styles.flex}>
+                          {d.name}
+                          {d.offersHomeDelivery ? ' · domicile' : ''}
+                        </Text>
+                        <Pressable
+                          onPress={() =>
+                            void updateDepartment(d.id, {
+                              offersHomeDelivery: !d.offersHomeDelivery,
+                            }).then(async () => setDepts(await getDepartments(editId)))
+                          }>
+                          <Text style={styles.link}>
+                            {d.offersHomeDelivery ? 'Sans domicile' : 'À domicile'}
+                          </Text>
+                        </Pressable>
                         <Pressable onPress={() => startRename(d)}>
                           <Text style={styles.link}>Renommer</Text>
                         </Pressable>
@@ -337,6 +358,17 @@ export function CompaniesConfigScreen() {
                       <Text style={styles.link}>Ajouter</Text>
                     </Pressable>
                   </View>
+                  {canEdit ? (
+                    <Pressable
+                      onPress={() => setNewDeptHome((v) => !v)}
+                      style={{ paddingVertical: 6 }}>
+                      <Text style={styles.meta}>
+                        {newDeptHome
+                          ? '☑ Fait des livraisons à domicile'
+                          : '☐ Fait des livraisons à domicile'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 ) : null}
               </>
             ) : null}

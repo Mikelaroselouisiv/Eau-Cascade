@@ -1,13 +1,16 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { Prisma, User } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { isManagerRole } from '../../common/user-scope';
 import { normalizePhone } from '../../common/utils/phone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RolesService } from '../roles/roles.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { UsersRepository } from './users.repository';
+import { SafeUser, UsersRepository } from './users.repository';
+
+export type PublicUser = Omit<SafeUser, 'managedDepartments'> & { departmentIds: number[] };
 
 @Injectable()
 export class UsersService {
@@ -18,7 +21,19 @@ export class UsersService {
     private readonly rolesService: RolesService,
   ) {}
 
-  async create(createUserDto: CreateUserDto, actorId?: number): Promise<Omit<User, 'password'>> {
+  private toPublic(user: SafeUser): PublicUser {
+    const fromJoin = user.managedDepartments.map((row) => row.departmentId);
+    const departmentIds = Array.from(
+      new Set([
+        ...fromJoin,
+        ...(user.departmentId != null ? [user.departmentId] : []),
+      ]),
+    );
+    const { managedDepartments: _links, ...rest } = user;
+    return { ...rest, departmentIds };
+  }
+
+  async create(createUserDto: CreateUserDto, actorId?: number): Promise<PublicUser> {
     const phoneNorm = normalizePhone(createUserDto.phone);
     const existingUser = await this.usersRepository.findByPhone(phoneNorm);
     if (existingUser) {
@@ -58,8 +73,11 @@ export class UsersService {
       ...(departmentConnect ? { department: departmentConnect } : {}),
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { password: _password, ...safeUser } = user;
+    await this.replaceManagedDepartments(user.id, role, {
+      departmentId: createUserDto.departmentId ?? null,
+      departmentIds: createUserDto.departmentIds,
+    });
+
     await this.auditService.log({
       userId: actorId,
       action: 'USER_CREATED',
@@ -67,11 +85,14 @@ export class UsersService {
       entityId: String(user.id),
       metadata: { phone: user.phone, role: user.role },
     });
-    return safeUser;
+    const created = await this.usersRepository.findById(user.id);
+    if (!created) throw new NotFoundException('Utilisateur introuvable');
+    return this.toPublic(created);
   }
 
-  findAll() {
-    return this.usersRepository.findAll();
+  async findAll() {
+    const rows = await this.usersRepository.findAll();
+    return rows.map((u) => this.toPublic(u));
   }
 
   async findOne(id: number) {
@@ -79,7 +100,7 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('Utilisateur introuvable');
     }
-    return user;
+    return this.toPublic(user);
   }
 
   findByPhone(phone: string) {
@@ -154,7 +175,20 @@ export class UsersService {
       data.email = dto.email.trim() === '' ? null : dto.email.trim();
     }
 
-    const updated = await this.usersRepository.update(id, data);
+    await this.usersRepository.update(id, data);
+    if (
+      dto.departmentId !== undefined ||
+      dto.departmentIds !== undefined ||
+      dto.role !== undefined
+    ) {
+      await this.replaceManagedDepartments(id, nextRole, {
+        departmentId: nextDeptId,
+        departmentIds: dto.departmentIds,
+      });
+    }
+
+    const updated = await this.usersRepository.findById(id);
+    if (!updated) throw new NotFoundException('Utilisateur introuvable');
     await this.auditService.log({
       userId: actorId,
       action: 'USER_UPDATED',
@@ -162,7 +196,7 @@ export class UsersService {
       entityId: String(id),
       metadata: { role: updated.role },
     });
-    return updated;
+    return this.toPublic(updated);
   }
 
   async remove(id: number, actingUserId: number) {
@@ -189,6 +223,76 @@ export class UsersService {
       entityId: String(id),
       metadata: { phone: existing.phone },
     });
-    return deleted;
+    return this.toPublic(deleted);
+  }
+
+  private async replaceManagedDepartments(
+    userId: number,
+    role: string,
+    opts: { departmentId?: number | null; departmentIds?: number[] },
+  ) {
+    if (role === 'ADMIN') {
+      await this.prisma.userDepartment.updateMany({
+        where: { userId, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+      return;
+    }
+
+    const homeId = opts.departmentId ?? null;
+    let wanted = isManagerRole(role)
+      ? (opts.departmentIds?.length ? opts.departmentIds : homeId != null ? [homeId] : [])
+      : homeId != null
+        ? [homeId]
+        : [];
+    wanted = Array.from(new Set(wanted.filter((id) => Number.isFinite(id) && id > 0)));
+    if (homeId != null && !wanted.includes(homeId)) {
+      wanted = [homeId, ...wanted];
+    }
+    if (!wanted.length) return;
+
+    const depts = await this.prisma.department.findMany({
+      where: { id: { in: wanted }, deletedAt: null },
+      select: { id: true, companyId: true },
+    });
+    if (depts.length !== wanted.length) {
+      throw new BadRequestException('Un des départements est introuvable');
+    }
+    const companyIds = new Set(depts.map((d) => d.companyId));
+    if (companyIds.size > 1) {
+      throw new BadRequestException(
+        'Les départements d’un gérant doivent appartenir à la même entreprise.',
+      );
+    }
+
+    const existing = await this.prisma.userDepartment.findMany({
+      where: { userId },
+    });
+    const wantedSet = new Set(wanted);
+    const now = new Date();
+
+    for (const row of existing) {
+      if (wantedSet.has(row.departmentId)) {
+        if (row.deletedAt) {
+          await this.prisma.userDepartment.update({
+            where: { id: row.id },
+            data: { deletedAt: null },
+          });
+        }
+      } else if (!row.deletedAt) {
+        await this.prisma.userDepartment.update({
+          where: { id: row.id },
+          data: { deletedAt: now },
+        });
+      }
+    }
+
+    const existingIds = new Set(existing.map((r) => r.departmentId));
+    for (const departmentId of wanted) {
+      if (existingIds.has(departmentId)) continue;
+      await this.prisma.userDepartment.create({
+        data: { userId, departmentId },
+      });
+    }
   }
 }

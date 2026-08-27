@@ -30,12 +30,13 @@
 body {
   margin: 0;
   font-family: var(--ei-font);
-  background:
-    linear-gradient(165deg, rgba(232, 244, 242, 0.88) 0%, rgba(214, 235, 247, 0.82) 45%, rgba(220, 239, 232, 0.9) 100%),
+  background-color: var(--ei-bg);
+  background-image:
+    linear-gradient(165deg, rgba(232, 244, 242, 0.62) 0%, rgba(214, 235, 247, 0.55) 45%, rgba(220, 239, 232, 0.65) 100%),
     var(--ei-water-bg);
   background-size: auto, cover;
   background-position: center, center;
-  background-attachment: fixed, fixed;
+  background-repeat: no-repeat, no-repeat;
   color: var(--ei-text);
 }
 
@@ -181,7 +182,7 @@ select {
 .app-shell {
   display: flex;
   min-height: 100vh;
-  background: var(--ei-bg);
+  background: transparent;
 }
 
 .app-sidebar {
@@ -512,10 +513,6 @@ select {
   display: grid;
   place-items: center;
   padding: 1rem;
-  background:
-    radial-gradient(ellipse 70% 50% at 10% 0%, rgba(255, 140, 0, 0.14), transparent 55%),
-    radial-gradient(ellipse 55% 40% at 100% 100%, rgba(230, 126, 0, 0.1), transparent 50%),
-    linear-gradient(165deg, #fffaf5 0%, #f7f4ef 45%, #efe8df 100%);
 }
 
 .login-brand {
@@ -959,6 +956,40 @@ select {
   color: #ef4444;
 }
 
+.dept-multi-fieldset {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.65rem 0.85rem 0.85rem;
+  margin: 0;
+  grid-column: 1 / -1;
+}
+
+.dept-multi-fieldset legend {
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 0 0.25rem;
+}
+
+.dept-multi-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.dept-multi-list .checkbox-row {
+  padding: 0.35rem 0.45rem;
+  border-radius: 8px;
+  background: var(--ei-surface-2, #f8fafc);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dept-multi-list .checkbox-row input[type='checkbox'] {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--ei-primary);
+  cursor: pointer;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;
@@ -1066,6 +1097,36 @@ select {
 
 .pos-draft-name-edit {
   margin-bottom: 0.5rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.pos-fulfillment {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+
+.pos-fulfillment-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 0.55rem;
+  padding: 0.4rem 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pos-fulfillment-btn.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.pos-fulfillment-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .pos-draft-name-label {
@@ -3333,6 +3394,19 @@ button.password-field__toggle:focus-visible {
   margin-bottom: 1rem;
 }
 
+.delivery-modal-contact {
+  font-size: 0.9rem;
+  color: #334155;
+  margin: -0.4rem 0 1rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.delivery-card-home {
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
 .delivery-lines {
   list-style: none;
   margin: 0 0 1rem;
@@ -3373,6 +3447,27 @@ button.password-field__toggle:focus-visible {
   font-variant-numeric: tabular-nums;
   color: #334155;
   white-space: nowrap;
+}
+
+.delivery-card-executor {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.delivery-executor {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.delivery-executor input,
+.delivery-executor select {
+  font-weight: 500;
 }
 
 .delivery-modal-actions {

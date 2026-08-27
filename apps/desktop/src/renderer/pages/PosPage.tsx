@@ -26,6 +26,7 @@ import type {
   CompanyProfile,
   Department,
   DepartmentPrinterSettings,
+  FulfillmentType,
   InventoryCountSheetRow,
   Product,
   ProductSaleUnit,
@@ -42,6 +43,7 @@ import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../utils/volumeUnitPrice';
 import { formatMoney, resolveCurrencyCode } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
+import { departmentsForUser } from '../utils/user-scope';
 
 /** Quantité décimale dans l’unité choisie (caisse, bouteille…) ; le stock est dans la même unité. */
 const QTY_DECIMALS = 4;
@@ -152,6 +154,9 @@ export function PosPage() {
     cart: CartLine[];
     paymentMethod: PaymentMethod;
     name: string;
+    fulfillmentType: FulfillmentType;
+    clientPhone: string;
+    clientAddress: string;
     bankId: number | '';
     bankAccountId: number | '';
   };
@@ -161,6 +166,9 @@ export function PosPage() {
     cart: [],
     paymentMethod: 'CASH',
     name: 'Client',
+    fulfillmentType: 'ON_SITE',
+    clientPhone: '',
+    clientAddress: '',
     bankId: '',
     bankAccountId: '',
   });
@@ -302,7 +310,10 @@ export function PosPage() {
         setSelectedCompanyId(nextCompanyId);
 
         const nextCompanyIdNumber = typeof nextCompanyId === 'number' ? nextCompanyId : undefined;
-        const nextDepartments = await getDepartments(nextCompanyIdNumber);
+        const nextDepartments = departmentsForUser(
+          await getDepartments(nextCompanyIdNumber),
+          user,
+        );
         setDepartments(nextDepartments);
 
         const nextDeptId: number | '' =
@@ -324,7 +335,7 @@ export function PosPage() {
         setStatus('Erreur chargement caisse', { persist: true });
       }
     })();
-  }, [user?.id, user?.role, user?.departmentId, user?.companyId]);
+  }, [user?.id, user?.role, user?.departmentId, user?.departmentIds, user?.companyId]);
 
   // Pour les managers/admin : recharger les listes de départements si l'entreprise change.
   useEffect(() => {
@@ -333,14 +344,15 @@ export function PosPage() {
 
     void getDepartments(Number(selectedCompanyId))
       .then((depts) => {
-        setDepartments(depts);
+        const scoped = departmentsForUser(depts, user);
+        setDepartments(scoped);
         setSelectedDepartmentId((prev) => {
-          if (typeof prev === 'number' && depts.some((d) => d.id === prev)) return prev;
-          return depts[0]?.id ?? '';
+          if (typeof prev === 'number' && scoped.some((d) => d.id === prev)) return prev;
+          return scoped[0]?.id ?? '';
         });
       })
       .catch(() => undefined);
-  }, [user, isCashier, selectedCompanyId]);
+  }, [user, isCashier, selectedCompanyId, user?.departmentIds]);
 
   // Pour les managers/admin : recharger les réglages d'entreprise et d'imprimante si besoin.
   useEffect(() => {
@@ -534,7 +546,16 @@ export function PosPage() {
       setDrafts((prev) =>
         prev.map((d) =>
           d.id === activeDraftId
-            ? { ...d, cart: [], name: 'Client', bankId: '', bankAccountId: '' }
+            ? {
+                ...d,
+                cart: [],
+                name: 'Client',
+                fulfillmentType: 'ON_SITE',
+                clientPhone: '',
+                clientAddress: '',
+                bankId: '',
+                bankAccountId: '',
+              }
             : d,
         ),
       );
@@ -594,8 +615,9 @@ export function PosPage() {
       setStatus('Produit sans unité de vente — configurez-le dans Stock.', { persist: true });
       return;
     }
+    const ignoreStock = activeDraft?.fulfillmentType === 'HOME';
     const up = Number(su.unitsPerPackage);
-    const maxQ = maxQtyInSaleUnit(p, up);
+    const maxQ = ignoreStock ? undefined : maxQtyInSaleUnit(p, up);
     if (maxQ !== undefined && maxQ < MIN_SALE_QTY) {
       setStatus('Stock insuffisant pour ce produit.', { persist: true });
       return;
@@ -610,7 +632,10 @@ export function PosPage() {
         const merged = roundQty(next[i].quantity + 1);
         next[i] = {
           ...next[i],
-          quantity: clampQty(merged, maxQtyInSaleUnit(p, next[i].unitsPerPackage)),
+          quantity: clampQty(
+            merged,
+            ignoreStock ? undefined : maxQtyInSaleUnit(p, next[i].unitsPerPackage),
+          ),
         };
         return { ...d, cart: next };
       }
@@ -640,8 +665,10 @@ export function PosPage() {
       cart: d.cart
         .map((l) => {
           if (l.productSaleUnitId !== productSaleUnitId) return l;
+          const ignoreStock = d.fulfillmentType === 'HOME';
           const p = products.find((x) => x.id === l.productId);
-          const maxQ = p ? maxQtyInSaleUnit(p, l.unitsPerPackage) : undefined;
+          const maxQ =
+            ignoreStock || !p ? undefined : maxQtyInSaleUnit(p, l.unitsPerPackage);
           const q = clampQty(l.quantity + delta, maxQ);
           return { ...l, quantity: q };
         })
@@ -666,8 +693,10 @@ export function PosPage() {
       cart: d.cart
         .map((l) => {
           if (l.productSaleUnitId !== productSaleUnitId) return l;
+          const ignoreStock = d.fulfillmentType === 'HOME';
           const p = products.find((x) => x.id === l.productId);
-          const maxQ = p ? maxQtyInSaleUnit(p, l.unitsPerPackage) : undefined;
+          const maxQ =
+            ignoreStock || !p ? undefined : maxQtyInSaleUnit(p, l.unitsPerPackage);
           const q = clampQty(parsed, maxQ);
           return { ...l, quantity: q };
         })
@@ -748,6 +777,21 @@ export function PosPage() {
       }
     }
 
+    if (activeDraft.fulfillmentType === 'HOME') {
+      if (!activeDraft.name.trim() || activeDraft.name.trim() === 'Client') {
+        setStatus('Indiquez le nom du client pour la livraison à domicile', { persist: true });
+        return;
+      }
+      if (!activeDraft.clientPhone.trim()) {
+        setStatus('Indiquez le téléphone du client', { persist: true });
+        return;
+      }
+      if (!activeDraft.clientAddress.trim()) {
+        setStatus('Indiquez l’adresse de livraison', { persist: true });
+        return;
+      }
+    }
+
     const clientName = activeDraft.name || null;
     const clientUuid =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -771,6 +815,13 @@ export function PosPage() {
         },
       ],
       clientName,
+      ...(activeDraft.fulfillmentType === 'HOME'
+        ? {
+            clientPhone: activeDraft.clientPhone.trim(),
+            clientAddress: activeDraft.clientAddress.trim(),
+          }
+        : {}),
+      fulfillmentType: activeDraft.fulfillmentType,
       clientUuid,
       registerId: registerSession.registerId,
       ...(saleMode === 'special' ? { specialSale: true } : {}),
@@ -809,6 +860,16 @@ export function PosPage() {
           address: [company?.address, company?.city].filter(Boolean).join(', ') || '',
           cashier: cashierLabel,
           receiptClientName: activeDraft.name || null,
+          receiptClientPhone:
+            activeDraft.fulfillmentType === 'HOME' ? activeDraft.clientPhone.trim() : null,
+          receiptClientAddress:
+            activeDraft.fulfillmentType === 'HOME' ? activeDraft.clientAddress.trim() : null,
+          fulfillmentLabel:
+            activeDraft.fulfillmentType === 'HOME' ? 'À domicile' : 'Sur place',
+          departmentName:
+            activeDraft.fulfillmentType === 'HOME'
+              ? null
+              : departments.find((d) => d.id === effectiveDepartmentId)?.name ?? null,
           items: activeCart.map((x) => {
             const pr = productsById.get(x.productId);
             const price =
@@ -1272,7 +1333,11 @@ export function PosPage() {
             {displayedProducts.map((p) => {
               const su = defaultSaleUnit(p);
               const up = su ? Number(su.unitsPerPackage) : 0;
-              const maxInUnit = su && p.trackStock && !p.isService ? maxQtyInSaleUnit(p, up) : undefined;
+              const ignoreStock = activeDraft.fulfillmentType === 'HOME';
+              const maxInUnit =
+                su && p.trackStock && !p.isService && !ignoreStock
+                  ? maxQtyInSaleUnit(p, up)
+                  : undefined;
               const disabled =
                 !su ||
                 (p.trackStock &&
@@ -1308,6 +1373,24 @@ export function PosPage() {
               </button>
             </div>
             <div className="pos-draft-name-edit">
+              <div className="pos-fulfillment" role="radiogroup" aria-label="Type de remise">
+                <button
+                  type="button"
+                  className={`pos-fulfillment-btn${activeDraft.fulfillmentType === 'ON_SITE' ? ' active' : ''}`}
+                  disabled={!salesEnabled}
+                  onClick={() => updateActiveDraft((d) => ({ ...d, fulfillmentType: 'ON_SITE' }))}
+                >
+                  Sur place
+                </button>
+                <button
+                  type="button"
+                  className={`pos-fulfillment-btn${activeDraft.fulfillmentType === 'HOME' ? ' active' : ''}`}
+                  disabled={!salesEnabled}
+                  onClick={() => updateActiveDraft((d) => ({ ...d, fulfillmentType: 'HOME' }))}
+                >
+                  À domicile
+                </button>
+              </div>
               <label className="pos-draft-name-label">
                 Nom fiche
                 <input
@@ -1317,6 +1400,33 @@ export function PosPage() {
                   placeholder="Ex. Client Dupont"
                 />
               </label>
+              {activeDraft.fulfillmentType === 'HOME' ? (
+                <>
+                  <label className="pos-draft-name-label">
+                    Téléphone client *
+                    <input
+                      value={activeDraft.clientPhone}
+                      disabled={!salesEnabled}
+                      onChange={(e) =>
+                        updateActiveDraft((d) => ({ ...d, clientPhone: e.target.value }))
+                      }
+                      placeholder="Ex. 37 00 0000"
+                      inputMode="tel"
+                    />
+                  </label>
+                  <label className="pos-draft-name-label">
+                    Adresse de livraison *
+                    <input
+                      value={activeDraft.clientAddress}
+                      disabled={!salesEnabled}
+                      onChange={(e) =>
+                        updateActiveDraft((d) => ({ ...d, clientAddress: e.target.value }))
+                      }
+                      placeholder="Rue, commune…"
+                    />
+                  </label>
+                </>
+              ) : null}
             </div>
             <div className="pos-drafts-list" role="tablist" aria-label="Fiches ouvertes">
               {drafts.map((d, idx) => (

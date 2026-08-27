@@ -36,9 +36,11 @@ au même horodatage.
 - `CreditPayment` : **append-only** — insert si `uuid` inconnu (acomptes / remboursements).
 - Les ventes crédit créent aussi `Sale` + `Delivery` (mêmes règles que la caisse) ; sans sync des clients crédit, ces ventes / livraisons restent bloquées (FK).
 
-### Config (`Company`, `Department`, `DepartmentPrinterProfile`, `PackagingUnit`, `User`, `Store`, `Register`, `CreditCustomer`)
+### Config (`Company`, `Department`, `DepartmentPrinterProfile`, `PackagingUnit`, `AppRole`, `User`, `UserDepartment`, `Store`, `Register`, `CreditCustomer`)
 
 - LWW **symétrique** sur `max(updatedAt, deletedAt)` — un admin peut administrer depuis n’importe quel nœud.
+- `AppRole` : identité naturelle = `code` (ADMIN, MANAGER, …). Les `uuid` diffèrent d’un nœud à l’autre au premier déploiement ; le sync fusionne par `code` puis aligne l’uuid. Le tableau `permissions` (String[]) est transporté.
+- `UserDepartment` : départements contrôlés par un gérant ; fusion par `(userUuid, departmentUuid)`.
 - Soft delete obligatoire pour ces DELETE métier (tombstone synchronisable). **Hard delete = invisible au sync = résurrection** depuis l’autre nœud.
 - Au pull / push : n’écraser que si `effectiveAt(incoming) > effectiveAt(existing)`.
 - Soft delete plus récent gagne ; une édition ultérieure peut « undelete » (`deletedAt: null`) si son `updatedAt` est plus récent.
@@ -68,7 +70,6 @@ au même horodatage.
 
 - `Session` (tokens refresh locaux)
 - `SyncState` (état par nœud)
-- `Bank*` (hors périmètre sync actuel)
 
 ## API
 

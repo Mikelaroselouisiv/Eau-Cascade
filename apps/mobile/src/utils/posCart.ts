@@ -84,9 +84,10 @@ export function effectiveUnitPrice(
   return resolveVolumeUnitPrice(Number(su.salePrice), tiers, line.quantity);
 }
 
-export function productSellable(product: Product): boolean {
+export function productSellable(product: Product, ignoreStock = false): boolean {
   const su = defaultSaleUnit(product);
   if (!su) return false;
+  if (ignoreStock) return true;
   const maxQ = maxQtyInSaleUnit(product, Number(su.unitsPerPackage));
   return maxQ === undefined || maxQ >= MIN_SALE_QTY;
 }
@@ -94,12 +95,13 @@ export function productSellable(product: Product): boolean {
 export function addLineToCart(
   cart: CartLine[],
   product: Product,
+  ignoreStock = false,
 ): { cart: CartLine[]; error?: string } {
   const su = defaultSaleUnit(product);
   if (!su) return { cart, error: 'Produit sans unité de vente' };
 
   const up = Number(su.unitsPerPackage);
-  const maxQ = maxQtyInSaleUnit(product, up);
+  const maxQ = ignoreStock ? undefined : maxQtyInSaleUnit(product, up);
   if (maxQ !== undefined && maxQ < MIN_SALE_QTY) {
     return { cart, error: 'Stock insuffisant pour ce produit' };
   }
@@ -110,7 +112,12 @@ export function addLineToCart(
     const merged = roundQty(next[existingIndex].quantity + 1);
     next[existingIndex] = {
       ...next[existingIndex],
-      quantity: clampQty(merged, maxQtyInSaleUnit(product, next[existingIndex].unitsPerPackage)),
+      quantity: clampQty(
+        merged,
+        ignoreStock
+          ? undefined
+          : maxQtyInSaleUnit(product, next[existingIndex].unitsPerPackage),
+      ),
     };
     return { cart: next };
   }
@@ -140,12 +147,13 @@ export function bumpCartLine(
   products: Product[],
   productSaleUnitId: number,
   delta: number,
+  ignoreStock = false,
 ): CartLine[] {
   return cart
     .map((l) => {
       if (l.productSaleUnitId !== productSaleUnitId) return l;
       const p = products.find((x) => x.id === l.productId);
-      const maxQ = p ? maxQtyInSaleUnit(p, l.unitsPerPackage) : undefined;
+      const maxQ = ignoreStock || !p ? undefined : maxQtyInSaleUnit(p, l.unitsPerPackage);
       return { ...l, quantity: clampQty(l.quantity + delta, maxQ) };
     })
     .filter((l) => l.quantity >= MIN_SALE_QTY);
@@ -156,6 +164,7 @@ export function setCartLineQty(
   products: Product[],
   productSaleUnitId: number,
   rawQty: number,
+  ignoreStock = false,
 ): CartLine[] {
   if (!Number.isFinite(rawQty) || rawQty < MIN_SALE_QTY) {
     return cart.filter((l) => l.productSaleUnitId !== productSaleUnitId);
@@ -164,7 +173,7 @@ export function setCartLineQty(
     .map((l) => {
       if (l.productSaleUnitId !== productSaleUnitId) return l;
       const p = products.find((x) => x.id === l.productId);
-      const maxQ = p ? maxQtyInSaleUnit(p, l.unitsPerPackage) : undefined;
+      const maxQ = ignoreStock || !p ? undefined : maxQtyInSaleUnit(p, l.unitsPerPackage);
       return { ...l, quantity: clampQty(rawQty, maxQ) };
     })
     .filter((l) => l.quantity >= MIN_SALE_QTY);

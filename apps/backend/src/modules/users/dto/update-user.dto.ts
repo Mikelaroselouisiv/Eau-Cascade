@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsEmail,
   IsInt,
@@ -50,4 +51,10 @@ export class UpdateUserDto {
   @Type(() => Number)
   @IsInt()
   departmentId?: number | null;
+
+  @IsOptional()
+  @IsArray()
+  @Type(() => Number)
+  @IsInt({ each: true })
+  departmentIds?: number[];
 }

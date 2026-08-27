@@ -171,41 +171,6 @@ export class RolesService implements OnModuleInit {
   }
 
   private async ensureSystemRoles() {
-    /** Permissions retirées des rôles système (ne doivent plus rester en base). */
-    const revokedByRole: Record<string, string[]> = {
-      CASHIER: ['config.view', 'config.manage'],
-      /** Gérant : plus de vue globale argent / banque / compta (réactivable dans Rôles). */
-      MANAGER: [
-        'banks.view',
-        'banks.manage',
-        'accounting.view',
-        'accounting.write',
-        'accounting.manage',
-        'company.manage',
-        'reports.view',
-        'finance.view',
-        'finance.write',
-      ],
-    };
-    /**
-     * Nouvelles permissions catalogue à ajouter une fois (remplacent d’anciens hardcodes),
-     * sans réinjecter tout le défaut MANAGER.
-     */
-    const grantIfMissingByRole: Record<string, string[]> = {
-      MANAGER: ['sales.special_price', 'sales.recent_totals'],
-      ACCOUNTANT: [
-        'accounting.view',
-        'accounting.write',
-        'accounting.manage',
-        'credit.view',
-        'banks.view',
-        'dashboard.synthesis',
-        'reports.view',
-        'stock.global',
-      ],
-      ADMIN: ['dashboard.synthesis', 'stock.global'],
-    };
-
     for (const [code, perms] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
       const existing = await this.prisma.appRole.findFirst({ where: { code } });
       if (!existing) {
@@ -217,26 +182,9 @@ export class RolesService implements OnModuleInit {
             isSystem: true,
           },
         });
-        continue;
       }
-      if (existing.deletedAt || !existing.isActive) continue;
-      if (existing.permissions.includes('*')) continue;
-
-      const revoked = new Set(revokedByRole[code] ?? []);
-      let next = existing.permissions.filter((p) => !revoked.has(p));
-      for (const p of grantIfMissingByRole[code] ?? []) {
-        if (!next.includes(p)) next = [...next, p];
-      }
-      const changed =
-        next.length !== existing.permissions.length ||
-        next.some((p, i) => p !== existing.permissions[i]);
-      if (!changed) continue;
-
-      await this.prisma.appRole.update({
-        where: { id: existing.id },
-        data: { permissions: next },
-      });
-      this.cache.delete(code);
+      // Ne pas réécrire les permissions existantes : la matrice est gérée
+      // dans Config → Rôles et synchronisée local ↔ online (AppRole).
     }
   }
 }

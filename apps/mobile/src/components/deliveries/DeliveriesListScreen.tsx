@@ -16,10 +16,11 @@ import { Screen } from '@/components/Screen';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import { getDeliveryById, getSaleById, listDeliveries, updateDelivery } from '@/services/api';
+import { getDeliveryById, getDepartments, getSaleById, listDeliveries, updateDelivery } from '@/services/api';
+import { formatApiError } from '@/services/api-errors';
 import { printReceipt } from '@/services/bluetooth-printer';
 import { buildSaleReceiptDataFromSale } from '@/services/receipt';
-import type { Delivery, DeliveryStatus } from '@/types/api';
+import type { Delivery, DeliveryStatus, Department } from '@/types/api';
 import { formatDateTime, formatMoney } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
 
@@ -35,18 +36,32 @@ const STATUS_COLOR: Record<DeliveryStatus, string> = {
   DELIVERED: BrandColors.ok,
 };
 
+function isHomeDelivery(d: Delivery) {
+  return d.fulfillmentType === 'HOME' || d.sale?.fulfillmentType === 'HOME';
+}
+
 type Props = {
   status?: DeliveryStatus;
 };
 
 export function DeliveriesListScreen({ status }: Props) {
   const { user, canPerm } = useAuth();
-  const canManage = canPerm('deliveries.manage');
+  const canManageAll = canPerm('deliveries.manage');
+  const canManageOnsite = canPerm('deliveries.manage_onsite');
+  const canManageHome = canPerm('deliveries.manage_home');
+  const canPrintFiche = canPerm('deliveries.print');
+  const canChangeExecutor = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const lockedScope = user?.role === 'CASHIER' || user?.role === 'LIVREUR';
   const companyId = typeof user?.companyId === 'number' ? user.companyId : undefined;
 
+  function canManageDelivery(d: Delivery) {
+    if (canManageAll) return true;
+    return isHomeDelivery(d) ? canManageHome : canManageOnsite;
+  }
+
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
+  const [fulfillmentFilter, setFulfillmentFilter] = useState<'' | 'ON_SITE' | 'HOME'>('');
   const [items, setItems] = useState<Delivery[]>([]);
   const [total, setTotal] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -55,6 +70,9 @@ export function DeliveriesListScreen({ status }: Props) {
 
   const [detail, setDetail] = useState<Delivery | null>(null);
   const [qtyDrafts, setQtyDrafts] = useState<Record<number, string>>({});
+  const [executorDraft, setExecutorDraft] = useState('');
+  const [stockDeptId, setStockDeptId] = useState<number | ''>('');
+  const [homeDepartments, setHomeDepartments] = useState<Department[]>([]);
   const [saving, setSaving] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [printingId, setPrintingId] = useState<number | null>(null);
@@ -72,6 +90,7 @@ export function DeliveriesListScreen({ status }: Props) {
         const res = await listDeliveries({
           companyId,
           status,
+          fulfillmentType: fulfillmentFilter || undefined,
           q: query || undefined,
           skip,
           take: 40,
@@ -83,13 +102,18 @@ export function DeliveriesListScreen({ status }: Props) {
         setError('Impossible de charger les livraisons');
       }
     },
-    [companyId, lockedScope, query, status],
+    [companyId, lockedScope, query, status, fulfillmentFilter],
   );
 
   useFocusEffect(
     useCallback(() => {
       void load();
-    }, [load]),
+      if (companyId != null) {
+        void getDepartments(companyId)
+          .then((list) => setHomeDepartments(list.filter((d) => d.offersHomeDelivery)))
+          .catch(() => setHomeDepartments([]));
+      }
+    }, [load, companyId]),
   );
 
   async function onRefresh() {
@@ -115,6 +139,8 @@ export function DeliveriesListScreen({ status }: Props) {
           (full.items ?? []).map((it) => [it.saleItemId, String(it.quantityDelivered)]),
         ),
       );
+      setExecutorDraft(full.executorName?.trim() ?? '');
+      setStockDeptId(full.departmentId ?? '');
     } catch {
       setError('Impossible d’ouvrir la fiche');
     }
@@ -150,12 +176,26 @@ export function DeliveriesListScreen({ status }: Props) {
   }
 
   async function saveDetail(markAll = false) {
-    if (!detail || !canManage || detail.status === 'DELIVERED') return;
+    if (!detail || !canManageDelivery(detail) || detail.status === 'DELIVERED') return;
+    const home = isHomeDelivery(detail);
+    if (home && detail.departmentId == null && stockDeptId === '') {
+      setDetailError('Choisissez le département qui livre à domicile');
+      return;
+    }
     setSaving(true);
     setDetailError(null);
     try {
+      const executorName = home ? executorDraft.trim() || null : undefined;
+      const stockPayload =
+        home && detail.departmentId == null && typeof stockDeptId === 'number'
+          ? { stockDepartmentId: stockDeptId }
+          : {};
       const updated = markAll
-        ? await updateDelivery(detail.id, { markDelivered: true })
+        ? await updateDelivery(detail.id, {
+            markDelivered: true,
+            ...(executorName !== undefined ? { executorName } : {}),
+            ...stockPayload,
+          })
         : await updateDelivery(detail.id, {
             items: (detail.items ?? []).map((it) => {
               const raw = (qtyDrafts[it.saleItemId] ?? '').replace(',', '.');
@@ -165,16 +205,20 @@ export function DeliveriesListScreen({ status }: Props) {
                 quantityDelivered: Number.isFinite(n) ? n : Number(it.quantityDelivered),
               };
             }),
+            ...(executorName !== undefined ? { executorName } : {}),
+            ...stockPayload,
           });
       setDetail(updated);
+      setExecutorDraft(updated.executorName?.trim() ?? '');
+      setStockDeptId(updated.departmentId ?? '');
       setQtyDrafts(
         Object.fromEntries(
           (updated.items ?? []).map((it) => [it.saleItemId, String(it.quantityDelivered)]),
         ),
       );
       await load();
-    } catch {
-      setDetailError('Enregistrement impossible');
+    } catch (e) {
+      setDetailError(formatApiError(e, 'Enregistrement impossible'));
     } finally {
       setSaving(false);
     }
@@ -195,6 +239,28 @@ export function DeliveriesListScreen({ status }: Props) {
         <Pressable style={styles.searchBtn} onPress={() => setQuery(q.trim())}>
           <Text style={styles.searchBtnText}>OK</Text>
         </Pressable>
+      </View>
+      <View style={styles.filterRow}>
+        {(
+          [
+            { id: '', label: 'Toutes' },
+            { id: 'ON_SITE', label: 'Sur place' },
+            { id: 'HOME', label: 'À domicile' },
+          ] as const
+        ).map((opt) => (
+          <Pressable
+            key={opt.id || 'all'}
+            style={[styles.filterChip, fulfillmentFilter === opt.id && styles.filterChipActive]}
+            onPress={() => setFulfillmentFilter(opt.id)}>
+            <Text
+              style={[
+                styles.filterChipText,
+                fulfillmentFilter === opt.id && styles.filterChipTextActive,
+              ]}>
+              {opt.label}
+            </Text>
+          </Pressable>
+        ))}
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Text style={styles.count}>{total} livraison(s)</Text>
@@ -231,9 +297,17 @@ export function DeliveriesListScreen({ status }: Props) {
                 </View>
                 <Text style={styles.client} numberOfLines={2}>
                   {item.sale?.clientName?.trim() || 'Client'}
+                  {isHomeDelivery(item) ? ' · À domicile' : ''}
                 </Text>
                 <Text style={styles.meta} numberOfLines={2}>
-                  {[item.company?.name, item.department?.name].filter(Boolean).join(' · ') || '—'}
+                  {isHomeDelivery(item)
+                    ? [
+                        item.company?.name,
+                        item.department?.name ? `Livré depuis ${item.department.name}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || '—'
+                    : [item.company?.name, item.department?.name].filter(Boolean).join(' · ') || '—'}
                 </Text>
                 <View style={styles.cardFoot}>
                   <Text style={styles.meta}>
@@ -242,6 +316,7 @@ export function DeliveriesListScreen({ status }: Props) {
                   <MoneyText value={item.sale?.total} style={styles.total} />
                 </View>
               </Pressable>
+              {canPrintFiche ? (
               <Pressable
                 style={[styles.cardPrintBtn, (busyPrint || printingId != null) && styles.disabled]}
                 disabled={busyPrint || printingId != null}
@@ -252,6 +327,7 @@ export function DeliveriesListScreen({ status }: Props) {
                   <Text style={styles.cardPrintText}>Imprimer</Text>
                 )}
               </Pressable>
+              ) : null}
             </View>
           );
         }}
@@ -277,11 +353,73 @@ export function DeliveriesListScreen({ status }: Props) {
                   </Text>
                   <Text style={styles.client}>{detail.sale?.clientName?.trim() || 'Client'}</Text>
                   <Text style={styles.meta}>
+                    {isHomeDelivery(detail) ? 'À domicile' : 'Sur place'} ·{' '}
                     {STATUS_LABEL[detail.status]} · {formatMoney(detail.sale?.total)}
                   </Text>
                   <Text style={styles.meta}>
-                    {[detail.company?.name, detail.department?.name].filter(Boolean).join(' · ')}
+                    {isHomeDelivery(detail)
+                      ? [
+                          detail.company?.name,
+                          detail.department?.name
+                            ? `Livré depuis ${detail.department.name}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')
+                      : [detail.company?.name, detail.department?.name].filter(Boolean).join(' · ')}
                   </Text>
+                  {isHomeDelivery(detail) && detail.sale?.clientPhone?.trim() ? (
+                    <Text style={styles.meta}>Tél. {detail.sale.clientPhone.trim()}</Text>
+                  ) : null}
+                  {isHomeDelivery(detail) && detail.sale?.clientAddress?.trim() ? (
+                    <Text style={styles.meta}>{detail.sale.clientAddress.trim()}</Text>
+                  ) : null}
+                  {isHomeDelivery(detail) &&
+                  canManageDelivery(detail) &&
+                  detail.status !== 'DELIVERED' &&
+                  detail.departmentId == null ? (
+                    <View style={styles.executorBlock}>
+                      <Text style={styles.meta}>Département de livraison</Text>
+                      {homeDepartments.length === 0 ? (
+                        <Text style={styles.meta}>
+                          Aucun département n’est coché pour les livraisons à domicile.
+                        </Text>
+                      ) : (
+                        homeDepartments.map((d) => (
+                          <Pressable
+                            key={d.id}
+                            onPress={() => setStockDeptId(d.id)}
+                            style={[
+                              styles.deptChip,
+                              stockDeptId === d.id && styles.deptChipActive,
+                            ]}>
+                            <Text
+                              style={[
+                                styles.deptChipText,
+                                stockDeptId === d.id && styles.deptChipTextActive,
+                              ]}>
+                              {d.name}
+                            </Text>
+                          </Pressable>
+                        ))
+                      )}
+                    </View>
+                  ) : null}
+                  {isHomeDelivery(detail) &&
+                  (canManageDelivery(detail) || detail.executorName?.trim()) ? (
+                    <View style={styles.executorBlock}>
+                      <Text style={styles.meta}>Exécuté par</Text>
+                      <TextInput
+                        style={styles.executorInput}
+                        value={executorDraft}
+                        editable={
+                          !(Boolean(detail.executorName?.trim()) && !canChangeExecutor) && !saving
+                        }
+                        placeholder="Nom de la personne qui a livré"
+                        onChangeText={setExecutorDraft}
+                      />
+                    </View>
+                  ) : null}
                 </View>
               }
               renderItem={({ item: it }) => {
@@ -289,7 +427,7 @@ export function DeliveriesListScreen({ status }: Props) {
                   it.saleItem?.lineLabel ||
                   it.saleItem?.product?.name ||
                   `Article #${it.saleItemId}`;
-                const editable = canManage && detail.status !== 'DELIVERED';
+                const editable = canManageDelivery(detail) && detail.status !== 'DELIVERED';
                 return (
                   <View style={styles.lineRow}>
                     <View style={styles.rowInfo}>
@@ -326,6 +464,7 @@ export function DeliveriesListScreen({ status }: Props) {
                 <Pressable style={styles.secondaryBtn} onPress={() => setDetail(null)}>
                   <Text style={styles.secondaryBtnText}>Fermer</Text>
                 </Pressable>
+                {canPrintFiche ? (
                 <Pressable
                   style={[styles.secondaryBtn, printingId != null && styles.disabled]}
                   disabled={printingId != null || saving}
@@ -336,7 +475,8 @@ export function DeliveriesListScreen({ status }: Props) {
                     <Text style={styles.secondaryBtnText}>Réimprimer fiche</Text>
                   )}
                 </Pressable>
-                {canManage && detail.status !== 'DELIVERED' ? (
+                ) : null}
+                {canManageDelivery(detail) && detail.status !== 'DELIVERED' ? (
                   <>
                     <Pressable
                       style={[styles.secondaryBtn, saving && styles.disabled]}
@@ -378,6 +518,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,
   },
+  filterRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.two,
+  },
+  filterChip: {
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: BrandColors.surface,
+  },
+  filterChipActive: {
+    backgroundColor: BrandColors.primary,
+    borderColor: BrandColors.primary,
+  },
+  filterChipText: { fontWeight: '700', color: BrandColors.text, fontSize: 13 },
+  filterChipTextActive: { color: '#fff' },
   search: {
     flex: 1,
     borderWidth: 1,
@@ -494,4 +654,28 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: { color: '#fff', fontWeight: '700' },
   disabled: { opacity: 0.55 },
+  executorBlock: { marginTop: Spacing.two, gap: 6 },
+  deptChip: {
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    borderRadius: 12,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 8,
+    backgroundColor: BrandColors.surface,
+  },
+  deptChipActive: {
+    backgroundColor: BrandColors.primary,
+    borderColor: BrandColors.primary,
+  },
+  deptChipText: { fontWeight: '700', color: BrandColors.text },
+  deptChipTextActive: { color: '#fff' },
+  executorInput: {
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    borderRadius: 12,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 10,
+    color: BrandColors.text,
+    backgroundColor: BrandColors.surface,
+  },
 });

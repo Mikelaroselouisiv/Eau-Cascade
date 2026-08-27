@@ -345,6 +345,32 @@ export class SyncService {
         where: { saleItemId: saleItem.id },
       }) as Promise<Record<string, unknown> | null>;
     }
+    if (entity === 'AppRole') {
+      const code = record.data?.code;
+      if (code == null || code === '') return null;
+      return this.prisma.appRole.findFirst({
+        where: { code: String(code) },
+      }) as Promise<Record<string, unknown> | null>;
+    }
+    if (entity === 'UserDepartment') {
+      const userUuid = record.data?.userUuid;
+      const departmentUuid = record.data?.departmentUuid;
+      if (!userUuid || !departmentUuid) return null;
+      const user = await this.prisma.user.findUnique({
+        where: { uuid: String(userUuid) },
+        select: { id: true },
+      });
+      const department = await this.prisma.department.findUnique({
+        where: { uuid: String(departmentUuid) },
+        select: { id: true },
+      });
+      if (!user || !department) return null;
+      return this.prisma.userDepartment.findUnique({
+        where: {
+          userId_departmentId: { userId: user.id, departmentId: department.id },
+        },
+      }) as Promise<Record<string, unknown> | null>;
+    }
     return null;
   }
 
@@ -376,7 +402,10 @@ export class SyncService {
     } catch (err) {
       // Course : fiche créée entre findByNaturalKey et create.
       if (
-        (entity === 'Delivery' || entity === 'DeliveryItem') &&
+        (entity === 'Delivery' ||
+          entity === 'DeliveryItem' ||
+          entity === 'AppRole' ||
+          entity === 'UserDepartment') &&
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002'
       ) {
@@ -606,7 +635,19 @@ export class SyncService {
       if (v instanceof Date) out[k] = v.toISOString();
       else if (v instanceof Prisma.Decimal) out[k] = v.toString();
       else if (typeof v === 'bigint') out[k] = Number(v);
-      else if (v !== null && typeof v === 'object') continue;
+      else if (Array.isArray(v)) {
+        if (
+          v.every(
+            (x) =>
+              x == null ||
+              typeof x === 'string' ||
+              typeof x === 'number' ||
+              typeof x === 'boolean',
+          )
+        ) {
+          out[k] = v;
+        }
+      } else if (v !== null && typeof v === 'object') continue;
       else out[k] = v;
     }
     return out;
@@ -719,6 +760,9 @@ export class SyncService {
       PackagingUnit: this.prisma.packagingUnit as unknown as Delegate,
       Store: this.prisma.store as unknown as Delegate,
       Register: this.prisma.register as unknown as Delegate,
+      AppRole: this.prisma.appRole as unknown as Delegate,
+      User: this.prisma.user as unknown as Delegate,
+      UserDepartment: this.prisma.userDepartment as unknown as Delegate,
       ProductFamily: this.prisma.productFamily as unknown as Delegate,
       ProductFamilyTier: this.prisma.productFamilyTier as unknown as Delegate,
       Product: this.prisma.product as unknown as Delegate,
@@ -726,7 +770,6 @@ export class SyncService {
       ProductVolumePrice: this.prisma.productVolumePrice as unknown as Delegate,
       ProductRecipe: this.prisma.productRecipe as unknown as Delegate,
       RecipeComponent: this.prisma.recipeComponent as unknown as Delegate,
-      User: this.prisma.user as unknown as Delegate,
       ExpenseCategory: this.prisma.expenseCategory as unknown as Delegate,
       CreditCustomer: this.prisma.creditCustomer as unknown as Delegate,
       Sale: this.prisma.sale as unknown as Delegate,

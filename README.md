@@ -27,6 +27,14 @@ npm run dev
 
 Logo source unique : `assets/icons/icon.png`
 
+## Livraison production
+
+```powershell
+powershell -ExecutionPolicy Bypass -File infra/scripts/ship-all.ps1 -Bump patch -Commit
+```
+
+Voir `docs/DEPLOYMENT.md` et `.cursor/skills/ship-all/SKILL.md`.
+
 ## GCP
 
 Projet : `eau-cascade` — voir `docs/GCP_EAU_CASCADE.md` et `AGENTS.md`.

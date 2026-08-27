@@ -74,6 +74,12 @@ enum DeliveryStatus {
   DELIVERED
 }
 
+/// Comment la vente est remise au client.
+enum FulfillmentType {
+  ON_SITE
+  HOME
+}
+
 /// Direction / curseur de sync (métronome local ↔ GCP).
 enum SyncDirection {
   PULL
@@ -172,7 +178,10 @@ model Department {
   company        Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name           String
   description    String?
+  /// Si vrai, ce département peut être choisi comme source de stock pour une livraison à domicile.
+  offersHomeDelivery Boolean               @default(false)
   users          User[]
+  managerLinks   UserDepartment[]
   products       Product[]
   packagingUnits PackagingUnit[]
   printerProfile DepartmentPrinterProfile?
@@ -396,6 +405,9 @@ model Sale {
   status     SaleStatus  @default(COMPLETED)
   cashier    String?
   clientName String?
+  clientPhone    String?
+  clientAddress  String?
+  fulfillmentType FulfillmentType @default(ON_SITE)
   /// Client crédit (null = vente caisse classique).
   creditCustomerId Int?
   creditCustomer   CreditCustomer? @relation(fields: [creditCustomerId], references: [id], onDelete: SetNull)
@@ -459,8 +471,12 @@ model Delivery {
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   departmentId  Int?
   department    Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  /// Copie de la vente : Sur place (dépt produit) ou À domicile (dépt choisi à la livraison).
+  fulfillmentType FulfillmentType @default(ON_SITE)
   status        DeliveryStatus @default(PENDING)
   note          String?
+  /// Nom saisi manuellement de la personne qui a exécuté la livraison.
+  executorName  String?
   deliveredAt   DateTime?
   deliveredById Int?
   deliveredBy   User?          @relation("DeliveryDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
@@ -860,6 +876,7 @@ model User {
   company      Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
   departmentId Int?
   department   Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  managedDepartments UserDepartment[]
   sales        Sale[]
   sessions     Session[]
   auditLogs    AuditLog[]
@@ -885,6 +902,23 @@ model User {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   deletedAt    DateTime?
+}
+
+/// Départements contrôlés par un gérant (en plus du département d’affectation).
+model UserDepartment {
+  id           Int        @id @default(autoincrement())
+  uuid         String     @unique @default(uuid())
+  userId       Int
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  departmentId Int
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  @@unique([userId, departmentId])
+  @@index([userId])
+  @@index([departmentId])
 }
 
 /// Compte du plan comptable (PCG commerce Haïti / France).

@@ -57,7 +57,7 @@ export class RolesGuard implements CanActivate {
         }
       }
       if (requiredAny && requiredAny.length > 0) {
-        if (!requiredAny.some((p) => userPerms.includes(p))) {
+        if (!requiredAny.some((p) => permissionsSatisfy(userPerms, [p]))) {
           throw new ForbiddenException('Accès refusé pour votre rôle');
         }
       }

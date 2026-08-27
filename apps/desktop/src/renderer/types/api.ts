@@ -25,6 +25,7 @@ export interface SessionUser {
   isActive?: boolean;
   companyId?: number | null;
   departmentId?: number | null;
+  departmentIds?: number[];
   createdAt?: string;
 }
 
@@ -383,10 +384,15 @@ export interface PaymentPayload {
   bankAccountId?: number;
 }
 
+export type FulfillmentType = 'ON_SITE' | 'HOME';
+
 export interface CreateSalePayload {
   items: SaleItemPayload[];
   payments: PaymentPayload[];
   clientName?: string | null;
+  clientPhone?: string | null;
+  clientAddress?: string | null;
+  fulfillmentType?: FulfillmentType;
   /** UUID client pour idempotence (offline / rejeu). */
   clientUuid?: string;
   registerId?: number;
@@ -435,6 +441,9 @@ export interface Sale {
   status: 'COMPLETED' | 'CANCELLED' | 'REFUNDED';
   createdAt: string;
   clientName?: string | null;
+  clientPhone?: string | null;
+  clientAddress?: string | null;
+  fulfillmentType?: FulfillmentType;
   cashier?: string | null;
   amountPaid?: number | string;
   amountReceived?: number | string;
@@ -492,8 +501,10 @@ export interface Delivery {
   saleRef?: number | null;
   companyId: number;
   departmentId?: number | null;
+  fulfillmentType?: FulfillmentType;
   status: DeliveryStatus;
   note?: string | null;
+  executorName?: string | null;
   deliveredAt?: string | null;
   createdAt: string;
   company?: { id: number; name: string } | null;
@@ -508,7 +519,10 @@ export interface Delivery {
     txnNumber?: number | null;
     total: number | string;
     clientName?: string | null;
+    clientPhone?: string | null;
+    clientAddress?: string | null;
     cashier?: string | null;
+    fulfillmentType?: FulfillmentType;
     status: string;
     createdAt: string;
     user?: {
@@ -619,6 +633,7 @@ export interface Department {
   companyId: number;
   name: string;
   description?: string | null;
+  offersHomeDelivery?: boolean;
   company?: { id: number; name: string };
 }
 

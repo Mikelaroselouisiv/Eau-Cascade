@@ -132,7 +132,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if ((!perms || perms.length === 0) && user.role === 'ADMIN') return true;
       if (!perms) return false;
       if (perms.includes('*')) return true;
-      return perms.includes(permission);
+      if (perms.includes(permission)) return true;
+      if (
+        (permission === 'deliveries.manage_onsite' || permission === 'deliveries.manage_home') &&
+        perms.includes('deliveries.manage')
+      ) {
+        return true;
+      }
+      return false;
     },
     [user],
   );

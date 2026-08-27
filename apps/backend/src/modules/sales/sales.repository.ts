@@ -6,7 +6,7 @@ const saleInclude = {
   user: { select: { id: true, email: true, phone: true, role: true, fullName: true } },
   items: {
     include: {
-      product: true,
+      product: { include: { department: { select: { id: true, name: true } } } },
       productSaleUnit: { include: { packagingUnit: true } },
     },
   },

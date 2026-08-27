@@ -81,5 +81,13 @@ export function resolveUserPermissions(user: {
 }
 
 export function permissionsInclude(perms: string[], permission: string): boolean {
-  return perms.includes('*') || perms.includes(permission);
+  if (perms.includes('*')) return true;
+  if (perms.includes(permission)) return true;
+  if (
+    (permission === 'deliveries.manage_onsite' || permission === 'deliveries.manage_home') &&
+    perms.includes('deliveries.manage')
+  ) {
+    return true;
+  }
+  return false;
 }

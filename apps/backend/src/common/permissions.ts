@@ -22,7 +22,10 @@ export const PERMISSIONS = [
   { code: 'sales.delete', label: 'Supprimer définitivement des ventes' },
   { code: 'sales.special_price', label: 'Vente spéciale / prix manuel' },
   { code: 'deliveries.view', label: 'Consulter les livraisons' },
-  { code: 'deliveries.manage', label: 'Gérer les livraisons' },
+  { code: 'deliveries.manage', label: 'Gérer toutes les livraisons (sur place et à domicile)' },
+  { code: 'deliveries.manage_onsite', label: 'Gérer seulement les livraisons sur place' },
+  { code: 'deliveries.manage_home', label: 'Gérer seulement les livraisons à domicile' },
+  { code: 'deliveries.print', label: 'Imprimer les fiches depuis Livraisons' },
   { code: 'finance.view', label: 'Consulter la finance (journal, totaux)' },
   { code: 'finance.write', label: 'Saisir / modifier toute écriture financière' },
   { code: 'finance.expense', label: 'Enregistrer des dépenses uniquement (sans voir la finance)' },
@@ -101,7 +104,14 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ id: string; label: string; codes
   {
     id: 'ops',
     label: 'Livraisons & exploitation',
-    codes: ['deliveries.view', 'deliveries.manage', 'stores.manage'],
+    codes: [
+      'deliveries.view',
+      'deliveries.manage',
+      'deliveries.manage_onsite',
+      'deliveries.manage_home',
+      'deliveries.print',
+      'stores.manage',
+    ],
   },
   {
     id: 'admin',
@@ -144,6 +154,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   ADMIN: ['*'],
   /**
    * Gérant = exploitation terrain (caisse, stock local, ventes du jour, crédit).
+   * Peut contrôler **plusieurs départements** de son entreprise (UserDepartment).
    * Pas de chiffres globaux / banque / compta / synthèse — à réactiver via Rôles si besoin.
    * `sales.recent_totals` : totaux ventes limités aux 2 derniers jours.
    */
@@ -212,10 +223,33 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   LIVREUR: ['deliveries.view', 'deliveries.manage', 'products.view'],
 };
 
+/** `deliveries.manage` couvre les deux modes ; `*` couvre tout. */
+export function permissionGranted(userPerms: string[] | null | undefined, required: string): boolean {
+  if (!userPerms?.length) return false;
+  if (userPerms.includes('*')) return true;
+  if (userPerms.includes(required)) return true;
+  if (
+    (required === 'deliveries.manage_onsite' || required === 'deliveries.manage_home') &&
+    userPerms.includes('deliveries.manage')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function canManageDeliveryFulfillment(
+  userPerms: string[] | null | undefined,
+  fulfillmentType: string | null | undefined,
+): boolean {
+  if (permissionGranted(userPerms, 'deliveries.manage')) return true;
+  if (fulfillmentType === 'HOME') return permissionGranted(userPerms, 'deliveries.manage_home');
+  return permissionGranted(userPerms, 'deliveries.manage_onsite');
+}
+
 export function permissionsSatisfy(userPerms: string[], requiredPerms: string[]): boolean {
   if (userPerms.includes('*')) return true;
   if (requiredPerms.includes('*')) {
     return userPerms.includes('*');
   }
-  return requiredPerms.every((p) => userPerms.includes(p));
+  return requiredPerms.every((p) => permissionGranted(userPerms, p));
 }

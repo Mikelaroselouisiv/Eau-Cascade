@@ -325,7 +325,15 @@ export class RegisterSessionsService {
 
     const opener = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { role: true, companyId: true, departmentId: true },
+      select: {
+        role: true,
+        companyId: true,
+        departmentId: true,
+        managedDepartments: {
+          where: { deletedAt: null },
+          select: { departmentId: true },
+        },
+      },
     });
     if (!opener) {
       throw new NotFoundException('Utilisateur introuvable');
@@ -344,6 +352,24 @@ export class RegisterSessionsService {
       if (register.store.companyId !== opener.companyId) {
         throw new ForbiddenException(
           'Ce comptoir n’appartient pas à votre entreprise',
+        );
+      }
+    }
+    if (opener.role === 'MANAGER') {
+      if (opener.companyId == null || opener.companyId !== dept.companyId) {
+        throw new ForbiddenException(
+          'Vous n’êtes pas affecté à cette entreprise pour ouvrir la caisse',
+        );
+      }
+      const allowed = Array.from(
+        new Set([
+          ...opener.managedDepartments.map((r) => r.departmentId),
+          ...(opener.departmentId != null ? [opener.departmentId] : []),
+        ]),
+      );
+      if (allowed.length && !allowed.includes(dto.departmentId)) {
+        throw new ForbiddenException(
+          'Vous n’êtes pas affecté à ce département pour ouvrir la caisse',
         );
       }
     }

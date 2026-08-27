@@ -8,12 +8,13 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   MinLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { PaymentMethod } from '@prisma/client';
+import { FulfillmentType, PaymentMethod } from '@prisma/client';
 
 export class CreateSaleItemDto {
   @Type(() => Number)
@@ -84,6 +85,21 @@ export class CreateSaleDto {
   @IsOptional()
   // Nom client (provenant de la fiche POS)
   clientName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  clientPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  clientAddress?: string;
+
+  /** Sur place (défaut) ou à domicile. */
+  @IsOptional()
+  @IsEnum(FulfillmentType)
+  fulfillmentType?: FulfillmentType;
 
   /** UUID client (offline) — idempotence : rejouer la même vente ne crée pas de doublon. */
   @IsOptional()

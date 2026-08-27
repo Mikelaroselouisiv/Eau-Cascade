@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { BankTransactionType, FinanceType, MovementType, PaymentMethod, Prisma } from '@prisma/client';
+import { BankTransactionType, FinanceType, FulfillmentType, MovementType, PaymentMethod, Prisma } from '@prisma/client';
 import { permissionsSatisfy } from '../../common/permissions';
 import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -64,6 +64,35 @@ export class SalesService {
           select: { id: true, txnNumber: true },
         });
         if (raced) return raced;
+      }
+
+      const fulfillmentType =
+        createSaleDto.fulfillmentType === FulfillmentType.HOME
+          ? FulfillmentType.HOME
+          : FulfillmentType.ON_SITE;
+      const clientNameRaw =
+        createSaleDto.clientName && createSaleDto.clientName.trim()
+          ? createSaleDto.clientName.trim()
+          : null;
+      const clientPhoneRaw =
+        createSaleDto.clientPhone && createSaleDto.clientPhone.trim()
+          ? createSaleDto.clientPhone.trim()
+          : null;
+      const clientAddressRaw =
+        createSaleDto.clientAddress && createSaleDto.clientAddress.trim()
+          ? createSaleDto.clientAddress.trim()
+          : null;
+
+      if (fulfillmentType === FulfillmentType.HOME) {
+        if (!clientNameRaw) {
+          throw new BadRequestException('Le nom du client est obligatoire pour une livraison à domicile');
+        }
+        if (!clientPhoneRaw) {
+          throw new BadRequestException('Le téléphone du client est obligatoire pour une livraison à domicile');
+        }
+        if (!clientAddressRaw) {
+          throw new BadRequestException('L’adresse du client est obligatoire pour une livraison à domicile');
+        }
       }
 
       const saleItemsData: Prisma.SaleItemCreateWithoutSaleInput[] = [];
@@ -138,20 +167,24 @@ export class SalesService {
           : null;
 
         if (product.isService && recipe?.components.length) {
-          for (const c of recipe.components) {
-            const need = Number(c.quantityPerParentBaseUnit) * baseQuantity;
-            await this.inventoryService.ensureStockAvailabilityTx(
-              tx,
-              c.componentProductId,
-              need,
-            );
+          if (fulfillmentType !== FulfillmentType.HOME) {
+            for (const c of recipe.components) {
+              const need = Number(c.quantityPerParentBaseUnit) * baseQuantity;
+              await this.inventoryService.ensureStockAvailabilityTx(
+                tx,
+                c.componentProductId,
+                need,
+              );
+            }
           }
         } else if (product.trackStock && !product.isService) {
-          await this.inventoryService.ensureStockAvailabilityTx(
-            tx,
-            product.id,
-            baseQuantity,
-          );
+          if (fulfillmentType !== FulfillmentType.HOME) {
+            await this.inventoryService.ensureStockAvailabilityTx(
+              tx,
+              product.id,
+              baseQuantity,
+            );
+          }
         }
 
         loadedLines.push({ item, psu, baseQuantity });
@@ -237,14 +270,7 @@ export class SalesService {
         throw new BadRequestException('Le montant payé est inférieur au total de la vente');
       }
 
-      // IMPORTANT: Prisma tente actuellement d'insérer la colonne `Sale.clientName` alors que
-      // la migration n'est pas forcément appliquée sur la DB. On contourne le create Prisma :
-      // 1) insertion Sale via SQL brut (sans clientName)
-      // 2) insertion SaleItem/Payment via Prisma (sans toucher au modèle Sale)
-      // 3) update "best-effort" de clientName si la colonne existe
-      const clientNameRaw =
-        createSaleDto.clientName && createSaleDto.clientName.trim() ? createSaleDto.clientName.trim() : null;
-
+      // Insertion SQL : uuid sans DEFAULT serveur après drift Prisma.
       let cashier: string | null = null;
       if (userId) {
         const u = await tx.user.findUnique({
@@ -260,12 +286,15 @@ export class SalesService {
       // uuid : plus de DEFAULT SQL après drift Prisma (@default(uuid()) côté client seulement).
       // L’INSERT brut doit donc fournir uuid explicitement.
       const saleUuid = randomUUID();
+      const fulfillmentSql = fulfillmentType === FulfillmentType.HOME ? 'HOME' : 'ON_SITE';
       const insertedRows = await tx.$queryRaw<Array<{ id: number }>>`
         INSERT INTO "Sale"
           ("uuid", "total", "subtotal", "tax", "cashier", "userId", "storeId", "registerId", "clientUuid",
+           "clientName", "clientPhone", "clientAddress", "fulfillmentType",
            "amountPaid", "amountReceived", "changeDue", "updatedAt")
         VALUES
           (${saleUuid}, ${total}, ${total}, 0, ${cashier}, ${userId ?? null}, ${storeId}, ${registerId}, ${clientUuid},
+           ${clientNameRaw}, ${clientPhoneRaw}, ${clientAddressRaw}, CAST(${fulfillmentSql} AS "FulfillmentType"),
            ${amountPaid}, ${amountReceived}, ${changeDue}, NOW())
         RETURNING "id";
       `;
@@ -415,14 +444,6 @@ export class SalesService {
         );
       }
 
-      if (clientNameRaw !== null) {
-        try {
-          await tx.$executeRaw`UPDATE "Sale" SET "clientName" = ${clientNameRaw} WHERE "id" = ${saleId}`;
-        } catch {
-          // Colonne non existante : on ignore pour ne pas bloquer l'encaissement.
-        }
-      }
-
       if (firstCompanyId != null) {
         const createdItems = await tx.saleItem.findMany({
           where: { saleId },
@@ -434,6 +455,7 @@ export class SalesService {
             saleId,
             companyId: firstCompanyId,
             departmentId: firstDepartmentId,
+            fulfillmentType,
             items: createdItems.map((it) => ({
               saleItemId: it.id,
               quantityOrdered: Number(it.quantity),
@@ -1099,7 +1121,19 @@ export class SalesService {
     drawKeyValueBlock(doc, [
       { label: 'Date', value: formatDateTimeFr(sale.createdAt) },
       { label: 'Statut', value: statusLabel },
+      {
+        label: 'Remise',
+        value: sale.fulfillmentType === 'HOME' ? 'À domicile' : 'Sur place',
+      },
       { label: 'Client', value: sale.clientName?.trim() || '—' },
+      ...(sale.fulfillmentType === 'HOME'
+        ? [
+            { label: 'Téléphone', value: sale.clientPhone?.trim() || '—' },
+            { label: 'Adresse', value: sale.clientAddress?.trim() || '—' },
+          ]
+        : sale.items?.[0]?.product?.department?.name
+          ? [{ label: 'Département', value: sale.items[0].product.department.name }]
+          : []),
       { label: 'Caissier', value: cashier },
     ]);
 

@@ -43,6 +43,7 @@ import type {
   CompanyListItem,
   CreateSalePayload,
   Department,
+  FulfillmentType,
   Product,
   RegisterSessionDetail,
   SaleCashGapRow,
@@ -77,12 +78,25 @@ type SaleDraft = {
   cart: CartLine[];
   paymentMethod: PaymentMethod;
   name: string;
+  fulfillmentType: FulfillmentType;
+  clientPhone: string;
+  clientAddress: string;
   bankId: number | '';
   bankAccountId: number | '';
 };
 
 function emptyDraft(id = `d${Date.now()}`): SaleDraft {
-  return { id, cart: [], paymentMethod: 'CASH', name: 'Client', bankId: '', bankAccountId: '' };
+  return {
+    id,
+    cart: [],
+    paymentMethod: 'CASH',
+    name: 'Client',
+    fulfillmentType: 'ON_SITE',
+    clientPhone: '',
+    clientAddress: '',
+    bankId: '',
+    bankAccountId: '',
+  };
 }
 
 const PAYMENT_OPTIONS: {
@@ -370,7 +384,18 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     setQtyDrafts({});
     if (drafts.length <= 1) {
       setDrafts((prev) =>
-        prev.map((d) => (d.id === activeDraftId ? { ...d, cart: [], name: 'Client' } : d)),
+        prev.map((d) =>
+          d.id === activeDraftId
+            ? {
+                ...d,
+                cart: [],
+                name: 'Client',
+                fulfillmentType: 'ON_SITE',
+                clientPhone: '',
+                clientAddress: '',
+              }
+            : d,
+        ),
       );
       return;
     }
@@ -477,7 +502,8 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       setStatus('Vente spéciale réservée aux managers et administrateurs');
       return;
     }
-    const { cart: next, error } = addLineToCart(cart, product);
+    const ignoreStock = activeDraft?.fulfillmentType === 'HOME';
+    const { cart: next, error } = addLineToCart(cart, product, ignoreStock);
     if (error) {
       setStatus(error);
       return;
@@ -488,7 +514,13 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   function bumpQty(productSaleUnitId: number, delta: number) {
     updateActiveDraft((d) => ({
       ...d,
-      cart: bumpCartLine(d.cart, products, productSaleUnitId, delta),
+      cart: bumpCartLine(
+        d.cart,
+        products,
+        productSaleUnitId,
+        delta,
+        d.fulfillmentType === 'HOME',
+      ),
     }));
   }
 
@@ -562,6 +594,24 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       }
     }
 
+    const fulfillmentType = activeDraft?.fulfillmentType ?? 'ON_SITE';
+    const clientPhone = (activeDraft?.clientPhone ?? '').trim();
+    const clientAddress = (activeDraft?.clientAddress ?? '').trim();
+    if (fulfillmentType === 'HOME') {
+      if (!draftName || draftName === 'Client') {
+        setStatus('Indiquez le nom du client pour la livraison à domicile');
+        return;
+      }
+      if (!clientPhone) {
+        setStatus('Indiquez le téléphone du client');
+        return;
+      }
+      if (!clientAddress) {
+        setStatus('Indiquez l’adresse de livraison');
+        return;
+      }
+    }
+
     const total = cartTotal;
     const applied = tendered != null ? Math.min(tendered, total) : total;
     if (applied < 0.01 && total > 0.009) {
@@ -594,6 +644,10 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
         },
       ],
       clientName: nameSnapshot,
+      ...(fulfillmentType === 'HOME'
+        ? { clientPhone, clientAddress }
+        : {}),
+      fulfillmentType,
       clientUuid: Crypto.randomUUID(),
       registerId: registerSession.registerId,
       ...(mode === 'special' ? { specialSale: true } : {}),
@@ -641,8 +695,15 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
             saleRef: txnRef,
             paymentMode: paymentMethodLabel(methodSnapshot),
             clientName: nameSnapshot ?? undefined,
+            clientPhone: fulfillmentType === 'HOME' ? clientPhone : undefined,
+            clientAddress: fulfillmentType === 'HOME' ? clientAddress : undefined,
+            fulfillmentLabel: fulfillmentType === 'HOME' ? 'À domicile' : 'Sur place',
+            departmentName:
+              fulfillmentType === 'HOME'
+                ? undefined
+                : departments.find((d) => d.id === departmentId)?.name,
             cashier: cashierLabel,
-            departmentId,
+            departmentId: fulfillmentType === 'HOME' ? undefined : departmentId,
           });
           await printReceipt(receiptData);
         } catch (printError) {
@@ -876,7 +937,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
         keyboardDismissMode="on-drag"
         renderItem={({ item }) => {
           const inCart = quantityInCart(item);
-          const sellable = productSellable(item);
+          const sellable = productSellable(item, activeDraft?.fulfillmentType === 'HOME');
           const tileColor = item.cardColor?.trim() || DEFAULT_PRODUCT_TILE_COLOR;
           const fg = textColorForBackground(tileColor);
           const disabled = !sellable || !salesEnabled;
@@ -1055,7 +1116,13 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                         if (Number.isFinite(n)) {
                           updateActiveDraft((d) => ({
                             ...d,
-                            cart: setCartLineQty(d.cart, products, item.productSaleUnitId, n),
+                            cart: setCartLineQty(
+                              d.cart,
+                              products,
+                              item.productSaleUnitId,
+                              n,
+                              d.fulfillmentType === 'HOME',
+                            ),
                           }));
                         }
                         setQtyDrafts((prev) => {
@@ -1097,6 +1164,62 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                 blurOnSubmit
               />
             </View>
+            <View style={styles.fulfillRow}>
+              <Pressable
+                style={[
+                  styles.fulfillBtn,
+                  (activeDraft?.fulfillmentType ?? 'ON_SITE') === 'ON_SITE' && styles.fulfillBtnActive,
+                ]}
+                onPress={() => updateActiveDraft((d) => ({ ...d, fulfillmentType: 'ON_SITE' }))}>
+                <Text
+                  style={[
+                    styles.fulfillBtnText,
+                    (activeDraft?.fulfillmentType ?? 'ON_SITE') === 'ON_SITE' &&
+                      styles.fulfillBtnTextActive,
+                  ]}>
+                  Sur place
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.fulfillBtn,
+                  activeDraft?.fulfillmentType === 'HOME' && styles.fulfillBtnActive,
+                ]}
+                onPress={() => updateActiveDraft((d) => ({ ...d, fulfillmentType: 'HOME' }))}>
+                <Text
+                  style={[
+                    styles.fulfillBtnText,
+                    activeDraft?.fulfillmentType === 'HOME' && styles.fulfillBtnTextActive,
+                  ]}>
+                  À domicile
+                </Text>
+              </Pressable>
+            </View>
+            {activeDraft?.fulfillmentType === 'HOME' ? (
+              <>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="call-outline" size={18} color="#9AA0A6" />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Téléphone client *"
+                    placeholderTextColor={BrandColors.textMuted}
+                    keyboardType="phone-pad"
+                    value={activeDraft.clientPhone}
+                    onChangeText={(v) => updateActiveDraft((d) => ({ ...d, clientPhone: v }))}
+                  />
+                </View>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="location-outline" size={18} color="#9AA0A6" />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Adresse de livraison *"
+                    placeholderTextColor={BrandColors.textMuted}
+                    value={activeDraft.clientAddress}
+                    onChangeText={(v) => updateActiveDraft((d) => ({ ...d, clientAddress: v }))}
+                  />
+                </View>
+              </>
+            ) : null}
 
             <View style={styles.paymentRow}>
               {PAYMENT_OPTIONS.map(({ method, label, icon }) => {
@@ -1424,6 +1547,22 @@ const styles = StyleSheet.create({
     backgroundColor: BrandColors.surface,
   },
   input: { flex: 1, paddingVertical: Spacing.three, color: BrandColors.text },
+  fulfillRow: { flexDirection: 'row', gap: Spacing.two },
+  fulfillBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    borderRadius: Spacing.three,
+    paddingVertical: Spacing.two,
+    alignItems: 'center',
+    backgroundColor: BrandColors.surface,
+  },
+  fulfillBtnActive: {
+    backgroundColor: BrandColors.primary,
+    borderColor: BrandColors.primary,
+  },
+  fulfillBtnText: { fontWeight: '700', color: BrandColors.text },
+  fulfillBtnTextActive: { color: '#fff' },
   paymentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   paymentButton: {
     flexGrow: 1,

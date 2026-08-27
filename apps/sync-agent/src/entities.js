@@ -10,7 +10,9 @@ export const ENTITY_ORDER = [
   'PackagingUnit',
   'Store',
   'Register',
+  'AppRole',
   'User',
+  'UserDepartment',
   'ExpenseCategory',
   'CreditCustomer',
   // Banques avant Payment / CreditPayment / BankTransaction (FK bankAccountId).

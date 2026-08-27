@@ -33,6 +33,7 @@ import { buildTicketPreviewText } from '../utils/ticketPreview';
 import { buildDisbursementOrderPreviewText } from '../utils/disbursementOrderPreview';
 import { formatRegisterCode } from '../utils/registerDisplay';
 import { formatRoleLabel } from '../utils/roleLabels';
+import { isManagerRole } from '../utils/user-scope';
 import { formatQuantity } from '../utils/formatQuantity';
 import { PasswordField } from '../components/PasswordField';
 import { BanksConfigSection } from '../components/BanksConfigSection';
@@ -1499,6 +1500,9 @@ function DepartmentEditModal({
 }) {
   const [name, setName] = useState(department.name);
   const [description, setDescription] = useState(department.description ?? '');
+  const [offersHomeDelivery, setOffersHomeDelivery] = useState(
+    department.offersHomeDelivery === true,
+  );
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -1514,6 +1518,7 @@ function DepartmentEditModal({
       await updateDepartment(department.id, {
         name: name.trim(),
         description: description.trim() || undefined,
+        offersHomeDelivery,
       });
       await onSaved();
       onClose();
@@ -1542,6 +1547,14 @@ function DepartmentEditModal({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Mission, périmètre…"
             />
+          </label>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={offersHomeDelivery}
+              onChange={(e) => setOffersHomeDelivery(e.target.checked)}
+            />
+            Ce département fait des livraisons à domicile
           </label>
           {err ? <p className="error-text">{err}</p> : null}
           <div className="modal-actions">
@@ -1573,6 +1586,7 @@ function CompanyDepartmentsPanel({
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [offersHomeDelivery, setOffersHomeDelivery] = useState(false);
   const [deptErr, setDeptErr] = useState('');
   const [addingDept, setAddingDept] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -1627,9 +1641,11 @@ function CompanyDepartmentsPanel({
         name: trimmed,
         description: description.trim() || undefined,
         companyId,
+        offersHomeDelivery,
       });
       setName('');
       setDescription('');
+      setOffersHomeDelivery(false);
       await loadDepts();
       await onDepartmentsChanged();
     } catch (err) {
@@ -1726,6 +1742,15 @@ function CompanyDepartmentsPanel({
               }}
             />
           </label>
+          <label className="checkbox-row" style={{ alignSelf: 'end' }}>
+            <input
+              type="checkbox"
+              checked={offersHomeDelivery}
+              disabled={!canEdit}
+              onChange={(e) => setOffersHomeDelivery(e.target.checked)}
+            />
+            Livraisons à domicile
+          </label>
           <button
             type="button"
             className="btn btn-primary"
@@ -1757,6 +1782,9 @@ function CompanyDepartmentsPanel({
               <div className="dept-card-header">
                 <div className="dept-card-titles">
                   <span className="dept-card-name">{d.name}</span>
+                  {d.offersHomeDelivery ? (
+                    <span className="dept-card-meta">Livraisons à domicile</span>
+                  ) : null}
                   {d.description ? <span className="dept-card-meta">{d.description}</span> : null}
                 </div>
                 <div className="dept-card-actions">
@@ -1889,13 +1917,60 @@ function CompanyDepartmentsPanel({
 }
 
 function userDepartmentLabel(
-  departmentId: number | null | undefined,
+  user: { departmentId?: number | null; departmentIds?: number[] | null },
   departments: Department[],
 ): string {
-  if (departmentId == null) return '—';
-  const d = departments.find((x) => x.id === departmentId);
-  if (!d) return '—';
-  return d.company ? `${d.company.name} — ${d.name}` : d.name;
+  const ids = Array.from(
+    new Set([
+      ...(user.departmentIds ?? []),
+      ...(user.departmentId != null ? [user.departmentId] : []),
+    ]),
+  );
+  if (!ids.length) return '—';
+  const labels = ids
+    .map((id) => {
+      const d = departments.find((x) => x.id === id);
+      if (!d) return null;
+      return d.company ? `${d.company.name} — ${d.name}` : d.name;
+    })
+    .filter((x): x is string => Boolean(x));
+  return labels.length ? labels.join(', ') : '—';
+}
+
+function ManagerDeptCheckboxes({
+  departments,
+  selected,
+  onChange,
+}: {
+  departments: Department[];
+  selected: number[];
+  onChange: (ids: number[]) => void;
+}) {
+  if (!departments.length) return null;
+  return (
+    <fieldset className="dept-multi-fieldset">
+      <legend>Départements gérés *</legend>
+      <div className="dept-multi-list">
+        {departments.map((d) => {
+          const checked = selected.includes(d.id);
+          return (
+            <label key={d.id} className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() =>
+                  onChange(
+                    checked ? selected.filter((id) => id !== d.id) : [...selected, d.id],
+                  )
+                }
+              />
+              {d.name}
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
 }
 
 function UsersSection({
@@ -1917,6 +1992,8 @@ function UsersSection({
   const [role, setRole] = useState<string>('CASHIER');
   const [fullName, setFullName] = useState('');
   const [deptId, setDeptId] = useState<number | ''>('');
+  const [createCompanyId, setCreateCompanyId] = useState<number | ''>('');
+  const [selectedDeptIds, setSelectedDeptIds] = useState<number[]>([]);
   const [msg, setMsg] = useAutoClearMessage();
   const [editUser, setEditUser] = useState<SessionUser | null>(null);
   const [createFormOpen, setCreateFormOpen] = useState(false);
@@ -1928,17 +2005,25 @@ function UsersSection({
     setFullName('');
     setRole('CASHIER');
     setDeptId('');
+    setCreateCompanyId('');
+    setSelectedDeptIds([]);
   }
 
   async function add(e: FormEvent) {
     e.preventDefault();
     setMsg('');
-    if (role !== 'ADMIN' && deptId === '') {
-      setMsg(
-        'Choisissez un département pour ce rôle (les administrateurs globaux n’en ont pas besoin).',
-        { persist: true },
-      );
-      return;
+    if (role !== 'ADMIN') {
+      if (isManagerRole(role) && selectedDeptIds.length === 0) {
+        setMsg('Cochez au moins un département pour ce gérant.', { persist: true });
+        return;
+      }
+      if (!isManagerRole(role) && deptId === '') {
+        setMsg(
+          'Choisissez un département pour ce rôle (les administrateurs globaux n’en ont pas besoin).',
+          { persist: true },
+        );
+        return;
+      }
     }
     if (password !== passwordConfirm) {
       setMsg('Les mots de passe ne correspondent pas.', { persist: true });
@@ -1950,7 +2035,13 @@ function UsersSection({
         password,
         role,
         fullName: fullName || undefined,
-        departmentId: role === 'ADMIN' ? undefined : Number(deptId),
+        departmentId: role === 'ADMIN' ? undefined : isManagerRole(role) ? selectedDeptIds[0] : Number(deptId),
+        departmentIds:
+          role === 'ADMIN'
+            ? undefined
+            : isManagerRole(role)
+              ? selectedDeptIds
+              : [Number(deptId)],
       });
       resetCreateForm();
       setCreateFormOpen(false);
@@ -1990,7 +2081,7 @@ function UsersSection({
                     <td>{u.phone}</td>
                     <td>{(u.fullName || '').trim() || '—'}</td>
                     <td>{formatRoleLabel(u.role, appRoles.find((r) => r.code === u.role)?.label)}</td>
-                    <td>{userDepartmentLabel(u.departmentId, departments)}</td>
+                    <td>{userDepartmentLabel(u, departments)}</td>
                     <td>{u.isActive ? 'oui' : 'non'}</td>
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
@@ -2109,7 +2200,19 @@ function UsersSection({
                   onChange={(e) => {
                     const r = e.target.value;
                     setRole(r);
-                    if (r === 'ADMIN') setDeptId('');
+                    if (r === 'ADMIN') {
+                      setDeptId('');
+                      setCreateCompanyId('');
+                      setSelectedDeptIds([]);
+                    } else if (isManagerRole(r)) {
+                      const current = departments.find((d) => d.id === deptId);
+                      if (current) {
+                        setCreateCompanyId(current.companyId);
+                        setSelectedDeptIds([current.id]);
+                      }
+                    } else {
+                      setSelectedDeptIds([]);
+                    }
                   }}
                 >
                   {appRoles.map((r) => (
@@ -2124,21 +2227,54 @@ function UsersSection({
                   Administrateur global : pas d’entreprise ni de département.
                 </p>
               ) : (
-                <label>
-                  Département d’affectation *
-                  <select
-                    value={deptId === '' ? '' : String(deptId)}
-                    onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : '')}
-                    required
-                  >
-                    <option value="">— Choisir</option>
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.company ? `${d.company.name} — ${d.name}` : d.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                isManagerRole(role) ? (
+                  <>
+                    <label>
+                      Entreprise
+                      <select
+                        value={createCompanyId === '' ? '' : String(createCompanyId)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setCreateCompanyId(v ? Number(v) : '');
+                          setSelectedDeptIds([]);
+                        }}
+                        required
+                      >
+                        <option value="">— Choisir</option>
+                        {companies.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {createCompanyId !== '' ? (
+                      <ManagerDeptCheckboxes
+                        departments={departments.filter((d) => d.companyId === createCompanyId)}
+                        selected={selectedDeptIds}
+                        onChange={setSelectedDeptIds}
+                      />
+                    ) : null}
+                  </>
+                ) : (
+                  <label>
+                    Département d’affectation *
+                    <select
+                      value={deptId === '' ? '' : String(deptId)}
+                      onChange={(e) => {
+                        setDeptId(e.target.value ? Number(e.target.value) : '');
+                      }}
+                      required
+                    >
+                      <option value="">— Choisir</option>
+                      {departments.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.company ? `${d.company.name} — ${d.name}` : d.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )
               )}
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.5rem' }}>
                 <button type="submit" className="btn btn-primary">
@@ -2216,6 +2352,16 @@ function UserEditModal({
   const [departmentId, setDepartmentId] = useState<number | ''>(
     user.role === 'ADMIN' ? '' : user.departmentId != null ? user.departmentId : '',
   );
+  const [selectedDeptIds, setSelectedDeptIds] = useState<number[]>(
+    isManagerRole(user.role)
+      ? Array.from(
+          new Set([
+            ...(user.departmentId != null ? [user.departmentId] : []),
+            ...(user.departmentIds ?? []),
+          ]),
+        )
+      : [],
+  );
   const [err, setErr] = useAutoClearMessage();
   const [saving, setSaving] = useState(false);
 
@@ -2225,7 +2371,7 @@ function UserEditModal({
   );
 
   useEffect(() => {
-    if (role === 'ADMIN') return;
+    if (role === 'ADMIN' || isManagerRole(role)) return;
     if (companyId === '') return;
     if (departmentId !== '' && !deptsForCompany.some((d) => d.id === departmentId)) {
       setDepartmentId(deptsForCompany[0]?.id ?? '');
@@ -2240,9 +2386,15 @@ function UserEditModal({
       setErr('Le numéro de téléphone est trop court (minimum 6 caractères).');
       return;
     }
-    if (role !== 'ADMIN' && departmentId === '') {
-      setErr('Choisissez un département pour ce rôle (sauf administrateur global).');
-      return;
+    if (role !== 'ADMIN') {
+      if (isManagerRole(role) && selectedDeptIds.length === 0) {
+        setErr('Cochez au moins un département pour ce gérant.');
+        return;
+      }
+      if (!isManagerRole(role) && departmentId === '') {
+        setErr('Choisissez un département pour ce rôle (sauf administrateur global).');
+        return;
+      }
     }
     const pw = password.trim();
     const pw2 = passwordConfirm.trim();
@@ -2269,11 +2421,21 @@ function UserEditModal({
         fullName: fullName.trim() || undefined,
         role,
         ...(role === 'ADMIN'
-          ? { companyId: null, departmentId: null }
-          : {
-              companyId: companyId === '' ? null : companyId,
-              departmentId: departmentId === '' ? null : departmentId,
-            }),
+          ? { companyId: null, departmentId: null, departmentIds: [] }
+          : isManagerRole(role)
+            ? {
+                companyId: companyId === '' ? null : companyId,
+                departmentId:
+                  typeof departmentId === 'number' && selectedDeptIds.includes(departmentId)
+                    ? departmentId
+                    : selectedDeptIds[0] ?? null,
+                departmentIds: selectedDeptIds,
+              }
+            : {
+                companyId: companyId === '' ? null : companyId,
+                departmentId: departmentId === '' ? null : departmentId,
+                departmentIds: departmentId === '' ? [] : [departmentId],
+              }),
       });
       if (sessionUser?.id === user.id) {
         try {
@@ -2342,6 +2504,14 @@ function UserEditModal({
                 if (r === 'ADMIN') {
                   setCompanyId('');
                   setDepartmentId('');
+                  setSelectedDeptIds([]);
+                } else if (isManagerRole(r)) {
+                  if (departmentId !== '') setSelectedDeptIds([departmentId]);
+                } else {
+                  setSelectedDeptIds([]);
+                  if (selectedDeptIds.length && departmentId === '') {
+                    setDepartmentId(selectedDeptIds[0]);
+                  }
                 }
               }}
             >
@@ -2366,6 +2536,7 @@ function UserEditModal({
                     const v = e.target.value;
                     setCompanyId(v ? Number(v) : '');
                     setDepartmentId('');
+                    setSelectedDeptIds([]);
                   }}
                 >
                   <option value="">— Choisir</option>
@@ -2376,22 +2547,32 @@ function UserEditModal({
                   ))}
                 </select>
               </label>
-              <label>
-                Département *
-                <select
-                  value={departmentId === '' ? '' : String(departmentId)}
-                  onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : '')}
-                  disabled={companyId === ''}
-                  required
-                >
-                  <option value="">— Choisir</option>
-                  {deptsForCompany.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {isManagerRole(role) && companyId !== '' ? (
+                <ManagerDeptCheckboxes
+                  departments={deptsForCompany}
+                  selected={selectedDeptIds}
+                  onChange={setSelectedDeptIds}
+                />
+              ) : !isManagerRole(role) ? (
+                <label>
+                  Département *
+                  <select
+                    value={departmentId === '' ? '' : String(departmentId)}
+                    onChange={(e) => {
+                      setDepartmentId(e.target.value ? Number(e.target.value) : '');
+                    }}
+                    disabled={companyId === ''}
+                    required
+                  >
+                    <option value="">— Choisir</option>
+                    {deptsForCompany.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
             </>
           )}
           <div className="modal-actions">

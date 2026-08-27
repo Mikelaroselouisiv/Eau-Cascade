@@ -82,6 +82,18 @@ function buildTicketText(saleData, width = 58) {
   if (saleData.receiptClientName) {
     lines.push(clipLine(`Client: ${saleData.receiptClientName}`, lineWidth));
   }
+  if (saleData.fulfillmentLabel) {
+    lines.push(clipLine(`Remise: ${saleData.fulfillmentLabel}`, lineWidth));
+  }
+  if (saleData.receiptClientPhone) {
+    lines.push(clipLine(`Tel client: ${saleData.receiptClientPhone}`, lineWidth));
+  }
+  if (saleData.receiptClientAddress) {
+    lines.push(clipLine(`Adresse: ${saleData.receiptClientAddress}`, lineWidth));
+  }
+  if (saleData.departmentName) {
+    lines.push(clipLine(`Departement: ${saleData.departmentName}`, lineWidth));
+  }
   lines.push(`Caissier: ${saleData.cashier ?? 'N/A'}`);
   lines.push(`Date: ${date}`);
   lines.push(separator);

@@ -4,9 +4,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DeliveryStatus, MovementType, Prisma } from '@prisma/client';
+import { DeliveryStatus, FulfillmentType, MovementType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  canEditDeliveryExecutor,
+  isManagerRole,
+  managerCanAccessDepartment,
+  resolvedDepartmentIds,
+} from '../../common/user-scope';
+import { canManageDeliveryFulfillment } from '../../common/permissions';
 import { AuditService } from '../audit/audit.service';
+import { RolesService } from '../roles/roles.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 
@@ -15,6 +23,7 @@ type ScopeUser = {
   role?: string;
   companyId?: number | null;
   departmentId?: number | null;
+  departmentIds?: number[] | null;
 };
 
 const deliveryInclude = {
@@ -27,7 +36,10 @@ const deliveryInclude = {
       txnNumber: true,
       total: true,
       clientName: true,
+      clientPhone: true,
+      clientAddress: true,
       cashier: true,
+      fulfillmentType: true,
       status: true,
       createdAt: true,
       user: { select: { id: true, fullName: true, phone: true } },
@@ -62,6 +74,7 @@ export class DeliveriesService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly inventoryService: InventoryService,
+    private readonly rolesService: RolesService,
   ) {}
 
   /** Crée la fiche livraison liée à une vente (même transaction). */
@@ -71,14 +84,19 @@ export class DeliveriesService {
       saleId: number;
       companyId: number;
       departmentId?: number | null;
+      fulfillmentType?: FulfillmentType;
       items: Array<{ saleItemId: number; quantityOrdered: number }>;
     },
   ) {
+    const fulfillmentType = opts.fulfillmentType ?? FulfillmentType.ON_SITE;
     const delivery = await tx.delivery.create({
       data: {
         saleId: opts.saleId,
         companyId: opts.companyId,
-        departmentId: opts.departmentId ?? null,
+        fulfillmentType,
+        // À domicile : le dépt source n’est connu qu’à la validation.
+        departmentId:
+          fulfillmentType === FulfillmentType.HOME ? null : (opts.departmentId ?? null),
         status: DeliveryStatus.PENDING,
         items: {
           create: opts.items.map((it) => ({
@@ -116,15 +134,19 @@ export class DeliveriesService {
 
     const companyId = sale.items[0]?.product?.companyId;
     if (companyId == null) return null;
+    const fulfillmentType = sale.fulfillmentType ?? FulfillmentType.ON_SITE;
     const departmentId =
-      sale.items.find((it) => it.product.departmentId != null)?.product.departmentId ??
-      null;
+      fulfillmentType === FulfillmentType.HOME
+        ? null
+        : (sale.items.find((it) => it.product.departmentId != null)?.product.departmentId ??
+          null);
 
     if (!sale.delivery) {
       return this.createFromSaleTx(this.prisma, {
         saleId,
         companyId,
         departmentId,
+        fulfillmentType,
         items: sale.items.map((it) => ({
           saleItemId: it.id,
           quantityOrdered: Number(it.quantity),
@@ -173,6 +195,7 @@ export class DeliveriesService {
       companyId?: number;
       departmentId?: number;
       status?: string;
+      fulfillmentType?: string;
       q?: string;
       skip?: number;
       take?: number;
@@ -180,6 +203,7 @@ export class DeliveriesService {
   ) {
     const scope = this.resolveScope(user, filters);
     const status = this.parseStatus(filters.status);
+    const fulfillmentType = this.parseFulfillmentType(filters.fulfillmentType);
     const take = Math.min(Math.max(filters.take ?? 100, 1), 100);
     const skip = Math.max(filters.skip ?? 0, 0);
     const q = filters.q?.trim() ?? '';
@@ -188,8 +212,9 @@ export class DeliveriesService {
       deletedAt: null,
       sale: { status: 'COMPLETED', deletedAt: null },
       ...(scope.companyId != null ? { companyId: scope.companyId } : {}),
-      ...(scope.departmentId != null ? { departmentId: scope.departmentId } : {}),
+      ...this.departmentListClause(scope),
       ...(status ? { status } : {}),
+      ...(fulfillmentType ? { fulfillmentType } : {}),
     };
 
     if (q) {
@@ -276,6 +301,19 @@ export class DeliveriesService {
       throw new BadRequestException('Cette vente n’est plus livrable');
     }
     this.assertCanAccess(user, delivery.companyId, delivery.departmentId);
+    await this.assertCanManageFulfillment(user, delivery.fulfillmentType);
+
+    const isHome = delivery.fulfillmentType === FulfillmentType.HOME;
+
+    if (isHome && dto.executorName !== undefined) {
+      const nextName = dto.executorName?.trim() || null;
+      const prevName = delivery.executorName?.trim() || null;
+      if (prevName && nextName !== prevName && !canEditDeliveryExecutor(user.role)) {
+        throw new ForbiddenException(
+          'Seul un administrateur ou un gérant peut modifier le nom de la personne qui a exécuté la livraison.',
+        );
+      }
+    }
 
     const targets = new Map<number, number>();
     for (const item of delivery.items) {
@@ -303,6 +341,39 @@ export class DeliveriesService {
       }
     }
 
+    let willMoveStock = false;
+    for (const item of delivery.items) {
+      const nextQty = targets.get(item.saleItemId);
+      if (nextQty == null) continue;
+      if (Math.abs(nextQty - Number(item.quantityDelivered)) > 0.0001) {
+        willMoveStock = true;
+        break;
+      }
+    }
+
+    let stockDepartmentId = delivery.departmentId;
+    if (isHome && willMoveStock) {
+      if (stockDepartmentId == null) {
+        if (dto.stockDepartmentId == null) {
+          throw new BadRequestException(
+            'Choisissez le département depuis lequel la livraison à domicile est faite.',
+          );
+        }
+        stockDepartmentId = await this.assertHomeStockDepartment(
+          dto.stockDepartmentId,
+          delivery.companyId,
+          user,
+        );
+      } else if (
+        dto.stockDepartmentId != null &&
+        dto.stockDepartmentId !== stockDepartmentId
+      ) {
+        throw new BadRequestException(
+          'Le département source de cette livraison à domicile est déjà fixé.',
+        );
+      }
+    }
+
     return this.prisma.$transaction(
       async (tx) => {
         if (dto.note !== undefined) {
@@ -312,13 +383,19 @@ export class DeliveriesService {
           });
         }
 
+        if (isHome && stockDepartmentId != null && delivery.departmentId == null) {
+          await tx.delivery.update({
+            where: { id },
+            data: { departmentId: stockDepartmentId },
+          });
+        }
+
         for (const item of delivery.items) {
           const nextQty = targets.get(item.saleItemId);
           if (nextQty == null) continue;
           const prevQty = Number(item.quantityDelivered);
           const deltaSaleQty = nextQty - prevQty;
 
-          // Toujours écrire la qté livrée avant / avec le stock (même transaction).
           if (Math.abs(nextQty - prevQty) > 0.0001) {
             await tx.deliveryItem.update({
               where: { id: item.id },
@@ -332,12 +409,18 @@ export class DeliveriesService {
               saleItemId: item.saleItemId,
               deltaSaleQty,
               userId: user.id,
+              fulfillmentType: delivery.fulfillmentType,
+              stockDepartmentId,
             });
           }
         }
 
         const items = await tx.deliveryItem.findMany({ where: { deliveryId: id } });
         const status = this.computeStatus(items);
+        const nextExecutor =
+          isHome && dto.executorName !== undefined
+            ? dto.executorName?.trim() || null
+            : undefined;
         const updated = await tx.delivery.update({
           where: { id },
           data: {
@@ -345,11 +428,11 @@ export class DeliveriesService {
             deliveredAt: status === DeliveryStatus.DELIVERED ? new Date() : null,
             deliveredById:
               status === DeliveryStatus.DELIVERED ? (user.id ?? null) : null,
+            ...(nextExecutor !== undefined ? { executorName: nextExecutor } : {}),
           },
           include: deliveryInclude,
         });
 
-        // Audit dans la même transaction (évite un journal « livré » si le commit échoue).
         await tx.auditLog.create({
           data: {
             userId: user.id,
@@ -376,12 +459,24 @@ export class DeliveriesService {
       saleItemId: number;
       deltaSaleQty: number;
       userId?: number;
+      fulfillmentType: FulfillmentType;
+      stockDepartmentId?: number | null;
     },
   ) {
     const saleItem = await tx.saleItem.findUnique({
       where: { id: opts.saleItemId },
       include: {
-        product: { select: { id: true, name: true, trackStock: true, isService: true } },
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            companyId: true,
+            departmentId: true,
+            trackStock: true,
+            isService: true,
+          },
+        },
       },
     });
     if (!saleItem) return;
@@ -393,6 +488,19 @@ export class DeliveriesService {
     if (Math.abs(baseDelta) <= 0.0001) return;
 
     const product = saleItem.product;
+    const remapDept =
+      opts.fulfillmentType === FulfillmentType.HOME ? opts.stockDepartmentId ?? null : null;
+    if (opts.fulfillmentType === FulfillmentType.HOME && remapDept == null) {
+      throw new BadRequestException(
+        'Choisissez le département depuis lequel la livraison à domicile est faite.',
+      );
+    }
+
+    const stockProductId =
+      remapDept != null
+        ? await this.resolveProductInDepartment(tx, product, remapDept)
+        : product.id;
+
     const reason =
       baseDelta > 0
         ? `Livraison vente #${opts.saleId}`
@@ -401,29 +509,47 @@ export class DeliveriesService {
     if (product.isService) {
       const recipe = await tx.productRecipe.findUnique({
         where: { parentProductId: product.id },
-        include: { components: true },
+        include: {
+          components: {
+            include: {
+              componentProduct: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  companyId: true,
+                  departmentId: true,
+                },
+              },
+            },
+          },
+        },
       });
       if (!recipe?.components.length) return;
       for (const c of recipe.components) {
         const need = Number(c.quantityPerParentBaseUnit) * baseDelta;
         if (Math.abs(need) <= 0.0001) continue;
+        const componentId =
+          remapDept != null
+            ? await this.resolveProductInDepartment(tx, c.componentProduct, remapDept)
+            : c.componentProductId;
         if (need > 0) {
-          await this.inventoryService.ensureStockAvailabilityTx(tx, c.componentProductId, need);
+          await this.inventoryService.ensureStockAvailabilityTx(tx, componentId, need);
           await this.inventoryService.decrementStockTx(
             tx,
-            c.componentProductId,
+            componentId,
             need,
             opts.userId,
             `${reason} — ${product.name}`,
           );
         } else {
           await tx.product.update({
-            where: { id: c.componentProductId },
+            where: { id: componentId },
             data: { stock: { increment: Math.abs(need) } },
           });
           await tx.stockMovement.create({
             data: {
-              productId: c.componentProductId,
+              productId: componentId,
               quantity: Math.abs(need),
               type: MovementType.IN,
               reason: `${reason} — ${product.name}`,
@@ -438,22 +564,22 @@ export class DeliveriesService {
     if (!product.trackStock) return;
 
     if (baseDelta > 0) {
-      await this.inventoryService.ensureStockAvailabilityTx(tx, product.id, baseDelta);
+      await this.inventoryService.ensureStockAvailabilityTx(tx, stockProductId, baseDelta);
       await this.inventoryService.decrementStockTx(
         tx,
-        product.id,
+        stockProductId,
         baseDelta,
         opts.userId,
         reason,
       );
     } else {
       await tx.product.update({
-        where: { id: product.id },
+        where: { id: stockProductId },
         data: { stock: { increment: Math.abs(baseDelta) } },
       });
       await tx.stockMovement.create({
         data: {
-          productId: product.id,
+          productId: stockProductId,
           quantity: Math.abs(baseDelta),
           type: MovementType.IN,
           reason,
@@ -461,6 +587,88 @@ export class DeliveriesService {
         },
       });
     }
+  }
+
+  private departmentListClause(scope: {
+    departmentId?: number;
+    departmentIds?: number[];
+  }): Prisma.DeliveryWhereInput {
+    const homePending: Prisma.DeliveryWhereInput = {
+      fulfillmentType: FulfillmentType.HOME,
+      departmentId: null,
+    };
+    if (scope.departmentId != null) {
+      return { OR: [{ departmentId: scope.departmentId }, homePending] };
+    }
+    if (scope.departmentIds?.length) {
+      return {
+        OR: [{ departmentId: { in: scope.departmentIds } }, homePending],
+      };
+    }
+    return {};
+  }
+
+  private async assertHomeStockDepartment(
+    departmentId: number,
+    companyId: number,
+    user: ScopeUser,
+  ): Promise<number> {
+    const dept = await this.prisma.department.findFirst({
+      where: { id: departmentId, companyId, deletedAt: null },
+      select: { id: true, name: true, offersHomeDelivery: true },
+    });
+    if (!dept) {
+      throw new BadRequestException('Département introuvable');
+    }
+    if (!dept.offersHomeDelivery) {
+      throw new BadRequestException(
+        `Le département « ${dept.name} » n’est pas configuré pour les livraisons à domicile.`,
+      );
+    }
+    if (isManagerRole(user.role) && !managerCanAccessDepartment(user, dept.id)) {
+      throw new ForbiddenException('Département hors périmètre');
+    }
+    return dept.id;
+  }
+
+  private async resolveProductInDepartment(
+    tx: Prisma.TransactionClient,
+    source: {
+      id: number;
+      name: string;
+      sku: string | null;
+      companyId: number;
+      departmentId: number | null;
+    },
+    targetDepartmentId: number,
+  ): Promise<number> {
+    if (source.departmentId === targetDepartmentId) return source.id;
+    const sku = source.sku?.trim();
+    if (sku) {
+      const bySku = await tx.product.findFirst({
+        where: {
+          companyId: source.companyId,
+          departmentId: targetDepartmentId,
+          sku,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (bySku) return bySku.id;
+    }
+    const byName = await tx.product.findFirst({
+      where: {
+        companyId: source.companyId,
+        departmentId: targetDepartmentId,
+        name: source.name,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (byName) return byName.id;
+    throw new BadRequestException(
+      `Le produit « ${source.name} » n’existe pas dans le département choisi pour la livraison. Créez-le dans ce département avant de livrer.`,
+    );
   }
 
   private computeStatus(
@@ -483,7 +691,7 @@ export class DeliveriesService {
   private resolveScope(
     user: ScopeUser,
     filters: { companyId?: number; departmentId?: number },
-  ): { companyId?: number; departmentId?: number } {
+  ): { companyId?: number; departmentId?: number; departmentIds?: number[] } {
     const role = user.role ?? '';
     // Caissier / livreur : toutes les fiches de leur entreprise (tous départements).
     // Le périmètre département s’applique à la caisse POS, pas aux livraisons.
@@ -499,14 +707,21 @@ export class DeliveriesService {
       };
     }
 
-    if (role === 'MANAGER' && user.companyId != null) {
+    if (isManagerRole(role) && user.companyId != null) {
       const companyId = filters.companyId ?? user.companyId;
       if (companyId !== user.companyId) {
         throw new ForbiddenException('Entreprise hors périmètre');
       }
+      const allowed = resolvedDepartmentIds(user);
+      if (filters.departmentId != null) {
+        if (allowed.length && !allowed.includes(filters.departmentId)) {
+          throw new ForbiddenException('Département hors périmètre');
+        }
+        return { companyId, departmentId: filters.departmentId };
+      }
       return {
         companyId,
-        departmentId: filters.departmentId,
+        departmentIds: allowed.length ? allowed : undefined,
       };
     }
 
@@ -519,7 +734,7 @@ export class DeliveriesService {
   private assertCanAccess(
     user: ScopeUser,
     companyId: number,
-    _departmentId: number | null,
+    departmentId: number | null,
   ) {
     const role = user.role ?? '';
     if (role === 'ADMIN') return;
@@ -531,8 +746,13 @@ export class DeliveriesService {
       return;
     }
 
-    if (role === 'MANAGER' && user.companyId != null && user.companyId !== companyId) {
-      throw new ForbiddenException('Accès refusé');
+    if (isManagerRole(role)) {
+      if (user.companyId != null && user.companyId !== companyId) {
+        throw new ForbiddenException('Accès refusé');
+      }
+      if (!managerCanAccessDepartment(user, departmentId)) {
+        throw new ForbiddenException('Accès refusé');
+      }
     }
   }
 
@@ -543,5 +763,27 @@ export class DeliveriesService {
       return v as DeliveryStatus;
     }
     throw new BadRequestException('Statut de livraison invalide');
+  }
+
+  private parseFulfillmentType(raw?: string): FulfillmentType | undefined {
+    if (!raw?.trim()) return undefined;
+    const v = raw.trim().toUpperCase();
+    if (v === 'ON_SITE' || v === 'HOME') {
+      return v as FulfillmentType;
+    }
+    throw new BadRequestException('Type de remise invalide');
+  }
+
+  private async assertCanManageFulfillment(user: ScopeUser, fulfillmentType: FulfillmentType) {
+    const role = user.role ?? '';
+    const perms = role ? await this.rolesService.getPermissionsForUserRole(role) : [];
+    if (role === 'ADMIN' && (!perms.length || perms.includes('*'))) return;
+    if (!canManageDeliveryFulfillment(perms, fulfillmentType)) {
+      throw new ForbiddenException(
+        fulfillmentType === FulfillmentType.HOME
+          ? 'Ce rôle ne peut pas gérer les livraisons à domicile.'
+          : 'Ce rôle ne peut pas gérer les livraisons sur place.',
+      );
+    }
   }
 }

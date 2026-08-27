@@ -54,6 +54,10 @@ export async function buildSaleReceiptData(params: {
   paymentMode: string;
   saleRef?: number;
   clientName?: string | null;
+  clientPhone?: string | null;
+  clientAddress?: string | null;
+  fulfillmentLabel?: string | null;
+  departmentName?: string | null;
   cashier?: string | null;
   departmentId?: number;
   isTest?: boolean;
@@ -72,6 +76,10 @@ export async function buildSaleReceiptData(params: {
     showLogoOnReceipt: printer?.showLogoOnReceipt,
     receiptLogoUrl: printer?.receiptLogoUrl,
     receiptClientName: params.clientName ?? undefined,
+    receiptClientPhone: params.clientPhone ?? undefined,
+    receiptClientAddress: params.clientAddress ?? undefined,
+    fulfillmentLabel: params.fulfillmentLabel ?? undefined,
+    departmentName: params.departmentName ?? undefined,
     cashier: params.cashier ?? 'N/A',
     isTest: params.isTest,
     previewSampleBody: printer?.previewSampleBody,
@@ -115,6 +123,11 @@ export async function buildSaleReceiptDataFromSale(
     paymentMode: paymentModeFromSale(sale),
     saleRef: sale.txnNumber ?? sale.id,
     clientName: sale.clientName,
+    clientPhone: sale.fulfillmentType === 'HOME' ? sale.clientPhone : undefined,
+    clientAddress: sale.fulfillmentType === 'HOME' ? sale.clientAddress : undefined,
+    fulfillmentLabel: sale.fulfillmentType === 'HOME' ? 'À domicile' : 'Sur place',
+    departmentName:
+      sale.fulfillmentType === 'HOME' ? undefined : sale.items?.[0]?.product?.department?.name,
     cashier: cashierLabelFromSale(sale),
     departmentId: departmentId ?? sale.items?.[0]?.product?.departmentId ?? undefined,
   });

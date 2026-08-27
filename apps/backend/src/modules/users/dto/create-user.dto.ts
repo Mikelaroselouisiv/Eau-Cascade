@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsEmail,
   IsInt,
@@ -48,4 +49,11 @@ export class CreateUserDto {
   @Type(() => Number)
   @IsInt()
   departmentId?: number;
+
+  /** Gérant : départements contrôlés (inclut le département d’affectation). */
+  @IsOptional()
+  @IsArray()
+  @Type(() => Number)
+  @IsInt({ each: true })
+  departmentIds?: number[];
 }

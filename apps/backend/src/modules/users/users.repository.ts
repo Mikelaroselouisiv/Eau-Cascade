@@ -15,6 +15,11 @@ const userPublicSelect = {
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
+  managedDepartments: {
+    where: { deletedAt: null },
+    select: { departmentId: true },
+    orderBy: { id: 'asc' },
+  },
 } satisfies Prisma.UserSelect;
 
 export type SafeUser = Prisma.UserGetPayload<{ select: typeof userPublicSelect }>;

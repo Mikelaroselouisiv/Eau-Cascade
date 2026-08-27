@@ -350,6 +350,7 @@ export async function createDepartment(payload: {
   name: string;
   description?: string;
   companyId?: number;
+  offersHomeDelivery?: boolean;
 }): Promise<Department> {
   const { data } = await api.post<Department>('/departments', payload);
   return data;
@@ -357,7 +358,7 @@ export async function createDepartment(payload: {
 
 export async function updateDepartment(
   id: number,
-  payload: { name?: string; description?: string },
+  payload: { name?: string; description?: string; offersHomeDelivery?: boolean },
 ): Promise<Department> {
   const { data } = await api.patch<Department>(`/departments/${id}`, payload);
   return data;
@@ -413,6 +414,7 @@ export async function createUser(payload: {
   fullName?: string;
   email?: string;
   departmentId?: number;
+  departmentIds?: number[];
   companyId?: number;
   isActive?: boolean;
 }) {
@@ -429,6 +431,7 @@ export async function updateUser(
     role: string;
     fullName: string;
     departmentId: number | null;
+    departmentIds: number[];
     companyId: number | null;
     isActive: boolean;
   }>,
@@ -1075,6 +1078,7 @@ export async function listDeliveries(params?: {
   companyId?: number;
   departmentId?: number;
   status?: DeliveryStatus | string;
+  fulfillmentType?: 'ON_SITE' | 'HOME' | string;
   q?: string;
   skip?: number;
   take?: number;
@@ -1089,6 +1093,7 @@ export async function listDeliveries(params?: {
       companyId: params?.companyId,
       departmentId: params?.departmentId,
       status: params?.status,
+      fulfillmentType: params?.fulfillmentType,
       q: params?.q || undefined,
       skip: params?.skip,
       take: params?.take,
@@ -1108,6 +1113,8 @@ export async function updateDelivery(
     items?: Array<{ saleItemId: number; quantityDelivered: number }>;
     markDelivered?: boolean;
     note?: string | null;
+    executorName?: string | null;
+    stockDepartmentId?: number;
   },
 ): Promise<Delivery> {
   const { data } = await api.patch<Delivery>(`/deliveries/${id}`, payload);

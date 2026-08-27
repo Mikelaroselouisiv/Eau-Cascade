@@ -21,11 +21,18 @@ Voir `apps/backend/src/common/time/timezone.ts` et `apps/desktop/src/renderer/ut
 
 ## Agent post-modification (release)
 
-Quand l’utilisateur a **fini de modifier le code**, l’agent doit enchaîner :
+Quand l’utilisateur a **fini de modifier le code**, une seule commande :
 
-1. Commit + push `main` (GitHub `Eau-Cascade`)
-2. Backend CI → Artifact Registry → VM GCP (`Backend - build and push to GCP`)
-3. Desktop CI → GCS Remote **et** Server (`Desktop - release to GCS`) pour notifier / publier les MAJ
+```powershell
+powershell -ExecutionPolicy Bypass -File infra/scripts/ship-all.ps1 -Bump patch -Commit
+```
 
-Détail opérationnel : `.cursor/rules/post-mod-release-agent.mdc`  
+Cela enchaîne : bump desktop, commit + push `main`, backend Artifact Registry → VM GCP, attente CI, puis installateurs Remote + Server (stack embarquée) vers GCS pour les MAJ in-app.
+
+Skill : `.cursor/skills/ship-all/SKILL.md`  
+Détail : `.cursor/rules/post-mod-release-agent.mdc`  
 Docs : `docs/DEPLOYMENT.md`, `docs/GCP_EAU_CASCADE.md`
+
+## UI — pas de tutoriel
+
+Ne pas ajouter de phrases d’aide / consigne sous les champs (« Cochez tous les… », « Choisissez X pour afficher Y »). Libellés + contrôles seulement. Détail : `.cursor/rules/no-tutorial-ui-copy.mdc`

@@ -1,0 +1,40 @@
+---
+description: Pas de phrases tutoriel dans l’UI — labels et champs suffisent
+alwaysApply: true
+---
+
+# Pas de copy tutoriel dans l’interface
+
+Quand on implémente un comportement (cases à cocher, filtres, formulaires, algorithme), **ne pas l’expliquer à l’écran**. Les libellés de champs suffisent. L’utilisateur sait s’en servir.
+
+## Interdit
+
+Phrases d’aide, de consigne ou de pédagogie sous / à côté des champs, du type :
+
+- « Cochez tous les départements que ce gérant pourra contrôler. »
+- « Choisissez une entreprise pour afficher ses départements. »
+- « Le gérant pourra travailler dans chaque département coché. »
+- Toute phrase qui décrit *comment* utiliser le contrôle qu’on vient d’ajouter
+
+## Autorisé
+
+- Libellés courts : `Départements gérés *`, `Entreprise`, `Sur place`
+- Messages d’erreur **après** une action (validation, API)
+- États vides factuels : `Aucun département`, `Chargement…`
+
+## Exemple
+
+```tsx
+// ❌ BAD
+<fieldset>
+  <legend>Départements gérés</legend>
+  <p className="info-text">Cochez tous les départements que ce gérant pourra contrôler.</p>
+  {/* checkboxes */}
+</fieldset>
+
+// ✅ GOOD
+<fieldset>
+  <legend>Départements gérés *</legend>
+  {/* checkboxes only */}
+</fieldset>
+```

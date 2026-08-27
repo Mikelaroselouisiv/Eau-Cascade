@@ -64,6 +64,17 @@ export function buildReceiptPayloadFromSale(
     cashier: cashierLabelFromSale(sale),
     dateTime: formatDateTime(sale.createdAt),
     receiptClientName: sale.clientName && sale.clientName.trim() ? sale.clientName.trim() : null,
+    receiptClientPhone:
+      sale.fulfillmentType === 'HOME' && sale.clientPhone?.trim() ? sale.clientPhone.trim() : null,
+    receiptClientAddress:
+      sale.fulfillmentType === 'HOME' && sale.clientAddress?.trim()
+        ? sale.clientAddress.trim()
+        : null,
+    fulfillmentLabel: sale.fulfillmentType === 'HOME' ? 'À domicile' : 'Sur place',
+    departmentName:
+      sale.fulfillmentType === 'HOME'
+        ? null
+        : sale.items?.[0]?.product?.department?.name?.trim() || null,
     items,
     total,
     amountReceived: amountReceived > 0.009 ? amountReceived : undefined,

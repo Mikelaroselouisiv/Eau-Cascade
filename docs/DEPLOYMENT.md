@@ -31,27 +31,21 @@ Aucun PowerShell, aucun `bootstrap-server.ps1`, aucun fichier à copier.
 1. Installer `POS-Eau-Cascade-Remote-Setup.exe`
 2. L’app se connecte au serveur GCP (ou au local si détecté)
 
-## Côté IT / développement (une seule fois)
+## Côté IT / développement
 
-Ces étapes se font **chez vous**, pas chez le client :
+Chez vous, pas chez le client — **une seule commande** :
 
 ```powershell
-# 1. Aligner sync GCP (depuis le PC de dev)
-powershell -ExecutionPolicy Bypass -File infra/scripts/gcp-provision-sync.ps1
-
-# 2. Builder les deux installateurs (Docker requis pour Server)
-cd apps/desktop
-npm run icons
-npm run dist:win:server
-npm run dist:win:remote
-
-# 3. Publier les deux feeds GCS (mises à jour en ligne Remote + Server)
-powershell -ExecutionPolicy Bypass -File ../../infra/scripts/assert-eau-cascade-gcp.ps1
-powershell -ExecutionPolicy Bypass -File ../../infra/scripts/upload-desktop-installer.ps1 -Edition server
-powershell -ExecutionPolicy Bypass -File ../../infra/scripts/upload-desktop-installer.ps1 -Edition remote
+powershell -ExecutionPolicy Bypass -File infra/scripts/ship-all.ps1 -Bump patch -Commit
 ```
 
+Cela bump la version desktop, commit/push GitHub, déploie le backend (Artifact Registry + VM), aligne la clé sync, attend la nouvelle image, builde Remote **et** Server (Postgres + API + sync-agent embarqués), puis publie les feeds GCS.
+
+Les postes déjà installés voient la MAJ dans l’app (bouton **Mise à jour**, plus vérif au démarrage / toutes les 4 h). Rien à configurer en magasin.
+
 Premier déploiement magasin : installer l’exe Server une fois (USB ou téléchargement GCS). Ensuite les mises à jour passent par le bouton dans l’app.
+
+Détail agent : `.cursor/skills/ship-all/SKILL.md`.
 
 ## Vérification (IT uniquement)
 
@@ -65,6 +59,7 @@ Sur la machine mère après install : ouvrir `http://localhost:3000/auth/setup-s
 
 | Script | Usage |
 |--------|--------|
+| `infra/scripts/ship-all.ps1` | Livraison complète (GitHub + GCP + installateurs) |
 | `infra/scripts/bootstrap-server.ps1` | PC de dev, pas la machine vierge en magasin |
 | `infra/scripts/dev-server-stack.ps1` | Stack Docker sans installateur |
-| `infra/scripts/gcp-provision-sync.ps1` | IT : sync clé + deploy GCP |
+| `infra/scripts/gcp-provision-sync.ps1` | IT : sync clé + deploy GCP (déjà appelé par ship-all) |

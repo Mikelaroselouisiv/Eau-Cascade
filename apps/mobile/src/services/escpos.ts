@@ -16,6 +16,10 @@ export interface SaleReceiptData {
   showLogoOnReceipt?: boolean;
   receiptLogoUrl?: string | null;
   receiptClientName?: string | null;
+  receiptClientPhone?: string | null;
+  receiptClientAddress?: string | null;
+  fulfillmentLabel?: string | null;
+  departmentName?: string | null;
   cashier?: string;
   isTest?: boolean;
   previewSampleBody?: string | null;
@@ -86,6 +90,18 @@ export function buildTicketText(saleData: SaleReceiptData, _width: 58 | 80 = 80)
   lines.push(separator);
   if (saleData.receiptClientName) {
     lines.push(clipLine(`Client: ${saleData.receiptClientName}`, lineWidth));
+  }
+  if (saleData.fulfillmentLabel) {
+    lines.push(clipLine(`Remise: ${saleData.fulfillmentLabel}`, lineWidth));
+  }
+  if (saleData.receiptClientPhone) {
+    lines.push(clipLine(`Tel client: ${saleData.receiptClientPhone}`, lineWidth));
+  }
+  if (saleData.receiptClientAddress) {
+    lines.push(clipLine(`Adresse: ${saleData.receiptClientAddress}`, lineWidth));
+  }
+  if (saleData.departmentName) {
+    lines.push(clipLine(`Departement: ${saleData.departmentName}`, lineWidth));
   }
   if (saleData.saleRef != null) {
     lines.push(clipLine(`Ticket #${saleData.saleRef}`, lineWidth));

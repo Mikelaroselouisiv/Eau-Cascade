@@ -53,7 +53,14 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ id: string; label: string; codes
   {
     id: 'ops',
     label: 'Livraisons & exploitation',
-    codes: ['deliveries.view', 'deliveries.manage', 'stores.manage'],
+    codes: [
+      'deliveries.view',
+      'deliveries.manage',
+      'deliveries.manage_onsite',
+      'deliveries.manage_home',
+      'deliveries.print',
+      'stores.manage',
+    ],
   },
   {
     id: 'admin',

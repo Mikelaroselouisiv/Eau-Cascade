@@ -50,10 +50,12 @@ export function buildSaleDetailPrintHtml(sale: Sale, companyName?: string): stri
       .join('') ?? '';
 
   const client = (sale.clientName && sale.clientName.trim()) || '—';
+  const isHome = sale.fulfillmentType === 'HOME';
   const caissier =
     sale.user?.fullName?.trim() ||
     sale.cashier ||
     (sale.user?.phone ? `Tel ${sale.user.phone}` : '—');
+  const deptName = !isHome ? sale.items?.[0]?.product?.department?.name?.trim() : '';
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -77,6 +79,15 @@ export function buildSaleDetailPrintHtml(sale: Sale, companyName?: string): stri
     ${companyName ? `<div><strong>Entreprise :</strong> ${escapeHtml(companyName)}</div>` : ''}
     <div><strong>Date :</strong> ${escapeHtml(formatDateTime(sale.createdAt))}</div>
     <div><strong>Client :</strong> ${escapeHtml(client)}</div>
+    <div><strong>Remise :</strong> ${escapeHtml(isHome ? 'À domicile' : 'Sur place')}</div>
+    ${
+      isHome
+        ? `<div><strong>Téléphone :</strong> ${escapeHtml(sale.clientPhone?.trim() || '—')}</div>
+    <div><strong>Adresse :</strong> ${escapeHtml(sale.clientAddress?.trim() || '—')}</div>`
+        : deptName
+          ? `<div><strong>Département :</strong> ${escapeHtml(deptName)}</div>`
+          : ''
+    }
     <div><strong>Caissier :</strong> ${escapeHtml(caissier)}</div>
     <div><strong>Statut :</strong> ${escapeHtml(sale.status)}</div>
   </div>

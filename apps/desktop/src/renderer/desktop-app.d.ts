@@ -31,6 +31,10 @@ declare global {
         receiptHeaderText?: string | null;
         receiptFooterText?: string | null;
         receiptClientName?: string | null;
+        receiptClientPhone?: string | null;
+        receiptClientAddress?: string | null;
+        fulfillmentLabel?: string | null;
+        departmentName?: string | null;
         receiptLogoUrl?: string | null;
         showLogoOnReceipt?: boolean;
         autoCut?: boolean;

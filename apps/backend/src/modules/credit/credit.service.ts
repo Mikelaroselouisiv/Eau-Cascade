@@ -433,6 +433,7 @@ export class CreditService {
         saleId: sale.id,
         companyId: customer.companyId,
         departmentId: firstDepartmentId,
+        fulfillmentType: 'ON_SITE',
         items: sale.items.map((it) => ({
           saleItemId: it.id,
           quantityOrdered: Number(it.quantity),

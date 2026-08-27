@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -37,4 +38,17 @@ export class UpdateDeliveryDto {
   @IsString()
   @MaxLength(500)
   note?: string | null;
+
+  /** Nom de la personne qui a exécuté la livraison (saisie manuelle, à domicile uniquement). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  executorName?: string | null;
+
+  /** Département source du stock (obligatoire pour valider une livraison à domicile). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  stockDepartmentId?: number;
 }
