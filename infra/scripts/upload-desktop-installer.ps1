@@ -70,17 +70,15 @@ if (Test-Path -LiteralPath $blockmapPath) {
 Write-Host "Upload $Edition ($editionToken) -> $dest"
 foreach ($file in $files) {
   Write-Host "  -> $($file.Name)"
-  & gsutil cp $file.FullName $dest
+  $gsArgs = @('cp')
+  if ($file.Name -eq 'latest.yml') {
+    $gsArgs = @('-h', 'Cache-Control:no-cache,max-age=0', 'cp')
+    Write-Host '    Cache-Control: no-cache'
+  }
+  & gsutil @gsArgs $file.FullName $dest
   if ($LASTEXITCODE -ne 0) {
     throw "gsutil cp a echoue pour $($file.Name)"
   }
-}
-
-$latestRemote = "${dest}latest.yml"
-Write-Host 'Cache-Control: no-cache sur latest.yml'
-& gsutil setmeta -h 'Cache-Control:no-cache,max-age=0' $latestRemote
-if ($LASTEXITCODE -ne 0) {
-  Write-Warning 'Impossible de fixer Cache-Control sur latest.yml (objet absent ?).'
 }
 
 Write-Host "Termine. URL publique: https://storage.googleapis.com/$Bucket/installers/$Edition/"

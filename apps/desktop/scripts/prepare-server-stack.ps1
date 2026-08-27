@@ -61,6 +61,19 @@ if (-not $dockerOk) {
   exit 0
 }
 
+function Repair-ProcessPath {
+  if ($env:OS -notmatch 'Windows') { return }
+  $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+  $user = [Environment]::GetEnvironmentVariable('Path', 'User')
+  if ($machine -or $user) { $env:Path = "$machine;$user;$env:Path" }
+}
+Repair-ProcessPath
+$gcloudCmd = Get-Command gcloud -ErrorAction SilentlyContinue
+if ($gcloudCmd) {
+  Write-Host 'gcloud auth configure-docker Artifact Registry...'
+  & gcloud auth configure-docker northamerica-northeast1-docker.pkg.dev --quiet
+}
+
 Write-Host "Pull backend $BackendImage ..."
 docker pull $BackendImage
 if ($LASTEXITCODE -ne 0) { throw 'docker pull backend a echoue' }
