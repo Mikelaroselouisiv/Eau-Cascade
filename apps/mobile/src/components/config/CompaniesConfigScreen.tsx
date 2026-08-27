@@ -346,29 +346,27 @@ export function CompaniesConfigScreen() {
                   </View>
                 ))}
                 {canEdit ? (
-                  <View style={styles.deptRow}>
-                    <TextInput
-                      style={[styles.input, styles.flex]}
-                      placeholder="Nouveau département"
-                      placeholderTextColor={BrandColors.textMuted}
-                      value={newDept}
-                      onChangeText={setNewDept}
-                    />
-                    <Pressable onPress={() => void addDepartment()} disabled={busy}>
-                      <Text style={styles.link}>Ajouter</Text>
-                    </Pressable>
-                  </View>
-                  {canEdit ? (
+                  <>
+                    <View style={styles.deptRow}>
+                      <TextInput
+                        style={[styles.input, styles.flex]}
+                        placeholder="Nouveau département"
+                        placeholderTextColor={BrandColors.textMuted}
+                        value={newDept}
+                        onChangeText={setNewDept}
+                      />
+                      <Pressable onPress={() => void addDepartment()} disabled={busy}>
+                        <Text style={styles.link}>Ajouter</Text>
+                      </Pressable>
+                    </View>
                     <Pressable
                       onPress={() => setNewDeptHome((v) => !v)}
                       style={{ paddingVertical: 6 }}>
                       <Text style={styles.meta}>
-                        {newDeptHome
-                          ? '☑ Fait des livraisons à domicile'
-                          : '☐ Fait des livraisons à domicile'}
+                        {newDeptHome ? '☑ Livraisons à domicile' : '☐ Livraisons à domicile'}
                       </Text>
                     </Pressable>
-                  ) : null}
+                  </>
                 ) : null}
               </>
             ) : null}
