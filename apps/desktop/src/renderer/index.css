@@ -3449,9 +3449,11 @@ button.password-field__toggle:focus-visible {
 }
 
 .delivery-line-qty {
+  font-size: 0.85rem;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
   color: #334155;
+  white-space: nowrap;
 }
 
 .delivery-drops {
@@ -3475,12 +3477,6 @@ button.password-field__toggle:focus-visible {
   display: grid;
   gap: 0.5rem;
   margin-bottom: 0.85rem;
-}
-  font-size: 0.85rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: #334155;
-  white-space: nowrap;
 }
 
 .delivery-card-executor {
