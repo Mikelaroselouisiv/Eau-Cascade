@@ -119,7 +119,7 @@ function ProductCardColorPicker({
 }
 
 export function StockPage() {
-  const { can, canPerm } = useAuth();
+  const { canPerm } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [packaging, setPackaging] = useState<PackagingUnit[]>([]);
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
