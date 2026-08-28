@@ -113,8 +113,9 @@ export function DeliveryPage() {
     void getCompanies()
       .then((list) => {
         setCompanies(list);
-        if (!isAdminRole(user?.role) && typeof user.companyId === 'number') {
-          setCompanyId(user.companyId);
+        const scopedCompanyId = user?.companyId;
+        if (!isAdminRole(user?.role) && typeof scopedCompanyId === 'number') {
+          setCompanyId(scopedCompanyId);
         } else if (list.length === 1) {
           setCompanyId(list[0].id);
         }

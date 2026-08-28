@@ -154,7 +154,6 @@ export function StockPage() {
   const [catalogAsOfLoading, setCatalogAsOfLoading] = useState(false);
   const [addProductOpen, setAddProductOpen] = useState(false);
 
-  const isAdmin = can(['ADMIN']);
   const canStockIn = canPerm('stock.manage') || canPerm('stock.adjust');
   const canStockOut = canPerm('stock.adjust');
   const canHarmonise = canStockIn || canStockOut;
