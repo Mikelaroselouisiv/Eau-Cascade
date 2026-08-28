@@ -81,6 +81,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    const onFocus = () => {
+      if (!getToken()) return;
+      void refreshUser().catch(() => undefined);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refreshUser]);
+
   const login = useCallback(async (phone: string, password: string) => {
     const res = await apiLogin(phone, password);
     try {

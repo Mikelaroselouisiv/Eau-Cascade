@@ -338,24 +338,7 @@ export class RegisterSessionsService {
     if (!opener) {
       throw new NotFoundException('Utilisateur introuvable');
     }
-    if (opener.role === 'CASHIER' || opener.role === 'LIVREUR') {
-      if (opener.companyId == null || opener.companyId !== dept.companyId) {
-        throw new ForbiddenException(
-          'Vous n’êtes pas affecté à cette entreprise pour ouvrir la caisse',
-        );
-      }
-      if (opener.departmentId != null && opener.departmentId !== dto.departmentId) {
-        throw new ForbiddenException(
-          'Vous n’êtes pas affecté à ce département pour ouvrir la caisse',
-        );
-      }
-      if (register.store.companyId !== opener.companyId) {
-        throw new ForbiddenException(
-          'Ce comptoir n’appartient pas à votre entreprise',
-        );
-      }
-    }
-    if (opener.role === 'MANAGER') {
+    if (opener.role !== 'ADMIN') {
       if (opener.companyId == null || opener.companyId !== dept.companyId) {
         throw new ForbiddenException(
           'Vous n’êtes pas affecté à cette entreprise pour ouvrir la caisse',
@@ -370,6 +353,11 @@ export class RegisterSessionsService {
       if (allowed.length && !allowed.includes(dto.departmentId)) {
         throw new ForbiddenException(
           'Vous n’êtes pas affecté à ce département pour ouvrir la caisse',
+        );
+      }
+      if (register.store.companyId !== opener.companyId) {
+        throw new ForbiddenException(
+          'Ce comptoir n’appartient pas à votre entreprise',
         );
       }
     }

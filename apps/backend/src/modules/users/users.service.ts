@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { Prisma } from '@prisma/client';
-import { isManagerRole } from '../../common/user-scope';
+import { isAdminRole } from '../../common/user-scope';
 import { normalizePhone } from '../../common/utils/phone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -42,17 +42,22 @@ export class UsersService {
 
     const role = createUserDto.role ?? 'CASHIER';
     await this.rolesService.assertRoleExists(role);
-    if (role !== 'ADMIN' && createUserDto.departmentId == null) {
+    const assignedIds = this.uniqueDeptIds([
+      ...(createUserDto.departmentIds ?? []),
+      ...(createUserDto.departmentId != null ? [createUserDto.departmentId] : []),
+    ]);
+    if (!isAdminRole(role) && assignedIds.length === 0) {
       throw new BadRequestException(
-        'Un département est requis pour ce rôle (sauf pour le profil administrateur global).',
+        'Cochez au moins un département (sauf pour le profil administrateur global).',
       );
     }
+    const homeDepartmentId = createUserDto.departmentId ?? assignedIds[0] ?? null;
 
     let companyConnect: { connect: { id: number } } | undefined;
     let departmentConnect: { connect: { id: number } } | undefined;
-    if (createUserDto.departmentId != null) {
+    if (homeDepartmentId != null) {
       const dept = await this.prisma.department.findUnique({
-        where: { id: createUserDto.departmentId },
+        where: { id: homeDepartmentId },
       });
       if (!dept) {
         throw new BadRequestException('Département introuvable');
@@ -74,8 +79,8 @@ export class UsersService {
     });
 
     await this.replaceManagedDepartments(user.id, role, {
-      departmentId: createUserDto.departmentId ?? null,
-      departmentIds: createUserDto.departmentIds,
+      departmentId: homeDepartmentId,
+      departmentIds: assignedIds,
     });
 
     await this.auditService.log({
@@ -136,11 +141,20 @@ export class UsersService {
     }
 
     const nextRole = dto.role ?? existing.role;
+    const incomingIds = dto.departmentIds != null ? this.uniqueDeptIds(dto.departmentIds) : null;
     const nextDeptId =
-      dto.departmentId !== undefined ? dto.departmentId : existing.departmentId;
-    if (nextRole !== 'ADMIN' && nextDeptId == null) {
+      dto.departmentId !== undefined
+        ? dto.departmentId
+        : incomingIds?.length
+          ? incomingIds[0]
+          : existing.departmentId;
+    const touchingDepts =
+      dto.departmentId !== undefined ||
+      dto.departmentIds !== undefined ||
+      dto.role !== undefined;
+    if (touchingDepts && !isAdminRole(nextRole) && nextDeptId == null && !incomingIds?.length) {
       throw new BadRequestException(
-        'Un département est requis pour ce rôle (sauf pour le profil administrateur global).',
+        'Cochez au moins un département (sauf pour le profil administrateur global).',
       );
     }
 
@@ -164,15 +178,32 @@ export class UsersService {
           : dto.companyId !== undefined
             ? { connect: { id: dto.companyId } }
             : undefined,
-      department:
-        dto.departmentId === null
-          ? { disconnect: true }
-          : dto.departmentId !== undefined
-            ? { connect: { id: dto.departmentId } }
-            : undefined,
+      ...(touchingDepts
+        ? {
+            department:
+              isAdminRole(nextRole) || nextDeptId == null
+                ? { disconnect: true }
+                : { connect: { id: nextDeptId } },
+          }
+        : {}),
     };
     if (dto.email !== undefined) {
       data.email = dto.email.trim() === '' ? null : dto.email.trim();
+    }
+    if (touchingDepts && isAdminRole(nextRole)) {
+      data.company = { disconnect: true };
+    } else if (
+      touchingDepts &&
+      dto.companyId === undefined &&
+      nextDeptId != null
+    ) {
+      const homeDept = await this.prisma.department.findUnique({
+        where: { id: nextDeptId },
+        select: { companyId: true },
+      });
+      if (homeDept) {
+        data.company = { connect: { id: homeDept.companyId } };
+      }
     }
 
     await this.usersRepository.update(id, data);
@@ -183,7 +214,7 @@ export class UsersService {
     ) {
       await this.replaceManagedDepartments(id, nextRole, {
         departmentId: nextDeptId,
-        departmentIds: dto.departmentIds,
+        departmentIds: incomingIds ?? dto.departmentIds,
       });
     }
 
@@ -240,12 +271,10 @@ export class UsersService {
     }
 
     const homeId = opts.departmentId ?? null;
-    let wanted = isManagerRole(role)
-      ? (opts.departmentIds?.length ? opts.departmentIds : homeId != null ? [homeId] : [])
-      : homeId != null
-        ? [homeId]
-        : [];
-    wanted = Array.from(new Set(wanted.filter((id) => Number.isFinite(id) && id > 0)));
+    let wanted = this.uniqueDeptIds([
+      ...(opts.departmentIds ?? []),
+      ...(homeId != null ? [homeId] : []),
+    ]);
     if (homeId != null && !wanted.includes(homeId)) {
       wanted = [homeId, ...wanted];
     }
@@ -261,7 +290,7 @@ export class UsersService {
     const companyIds = new Set(depts.map((d) => d.companyId));
     if (companyIds.size > 1) {
       throw new BadRequestException(
-        'Les départements d’un gérant doivent appartenir à la même entreprise.',
+        'Les départements doivent appartenir à la même entreprise.',
       );
     }
 
@@ -294,5 +323,9 @@ export class UsersService {
         data: { userId, departmentId },
       });
     }
+  }
+
+  private uniqueDeptIds(ids: number[]): number[] {
+    return Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
   }
 }

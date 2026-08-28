@@ -119,7 +119,7 @@ function ProductCardColorPicker({
 }
 
 export function StockPage() {
-  const { can } = useAuth();
+  const { can, canPerm } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [packaging, setPackaging] = useState<PackagingUnit[]>([]);
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
@@ -155,6 +155,9 @@ export function StockPage() {
   const [addProductOpen, setAddProductOpen] = useState(false);
 
   const isAdmin = can(['ADMIN']);
+  const canStockIn = canPerm('stock.manage') || canPerm('stock.adjust');
+  const canStockOut = canPerm('stock.adjust');
+  const canHarmonise = canStockIn || canStockOut;
 
   const stockableProducts = useMemo(
     () =>
@@ -299,9 +302,13 @@ export function StockPage() {
   }, []);
 
   useEffect(() => {
-    // Sécurité UI: évite l'accès au formulaire d'opérations si le rôle n'est pas ADMIN.
-    if (tab === 'operations' && !isAdmin) setTab('purchases');
-  }, [tab, isAdmin]);
+    if (tab === 'operations' && !canHarmonise) setTab('purchases');
+  }, [tab, canHarmonise]);
+
+  useEffect(() => {
+    if (opKind === 'in' && !canStockIn && canStockOut) setOpKind('out');
+    if (opKind === 'out' && !canStockOut && canStockIn) setOpKind('in');
+  }, [opKind, canStockIn, canStockOut]);
 
   useEffect(() => {
     if (departmentId === '') {
@@ -423,12 +430,20 @@ export function StockPage() {
     const reason = opReason.trim() || undefined;
     try {
       if (opKind === 'in') {
+        if (!canStockIn) {
+          setOpMsg('Entrée non autorisée.', { persist: true });
+          return;
+        }
         await stockIn({
           productId: Number(opProductId),
           quantity: qty,
           reason: reason ?? 'Réception / entrée stock',
         });
       } else {
+        if (!canStockOut) {
+          setOpMsg('Sortie non autorisée.', { persist: true });
+          return;
+        }
         const prod = products.find((x) => x.id === opProductId);
         if (!prod) return;
         if (Number(prod.stock) < qty) {
@@ -474,10 +489,10 @@ export function StockPage() {
           role="tab"
           aria-selected={tab === 'operations'}
           className={`tab ${tab === 'operations' ? 'active' : ''}`}
-          disabled={!isAdmin}
-          aria-disabled={!isAdmin}
+          disabled={!canHarmonise}
+          aria-disabled={!canHarmonise}
           onClick={() => {
-            if (!isAdmin) return;
+            if (!canHarmonise) return;
             setTab('operations');
           }}
         >
@@ -834,7 +849,7 @@ export function StockPage() {
         />
       ) : null}
 
-      {tab === 'operations' && isAdmin ? (
+      {tab === 'operations' && canHarmonise ? (
         <section className="card">
           <h2>Harmonisation manuelle</h2>
           {opMsg ? (
@@ -844,8 +859,8 @@ export function StockPage() {
             <label>
               Type d’opération
               <select value={opKind} onChange={(e) => setOpKind(e.target.value === 'out' ? 'out' : 'in')}>
-                <option value="in">Entrée (augmenter le stock)</option>
-                <option value="out">Sortie (diminuer le stock)</option>
+                {canStockIn ? <option value="in">Entrée (augmenter le stock)</option> : null}
+                {canStockOut ? <option value="out">Sortie (diminuer le stock)</option> : null}
               </select>
             </label>
             <label>

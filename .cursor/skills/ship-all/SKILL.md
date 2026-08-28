@@ -20,6 +20,8 @@ powershell -ExecutionPolicy Bypass -File infra/scripts/ship-all.ps1 -Bump patch 
 
 Le script répare le PATH Windows (scoop `git` / `gcloud` / `gh`) puis enchaîne tout.
 
+Après chaque build, copie aussi les exe à la **racine du repo** (cette machine, USB) : `POS-Eau-Cascade-Remote-Setup.exe` / `POS-Eau-Cascade-Server-Setup.exe` + noms versionnés. Gitignorés, jamais GitHub.
+
 ## Checklist
 
 ```

@@ -33,7 +33,7 @@ import { buildTicketPreviewText } from '../utils/ticketPreview';
 import { buildDisbursementOrderPreviewText } from '../utils/disbursementOrderPreview';
 import { formatRegisterCode } from '../utils/registerDisplay';
 import { formatRoleLabel, normalizeRoleCode } from '../utils/roleLabels';
-import { isManagerRole } from '../utils/user-scope';
+import { isAdminRole } from '../utils/user-scope';
 import { formatQuantity } from '../utils/formatQuantity';
 import { PasswordField } from '../components/PasswordField';
 import { BanksConfigSection } from '../components/BanksConfigSection';
@@ -1916,7 +1916,7 @@ function userDepartmentLabel(
   return labels.length ? labels.join(', ') : '—';
 }
 
-function ManagerDeptCheckboxes({
+function AssignedDeptCheckboxes({
   departments,
   selected,
   onChange,
@@ -1926,10 +1926,20 @@ function ManagerDeptCheckboxes({
   onChange: (ids: number[]) => void;
 }) {
   if (!departments.length) return null;
+  const allIds = departments.map((d) => d.id);
+  const allOn = allIds.length > 0 && allIds.every((id) => selected.includes(id));
   return (
     <fieldset className="dept-multi-fieldset">
-      <legend>Départements gérés *</legend>
+      <legend>Départements *</legend>
       <div className="dept-multi-list">
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={allOn}
+            onChange={() => onChange(allOn ? [] : allIds)}
+          />
+          Tous
+        </label>
         {departments.map((d) => {
           const checked = selected.includes(d.id);
           return (
@@ -1992,15 +2002,8 @@ function UsersSection({
     e.preventDefault();
     setMsg('');
     if (role !== 'ADMIN') {
-      if (isManagerRole(role) && selectedDeptIds.length === 0) {
-        setMsg('Cochez au moins un département pour ce gérant.', { persist: true });
-        return;
-      }
-      if (!isManagerRole(role) && deptId === '') {
-        setMsg(
-          'Choisissez un département pour ce rôle (les administrateurs globaux n’en ont pas besoin).',
-          { persist: true },
-        );
+      if (selectedDeptIds.length === 0) {
+        setMsg('Cochez au moins un département.', { persist: true });
         return;
       }
     }
@@ -2014,13 +2017,8 @@ function UsersSection({
         password,
         role,
         fullName: fullName || undefined,
-        departmentId: role === 'ADMIN' ? undefined : isManagerRole(role) ? selectedDeptIds[0] : Number(deptId),
-        departmentIds:
-          role === 'ADMIN'
-            ? undefined
-            : isManagerRole(role)
-              ? selectedDeptIds
-              : [Number(deptId)],
+        departmentId: role === 'ADMIN' ? undefined : selectedDeptIds[0],
+        departmentIds: role === 'ADMIN' ? undefined : selectedDeptIds,
       });
       resetCreateForm();
       setCreateFormOpen(false);
@@ -2183,14 +2181,12 @@ function UsersSection({
                       setDeptId('');
                       setCreateCompanyId('');
                       setSelectedDeptIds([]);
-                    } else if (isManagerRole(r)) {
+                    } else if (deptId !== '' && selectedDeptIds.length === 0) {
                       const current = departments.find((d) => d.id === deptId);
                       if (current) {
                         setCreateCompanyId(current.companyId);
                         setSelectedDeptIds([current.id]);
                       }
-                    } else {
-                      setSelectedDeptIds([]);
                     }
                   }}
                 >
@@ -2206,54 +2202,34 @@ function UsersSection({
                   Administrateur global : pas d’entreprise ni de département.
                 </p>
               ) : (
-                isManagerRole(role) ? (
-                  <>
-                    <label>
-                      Entreprise
-                      <select
-                        value={createCompanyId === '' ? '' : String(createCompanyId)}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setCreateCompanyId(v ? Number(v) : '');
-                          setSelectedDeptIds([]);
-                        }}
-                        required
-                      >
-                        <option value="">— Choisir</option>
-                        {companies.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {createCompanyId !== '' ? (
-                      <ManagerDeptCheckboxes
-                        departments={departments.filter((d) => d.companyId === createCompanyId)}
-                        selected={selectedDeptIds}
-                        onChange={setSelectedDeptIds}
-                      />
-                    ) : null}
-                  </>
-                ) : (
+                <>
                   <label>
-                    Département d’affectation *
+                    Entreprise
                     <select
-                      value={deptId === '' ? '' : String(deptId)}
+                      value={createCompanyId === '' ? '' : String(createCompanyId)}
                       onChange={(e) => {
-                        setDeptId(e.target.value ? Number(e.target.value) : '');
+                        const v = e.target.value;
+                        setCreateCompanyId(v ? Number(v) : '');
+                        setSelectedDeptIds([]);
                       }}
                       required
                     >
                       <option value="">— Choisir</option>
-                      {departments.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.company ? `${d.company.name} — ${d.name}` : d.name}
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
                         </option>
                       ))}
                     </select>
                   </label>
-                )
+                  {createCompanyId !== '' ? (
+                    <AssignedDeptCheckboxes
+                      departments={departments.filter((d) => d.companyId === createCompanyId)}
+                      selected={selectedDeptIds}
+                      onChange={setSelectedDeptIds}
+                    />
+                  ) : null}
+                </>
               )}
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.5rem' }}>
                 <button type="submit" className="btn btn-primary">
@@ -2332,14 +2308,14 @@ function UserEditModal({
     user.role === 'ADMIN' ? '' : user.departmentId != null ? user.departmentId : '',
   );
   const [selectedDeptIds, setSelectedDeptIds] = useState<number[]>(
-    isManagerRole(user.role)
-      ? Array.from(
+    isAdminRole(user.role)
+      ? []
+      : Array.from(
           new Set([
             ...(user.departmentId != null ? [user.departmentId] : []),
             ...(user.departmentIds ?? []),
           ]),
-        )
-      : [],
+        ),
   );
   const [err, setErr] = useAutoClearMessage();
   const [saving, setSaving] = useState(false);
@@ -2350,12 +2326,10 @@ function UserEditModal({
   );
 
   useEffect(() => {
-    if (role === 'ADMIN' || isManagerRole(role)) return;
+    if (isAdminRole(role)) return;
     if (companyId === '') return;
-    if (departmentId !== '' && !deptsForCompany.some((d) => d.id === departmentId)) {
-      setDepartmentId(deptsForCompany[0]?.id ?? '');
-    }
-  }, [companyId, deptsForCompany, departmentId, role]);
+    setSelectedDeptIds((prev) => prev.filter((id) => deptsForCompany.some((d) => d.id === id)));
+  }, [companyId, deptsForCompany, role]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -2366,12 +2340,8 @@ function UserEditModal({
       return;
     }
     if (role !== 'ADMIN') {
-      if (isManagerRole(role) && selectedDeptIds.length === 0) {
-        setErr('Cochez au moins un département pour ce gérant.');
-        return;
-      }
-      if (!isManagerRole(role) && departmentId === '') {
-        setErr('Choisissez un département pour ce rôle (sauf administrateur global).');
+      if (selectedDeptIds.length === 0) {
+        setErr('Cochez au moins un département.');
         return;
       }
     }
@@ -2401,20 +2371,11 @@ function UserEditModal({
         role,
         ...(role === 'ADMIN'
           ? { companyId: null, departmentId: null, departmentIds: [] }
-          : isManagerRole(role)
-            ? {
-                companyId: companyId === '' ? null : companyId,
-                departmentId:
-                  typeof departmentId === 'number' && selectedDeptIds.includes(departmentId)
-                    ? departmentId
-                    : selectedDeptIds[0] ?? null,
-                departmentIds: selectedDeptIds,
-              }
-            : {
-                companyId: companyId === '' ? null : companyId,
-                departmentId: departmentId === '' ? null : departmentId,
-                departmentIds: departmentId === '' ? [] : [departmentId],
-              }),
+          : {
+              companyId: companyId === '' ? null : companyId,
+              departmentId: selectedDeptIds[0] ?? null,
+              departmentIds: selectedDeptIds,
+            }),
       });
       if (sessionUser?.id === user.id) {
         try {
@@ -2484,13 +2445,8 @@ function UserEditModal({
                   setCompanyId('');
                   setDepartmentId('');
                   setSelectedDeptIds([]);
-                } else if (isManagerRole(r)) {
-                  if (departmentId !== '') setSelectedDeptIds([departmentId]);
-                } else {
-                  setSelectedDeptIds([]);
-                  if (selectedDeptIds.length && departmentId === '') {
-                    setDepartmentId(selectedDeptIds[0]);
-                  }
+                } else if (departmentId !== '' && selectedDeptIds.length === 0) {
+                  setSelectedDeptIds([departmentId]);
                 }
               }}
             >
@@ -2526,31 +2482,12 @@ function UserEditModal({
                   ))}
                 </select>
               </label>
-              {isManagerRole(role) && companyId !== '' ? (
-                <ManagerDeptCheckboxes
+              {companyId !== '' ? (
+                <AssignedDeptCheckboxes
                   departments={deptsForCompany}
                   selected={selectedDeptIds}
                   onChange={setSelectedDeptIds}
                 />
-              ) : !isManagerRole(role) ? (
-                <label>
-                  Département *
-                  <select
-                    value={departmentId === '' ? '' : String(departmentId)}
-                    onChange={(e) => {
-                      setDepartmentId(e.target.value ? Number(e.target.value) : '');
-                    }}
-                    disabled={companyId === ''}
-                    required
-                  >
-                    <option value="">— Choisir</option>
-                    {deptsForCompany.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               ) : null}
             </>
           )}

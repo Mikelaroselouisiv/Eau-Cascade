@@ -1,4 +1,9 @@
-/** Gérant : plusieurs départements d’une même entreprise. */
+/** Administrateur global : pas de périmètre département. */
+export function isAdminRole(role?: string | null): boolean {
+  return role === 'ADMIN';
+}
+
+/** @deprecated Préférer les départements affectés (UserDepartment), pas le code MANAGER. */
 export function isManagerRole(role?: string | null): boolean {
   return role === 'MANAGER';
 }
@@ -18,7 +23,7 @@ export function resolvedDepartmentIds(user: {
   return [];
 }
 
-export function managerCanAccessDepartment(
+export function canAccessAssignedDepartment(
   user: {
     role?: string | null;
     departmentId?: number | null;
@@ -26,10 +31,12 @@ export function managerCanAccessDepartment(
   },
   departmentId: number | null | undefined,
 ): boolean {
-  if (user.role === 'ADMIN') return true;
+  if (isAdminRole(user.role)) return true;
   if (departmentId == null) return true;
-  if (!isManagerRole(user.role)) return true;
   const ids = resolvedDepartmentIds(user);
   if (!ids.length) return true;
   return ids.includes(departmentId);
 }
+
+/** Alias : le périmètre n’est plus réservé au code MANAGER. */
+export const managerCanAccessDepartment = canAccessAssignedDepartment;

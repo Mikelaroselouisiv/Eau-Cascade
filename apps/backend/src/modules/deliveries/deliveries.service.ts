@@ -7,9 +7,8 @@ import {
 import { DeliveryStatus, FulfillmentType, MovementType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  canAccessAssignedDepartment,
   canEditDeliveryExecutor,
-  isManagerRole,
-  managerCanAccessDepartment,
   resolvedDepartmentIds,
 } from '../../common/user-scope';
 import { canManageDeliveryFulfillment } from '../../common/permissions';
@@ -625,7 +624,7 @@ export class DeliveriesService {
         `Le département « ${dept.name} » n’est pas configuré pour les livraisons à domicile.`,
       );
     }
-    if (isManagerRole(user.role) && !managerCanAccessDepartment(user, dept.id)) {
+    if (!canAccessAssignedDepartment(user, dept.id)) {
       throw new ForbiddenException('Département hors périmètre');
     }
     return dept.id;
@@ -693,41 +692,30 @@ export class DeliveriesService {
     filters: { companyId?: number; departmentId?: number },
   ): { companyId?: number; departmentId?: number; departmentIds?: number[] } {
     const role = user.role ?? '';
-    // Caissier / livreur : toutes les fiches de leur entreprise (tous départements).
-    // Le périmètre département s’applique à la caisse POS, pas aux livraisons.
-    const locked = role === 'CASHIER' || role === 'LIVREUR';
-
-    if (locked) {
-      if (user.companyId == null) {
-        throw new ForbiddenException('Affectation entreprise manquante');
-      }
+    if (role === 'ADMIN') {
       return {
-        companyId: user.companyId,
+        companyId: filters.companyId,
         departmentId: filters.departmentId,
       };
     }
 
-    if (isManagerRole(role) && user.companyId != null) {
-      const companyId = filters.companyId ?? user.companyId;
-      if (companyId !== user.companyId) {
-        throw new ForbiddenException('Entreprise hors périmètre');
-      }
-      const allowed = resolvedDepartmentIds(user);
-      if (filters.departmentId != null) {
-        if (allowed.length && !allowed.includes(filters.departmentId)) {
-          throw new ForbiddenException('Département hors périmètre');
-        }
-        return { companyId, departmentId: filters.departmentId };
-      }
-      return {
-        companyId,
-        departmentIds: allowed.length ? allowed : undefined,
-      };
+    if (user.companyId == null) {
+      throw new ForbiddenException('Affectation entreprise manquante');
     }
-
+    const companyId = filters.companyId ?? user.companyId;
+    if (companyId !== user.companyId) {
+      throw new ForbiddenException('Entreprise hors périmètre');
+    }
+    const allowed = resolvedDepartmentIds(user);
+    if (filters.departmentId != null) {
+      if (allowed.length && !allowed.includes(filters.departmentId)) {
+        throw new ForbiddenException('Département hors périmètre');
+      }
+      return { companyId, departmentId: filters.departmentId };
+    }
     return {
-      companyId: filters.companyId,
-      departmentId: filters.departmentId,
+      companyId,
+      departmentIds: allowed.length ? allowed : undefined,
     };
   }
 
@@ -739,20 +727,11 @@ export class DeliveriesService {
     const role = user.role ?? '';
     if (role === 'ADMIN') return;
 
-    if (role === 'CASHIER' || role === 'LIVREUR') {
-      if (user.companyId == null || user.companyId !== companyId) {
-        throw new ForbiddenException('Accès refusé');
-      }
-      return;
+    if (user.companyId != null && user.companyId !== companyId) {
+      throw new ForbiddenException('Accès refusé');
     }
-
-    if (isManagerRole(role)) {
-      if (user.companyId != null && user.companyId !== companyId) {
-        throw new ForbiddenException('Accès refusé');
-      }
-      if (!managerCanAccessDepartment(user, departmentId)) {
-        throw new ForbiddenException('Accès refusé');
-      }
+    if (!canAccessAssignedDepartment(user, departmentId)) {
+      throw new ForbiddenException('Accès refusé');
     }
   }
 

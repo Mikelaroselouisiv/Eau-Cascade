@@ -151,7 +151,7 @@ export class InventoryController {
   }
 
   @Post('entries')
-  @Permissions('stock.manage')
+  @PermissionsAny('stock.manage', 'stock.adjust')
   stockIn(@Body() dto: StockMovementDto, @GetUser() user?: { id?: number }) {
     return this.inventoryService.increaseStock(dto.productId, dto.quantity, dto.reason, user?.id);
   }

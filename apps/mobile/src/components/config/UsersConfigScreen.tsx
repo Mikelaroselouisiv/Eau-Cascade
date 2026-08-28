@@ -26,6 +26,7 @@ import {
   listRoles,
   updateUser,
 } from '@/services/api';
+import { formatApiError } from '@/services/api-errors';
 import type { AppRoleRow, Department, SessionUser } from '@/types/api';
 import { formatRoleLabel } from '@/utils/roleLabels';
 
@@ -47,14 +48,12 @@ export function UsersConfigScreen() {
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState('CASHIER');
-  const [deptId, setDeptId] = useState<number | ''>('');
   const [extraDeptIds, setExtraDeptIds] = useState<number[]>([]);
 
   const [edit, setEdit] = useState<SessionUser | null>(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editRole, setEditRole] = useState('CASHIER');
-  const [editDeptId, setEditDeptId] = useState<number | ''>('');
   const [editExtraDeptIds, setEditExtraDeptIds] = useState<number[]>([]);
   const [editPassword, setEditPassword] = useState('');
 
@@ -92,12 +91,8 @@ export function UsersConfigScreen() {
 
   async function submitCreate() {
     if (role !== 'ADMIN') {
-      if (role === 'MANAGER' && extraDeptIds.length === 0) {
+      if (extraDeptIds.length === 0) {
         setStatus('Cochez au moins un département');
-        return;
-      }
-      if (role !== 'MANAGER' && deptId === '') {
-        setStatus('Département requis (sauf ADMIN)');
         return;
       }
     }
@@ -117,13 +112,8 @@ export function UsersConfigScreen() {
         password,
         role,
         fullName: fullName.trim() || undefined,
-        departmentId: role === 'ADMIN' ? undefined : role === 'MANAGER' ? extraDeptIds[0] : Number(deptId),
-        departmentIds:
-          role === 'ADMIN'
-            ? undefined
-            : role === 'MANAGER'
-              ? extraDeptIds
-              : [Number(deptId)],
+        departmentId: role === 'ADMIN' ? undefined : extraDeptIds[0],
+        departmentIds: role === 'ADMIN' ? undefined : extraDeptIds,
       });
       setShowCreate(false);
       setPhone('');
@@ -131,12 +121,11 @@ export function UsersConfigScreen() {
       setPasswordConfirm('');
       setFullName('');
       setRole('CASHIER');
-      setDeptId('');
       setExtraDeptIds([]);
       setStatus('Utilisateur créé');
       await load();
-    } catch {
-      setStatus('Création impossible');
+    } catch (err) {
+      setStatus(formatApiError(err, 'Création impossible'));
     } finally {
       setBusy(false);
     }
@@ -147,16 +136,15 @@ export function UsersConfigScreen() {
     setEditName(u.fullName ?? '');
     setEditPhone(u.phone);
     setEditRole(u.role);
-    setEditDeptId(u.departmentId ?? '');
     setEditExtraDeptIds(
-      u.role === 'MANAGER'
-        ? Array.from(
+      u.role === 'ADMIN'
+        ? []
+        : Array.from(
             new Set([
               ...(u.departmentIds ?? []),
               ...(u.departmentId != null ? [u.departmentId] : []),
             ]),
-          )
-        : [],
+          ),
     );
     setEditPassword('');
     setStatus(null);
@@ -165,12 +153,8 @@ export function UsersConfigScreen() {
   async function submitEdit() {
     if (!edit) return;
     if (editRole !== 'ADMIN') {
-      if (editRole === 'MANAGER' && editExtraDeptIds.length === 0) {
+      if (editExtraDeptIds.length === 0) {
         setStatus('Cochez au moins un département');
-        return;
-      }
-      if (editRole !== 'MANAGER' && editDeptId === '') {
-        setStatus('Département requis (sauf ADMIN)');
         return;
       }
     }
@@ -180,27 +164,15 @@ export function UsersConfigScreen() {
         phone: editPhone.trim(),
         fullName: editName.trim(),
         role: editRole,
-        departmentId:
-          editRole === 'ADMIN'
-            ? null
-            : editRole === 'MANAGER'
-              ? typeof editDeptId === 'number' && editExtraDeptIds.includes(editDeptId)
-                ? editDeptId
-                : editExtraDeptIds[0]
-              : Number(editDeptId),
-        departmentIds:
-          editRole === 'ADMIN'
-            ? []
-            : editRole === 'MANAGER'
-              ? editExtraDeptIds
-              : [Number(editDeptId)],
+        departmentId: editRole === 'ADMIN' ? null : editExtraDeptIds[0],
+        departmentIds: editRole === 'ADMIN' ? [] : editExtraDeptIds,
         ...(editPassword.trim() ? { password: editPassword.trim() } : {}),
       });
       setEdit(null);
       setStatus('Utilisateur mis à jour');
       await load();
-    } catch {
-      setStatus('Mise à jour impossible');
+    } catch (err) {
+      setStatus(formatApiError(err, 'Mise à jour impossible'));
     } finally {
       setBusy(false);
     }
@@ -333,38 +305,20 @@ export function UsersConfigScreen() {
                   active={role === code}
                   onPress={() => {
                     setRole(code);
-                    if (code === 'MANAGER' && deptId !== '') {
-                      setExtraDeptIds((prev) => (prev.length ? prev : [deptId]));
-                    }
+                    if (code === 'ADMIN') setExtraDeptIds([]);
                   }}
                 />
               ))}
             </ScrollView>
             {role !== 'ADMIN' ? (
-              role === 'MANAGER' ? (
-                <>
-                  <Text style={styles.fieldLabel}>Départements gérés</Text>
-                  <DeptCheckboxList
-                    departments={departments}
-                    selected={extraDeptIds}
-                    onChange={setExtraDeptIds}
-                  />
-                </>
-              ) : (
-                <>
-                  <Text style={styles.fieldLabel}>Département</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
-                    {departments.map((d) => (
-                      <Chip
-                        key={d.id}
-                        label={d.name}
-                        active={deptId === d.id}
-                        onPress={() => setDeptId(d.id)}
-                      />
-                    ))}
-                  </ScrollView>
-                </>
-              )
+              <>
+                <Text style={styles.fieldLabel}>Départements</Text>
+                <DeptCheckboxList
+                  departments={departments}
+                  selected={extraDeptIds}
+                  onChange={setExtraDeptIds}
+                />
+              </>
             ) : null}
           </ScrollView>
         }
@@ -428,38 +382,20 @@ export function UsersConfigScreen() {
                   active={editRole === code}
                   onPress={() => {
                     setEditRole(code);
-                    if (code === 'MANAGER' && editDeptId !== '') {
-                      setEditExtraDeptIds((prev) => (prev.length ? prev : [editDeptId]));
-                    }
+                    if (code === 'ADMIN') setEditExtraDeptIds([]);
                   }}
                 />
               ))}
             </ScrollView>
             {editRole !== 'ADMIN' ? (
-              editRole === 'MANAGER' ? (
-                <>
-                  <Text style={styles.fieldLabel}>Départements gérés</Text>
-                  <DeptCheckboxList
-                    departments={departments}
-                    selected={editExtraDeptIds}
-                    onChange={setEditExtraDeptIds}
-                  />
-                </>
-              ) : (
-                <>
-                  <Text style={styles.fieldLabel}>Département</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
-                    {departments.map((d) => (
-                      <Chip
-                        key={d.id}
-                        label={d.name}
-                        active={editDeptId === d.id}
-                        onPress={() => setEditDeptId(d.id)}
-                      />
-                    ))}
-                  </ScrollView>
-                </>
-              )
+              <>
+                <Text style={styles.fieldLabel}>Départements</Text>
+                <DeptCheckboxList
+                  departments={departments}
+                  selected={editExtraDeptIds}
+                  onChange={setEditExtraDeptIds}
+                />
+              </>
             ) : null}
           </ScrollView>
         }
@@ -511,20 +447,46 @@ function DeptCheckboxList({
     onChange([...selected, dept.id]);
   }
 
+  function toggleAllForCompany(companyId: number) {
+    const ids = departments.filter((d) => d.companyId === companyId).map((d) => d.id);
+    const allOn = ids.length > 0 && ids.every((id) => selected.includes(id));
+    onChange(allOn ? [] : ids);
+  }
+
+  const companyIds = Array.from(new Set(departments.map((d) => d.companyId)));
+
   return (
     <View style={styles.checkList}>
-      {departments.map((d) => {
-        const checked = selected.includes(d.id);
-        const label = d.company ? `${d.company.name} — ${d.name}` : d.name;
+      {companyIds.map((companyId) => {
+        const group = departments.filter((d) => d.companyId === companyId);
+        const allOn = group.length > 0 && group.every((d) => selected.includes(d.id));
+        const companyName = group[0]?.company?.name;
         return (
-          <Pressable key={d.id} style={styles.checkRow} onPress={() => toggle(d)}>
-            <Ionicons
-              name={checked ? 'checkbox' : 'square-outline'}
-              size={22}
-              color={BrandColors.primary}
-            />
-            <Text style={styles.checkLabel}>{label}</Text>
-          </Pressable>
+          <View key={companyId} style={{ gap: 6 }}>
+            <Pressable style={styles.checkRow} onPress={() => toggleAllForCompany(companyId)}>
+              <Ionicons
+                name={allOn ? 'checkbox' : 'square-outline'}
+                size={22}
+                color={BrandColors.primary}
+              />
+              <Text style={styles.checkLabel}>
+                {companyName ? `Tous — ${companyName}` : 'Tous'}
+              </Text>
+            </Pressable>
+            {group.map((d) => {
+              const checked = selected.includes(d.id);
+              return (
+                <Pressable key={d.id} style={styles.checkRow} onPress={() => toggle(d)}>
+                  <Ionicons
+                    name={checked ? 'checkbox' : 'square-outline'}
+                    size={22}
+                    color={BrandColors.primary}
+                  />
+                  <Text style={styles.checkLabel}>{d.name}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
         );
       })}
     </View>

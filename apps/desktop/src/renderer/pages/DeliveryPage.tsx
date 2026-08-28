@@ -21,6 +21,7 @@ import { saleTxnNumber } from '../utils/saleTxnNumber';
 import {
   canEditDeliveryExecutor,
   departmentsForUser,
+  isAdminRole,
 } from '../utils/user-scope';
 
 const PAGE_SIZE = 100;
@@ -112,7 +113,7 @@ export function DeliveryPage() {
     void getCompanies()
       .then((list) => {
         setCompanies(list);
-        if (user?.role === 'MANAGER' && typeof user.companyId === 'number') {
+        if (!isAdminRole(user?.role) && typeof user.companyId === 'number') {
           setCompanyId(user.companyId);
         } else if (list.length === 1) {
           setCompanyId(list[0].id);

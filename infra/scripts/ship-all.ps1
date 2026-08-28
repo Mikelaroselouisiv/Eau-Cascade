@@ -239,6 +239,36 @@ function Ensure-GitIdentity {
   Write-Host "Git identity (env, no config write): $name <$email>" -ForegroundColor Gray
 }
 
+function Copy-InstallerToRepoRoot([string] $Edition) {
+  $token = if ($Edition -eq 'remote') { 'Remote' } else { 'Server' }
+  $releaseDir = Join-Path $RepoRoot 'apps\desktop\release'
+  $latest = Join-Path $releaseDir 'latest.yml'
+  $src = $null
+  if (Test-Path -LiteralPath $latest) {
+    $latestText = Get-Content -LiteralPath $latest -Raw
+    if ($latestText -match "path:\s*(POS-Eau-Cascade-$token-[\d.]+\.exe)") {
+      $candidate = Join-Path $releaseDir $Matches[1]
+      if (Test-Path -LiteralPath $candidate) { $src = $candidate }
+    }
+  }
+  if (-not $src) {
+    $src = Get-ChildItem -LiteralPath $releaseDir -Filter "POS-Eau-Cascade-$token-*.exe" -File |
+      Sort-Object LastWriteTime -Descending |
+      Select-Object -First 1 -ExpandProperty FullName
+  }
+  if (-not $src -or -not (Test-Path -LiteralPath $src)) {
+    throw "Installateur $token introuvable dans $releaseDir"
+  }
+  $leaf = Split-Path $src -Leaf
+  Copy-Item -LiteralPath $src -Destination (Join-Path $RepoRoot $leaf) -Force
+  Copy-Item -LiteralPath $src -Destination (Join-Path $RepoRoot "POS-Eau-Cascade-$token-Setup.exe") -Force
+  $block = "$src.blockmap"
+  if (Test-Path -LiteralPath $block) {
+    Copy-Item -LiteralPath $block -Destination (Join-Path $RepoRoot (Split-Path $block -Leaf)) -Force
+  }
+  Write-Host ("Copie racine: {0} + POS-Eau-Cascade-{1}-Setup.exe" -f $leaf, $token) -ForegroundColor Gray
+}
+
 function Bump-SemVer([string] $Current, [string] $Kind) {
   $parts = $Current.Split('.')
   if ($parts.Count -lt 3) { throw "Version invalide: $Current (attendu X.Y.Z)" }
@@ -316,7 +346,8 @@ if ($Commit) {
         $_ -match '(^|/)\.env\.(dev|prod|local|server)$' -or
         $_ -match 'ChatGPT Image' -or
         $_ -match '(^|/)apps/backend/dist/' -or
-        $_ -match '(^|/)apps/desktop/release/'
+        $_ -match '(^|/)apps/desktop/release/' -or
+        $_ -match '(^|/)POS-Eau-Cascade-.*\.exe'
       ) {
         & $git reset HEAD -- $_ 2>$null
         Write-Host "  (exclu) $_" -ForegroundColor Yellow
@@ -427,6 +458,9 @@ if ($Desktop -eq 'none') {
         Invoke-OrDry "upload-desktop-installer.ps1 -Edition $ed" {
           & $UploadScript -Edition $ed
         }
+        Invoke-OrDry "copie installateur $ed a la racine du repo" {
+          Copy-InstallerToRepoRoot $ed
+        }
       }
     } finally {
       Pop-Location
@@ -442,6 +476,9 @@ Write-Host "  Remote: https://storage.googleapis.com/$AssetsBucket/installers/re
 Write-Host "  Server: https://storage.googleapis.com/$AssetsBucket/installers/server/latest.yml"
 Write-Host "API cloud  : $PublicApi"
 Write-Host "GitHub     : $GitHubRepo"
+Write-Host "Racine repo (cette machine) :"
+Write-Host "  POS-Eau-Cascade-Remote-Setup.exe"
+Write-Host "  POS-Eau-Cascade-Server-Setup.exe"
 Write-Host ""
 Write-Host "Sur les machines installees : bouton Mise a jour -> telecharger -> redemarrer."
 Write-Host "Les postes Remote vérifient aussi au démarrage et toutes les 4 h."

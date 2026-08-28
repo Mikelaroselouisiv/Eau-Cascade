@@ -50,7 +50,7 @@ export class CreateUserDto {
   @IsInt()
   departmentId?: number;
 
-  /** Gérant : départements contrôlés (inclut le département d’affectation). */
+  /** Départements contrôlés (tous rôles sauf ADMIN). */
   @IsOptional()
   @IsArray()
   @Type(() => Number)

@@ -43,7 +43,7 @@ import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../utils/volumeUnitPrice';
 import { formatMoney, resolveCurrencyCode } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
-import { departmentsForUser } from '../utils/user-scope';
+import { departmentsForUser, isAdminRole, resolvedDepartmentIds } from '../utils/user-scope';
 
 /** Quantité décimale dans l’unité choisie (caisse, bouteille…) ; le stock est dans la même unité. */
 const QTY_DECIMALS = 4;
@@ -138,7 +138,8 @@ function effectiveUnitPrice(
 export function PosPage() {
   const { user, canPerm } = useAuth();
   const cashierLabel = user?.fullName?.trim() || user?.phone || 'Caissier';
-  const isCashier = user?.role === 'CASHIER';
+  const assignedDeptIds = resolvedDepartmentIds(user);
+  const posScopeLocked = !isAdminRole(user?.role) && assignedDeptIds.length === 1;
   const canSpecialSale = canPerm('sales.special_price');
   const [saleMode, setSaleMode] = useState<'classic' | 'special'>('classic');
   const [products, setProducts] = useState<Product[]>([]);
@@ -217,18 +218,18 @@ export function PosPage() {
   }, [canSpecialSale, saleMode]);
 
   const effectiveDepartmentId = useMemo(() => {
-    if (isCashier) {
-      return typeof user?.departmentId === 'number' ? user.departmentId : undefined;
+    if (posScopeLocked) {
+      return assignedDeptIds[0];
     }
     return selectedDepartmentId === '' ? undefined : selectedDepartmentId;
-  }, [isCashier, user?.departmentId, selectedDepartmentId]);
+  }, [posScopeLocked, assignedDeptIds, selectedDepartmentId]);
 
   const effectiveCompanyId = useMemo(() => {
-    if (isCashier) {
+    if (posScopeLocked) {
       return typeof user?.companyId === 'number' ? user.companyId : company?.id;
     }
     return selectedCompanyId === '' ? undefined : selectedCompanyId;
-  }, [isCashier, user?.companyId, company?.id, selectedCompanyId]);
+  }, [posScopeLocked, user?.companyId, company?.id, selectedCompanyId]);
 
   async function loadRegisterContext(deptId?: number, compId?: number) {
     const session = await getActiveRegisterSession();
@@ -267,10 +268,10 @@ export function PosPage() {
   useEffect(() => {
     if (!user) return;
 
-    const deptId = typeof user.departmentId === 'number' ? user.departmentId : undefined;
+    const deptId = assignedDeptIds[0];
     const userCompanyId = typeof user.companyId === 'number' ? user.companyId : undefined;
 
-    if (isCashier) {
+    if (posScopeLocked) {
       void (async () => {
         try {
           const [prods, pr] = await Promise.all([
@@ -339,7 +340,7 @@ export function PosPage() {
 
   // Pour les managers/admin : recharger les listes de départements si l'entreprise change.
   useEffect(() => {
-    if (!user || isCashier) return;
+    if (!user || posScopeLocked) return;
     if (selectedCompanyId === '') return;
 
     void getDepartments(Number(selectedCompanyId))
@@ -352,11 +353,11 @@ export function PosPage() {
         });
       })
       .catch(() => undefined);
-  }, [user, isCashier, selectedCompanyId, user?.departmentIds]);
+  }, [user, posScopeLocked, selectedCompanyId, user?.departmentIds]);
 
   // Pour les managers/admin : recharger les réglages d'entreprise et d'imprimante si besoin.
   useEffect(() => {
-    if (!user || isCashier) return;
+    if (!user || posScopeLocked) return;
     if (selectedCompanyId === '') {
       setCompany(null);
       return;
@@ -365,10 +366,10 @@ export function PosPage() {
     void getCompanyById(Number(selectedCompanyId))
       .then(setCompany)
       .catch(() => undefined);
-  }, [user, isCashier, selectedCompanyId]);
+  }, [user, posScopeLocked, selectedCompanyId]);
 
   useEffect(() => {
-    if (!user || isCashier) return;
+    if (!user || posScopeLocked) return;
     if (selectedDepartmentId === '') {
       setPrinter(null);
       return;
@@ -377,10 +378,10 @@ export function PosPage() {
     void getPrinterSettings(Number(selectedDepartmentId))
       .then(setPrinter)
       .catch(() => undefined);
-  }, [user, isCashier, selectedDepartmentId]);
+  }, [user, posScopeLocked, selectedDepartmentId]);
 
   const displayedProducts = useMemo(() => {
-    if (isCashier) return products;
+    if (posScopeLocked) return products;
     if (selectedCompanyId === '' && selectedDepartmentId === '') return products;
 
     return products.filter((p) => {
@@ -390,7 +391,7 @@ export function PosPage() {
       if (selectedDepartmentId !== '' && deptId !== selectedDepartmentId) return false;
       return true;
     });
-  }, [products, isCashier, selectedCompanyId, selectedDepartmentId]);
+  }, [products, posScopeLocked, selectedCompanyId, selectedDepartmentId]);
 
   useEffect(() => {
     void syncSalesQueue()
@@ -910,8 +911,8 @@ export function PosPage() {
       removeActiveDraftFromUI();
       setAmountReceived('');
       await refreshCashGaps();
-      const deptId = typeof user?.departmentId === 'number' ? user.departmentId : undefined;
-      if (isCashier) {
+      const deptId = assignedDeptIds[0];
+      if (posScopeLocked) {
         setProducts(await loadProductsWithCache(deptId));
       } else {
         setProducts(await loadProductsWithCache(undefined));
@@ -1220,7 +1221,7 @@ export function PosPage() {
             className="pos-toolbar"
             style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'end' }}
           >
-            {!isCashier ? (
+            {!posScopeLocked ? (
               <>
                 <label>
                   Entreprise

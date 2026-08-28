@@ -201,7 +201,7 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
       title: 'Harmonisation',
       icon: 'swap-vertical-outline',
       permission: 'stock.adjust',
-      roles: ['ADMIN'],
+      roles: ['ADMIN', 'MANAGER', 'STOCK_MANAGER'],
     },
   ],
   config: [
@@ -329,6 +329,9 @@ export function canAccessTab(tab: SectionTab, access: AccessFns): boolean {
       access.canPerm('finance.write') ||
       access.canPerm('finance.expense')
     );
+  }
+  if (tab.name === 'harmonisation') {
+    return access.canPerm('stock.adjust') || access.canPerm('stock.manage');
   }
   if (tab.permission) return access.canPerm(tab.permission);
   if (tab.roles) return access.can(tab.roles);

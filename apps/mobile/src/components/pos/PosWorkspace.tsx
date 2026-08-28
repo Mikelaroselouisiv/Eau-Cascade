@@ -66,6 +66,7 @@ import {
   specialPricesReady,
   type CartLine,
 } from '@/utils/posCart';
+import { departmentsForUser, isAdminRole, resolvedDepartmentIds } from '@/utils/user-scope';
 
 const DANGER = BrandColors.danger;
 const WARNING = '#B45309';
@@ -119,7 +120,8 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const { user, canPerm } = useAuth();
   const { companyId: scopedCompanyId } = useCompanyScope();
   const cashierLabel = user?.fullName?.trim() || user?.phone || 'Caissier';
-  const isCashier = user?.role === 'CASHIER';
+  const assignedDeptIds = resolvedDepartmentIds(user);
+  const isCashier = !isAdminRole(user?.role) && assignedDeptIds.length === 1;
   const canUsePos = canPerm('pos.use');
   const canSpecial = canPerm('sales.special_price');
   const canSell = canPerm('sales.create') || canUsePos;
@@ -155,9 +157,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
         : selectedCompanyId;
 
   const departmentId = isCashier
-    ? typeof user?.departmentId === 'number'
-      ? user.departmentId
-      : undefined
+    ? assignedDeptIds[0]
     : registerSession
       ? registerSession.departmentId
       : selectedDepartmentId === ''
@@ -240,16 +240,17 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     void getDepartments(companyId)
       .then((depts) => {
         if (cancelled) return;
-        setDepartments(depts);
+        const scoped = departmentsForUser(depts, user);
+        setDepartments(scoped);
         setSelectedDepartmentId((prev) => {
-          if (typeof prev === 'number' && depts.some((d) => d.id === prev)) return prev;
+          if (typeof prev === 'number' && scoped.some((d) => d.id === prev)) return prev;
           if (
             typeof user?.departmentId === 'number' &&
-            depts.some((d) => d.id === user.departmentId)
+            scoped.some((d) => d.id === user.departmentId)
           ) {
             return user.departmentId;
           }
-          return depts[0]?.id ?? '';
+          return scoped[0]?.id ?? '';
         });
       })
       .catch(() => {
@@ -261,7 +262,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [isCashier, companyId, user?.departmentId]);
+  }, [isCashier, companyId, user?.departmentId, user?.departmentIds]);
 
   const displayedProducts = useMemo(() => {
     const rows = isCashier

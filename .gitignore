@@ -15,6 +15,9 @@ infra/docker/.env.server
 
 # Desktop build artifacts
 apps/desktop/release/
+# Copies racine (USB / PC de dev) — jamais GitHub
+/POS-Eau-Cascade-*.exe
+/POS-Eau-Cascade-*.exe.blockmap
 apps/desktop/build/
 apps/desktop/server-stack/images/*.tar
 apps/desktop/server-stack/defaults.env

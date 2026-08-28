@@ -27,8 +27,10 @@ import { stockPackagingLabel } from '@/utils/packaging';
 import { formatQuantity } from '@/utils/quantity';
 
 export function StockHarmonisationScreen() {
-  const { can, canPerm } = useAuth();
-  const allowed = can(['ADMIN']) || canPerm('stock.adjust');
+  const { canPerm } = useAuth();
+  const canStockIn = canPerm('stock.manage') || canPerm('stock.adjust');
+  const canStockOut = canPerm('stock.adjust');
+  const allowed = canStockIn || canStockOut;
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -91,6 +93,11 @@ export function StockHarmonisationScreen() {
     }
   }, [filteredProducts, productId]);
 
+  useEffect(() => {
+    if (kind === 'in' && !canStockIn && canStockOut) setKind('out');
+    if (kind === 'out' && !canStockOut && canStockIn) setKind('in');
+  }, [kind, canStockIn, canStockOut]);
+
   const selected = useMemo(
     () => (productId === '' ? null : products.find((p) => p.id === productId) ?? null),
     [productId, products],
@@ -117,12 +124,22 @@ export function StockHarmonisationScreen() {
     setStatus(null);
     try {
       if (kind === 'in') {
+        if (!canStockIn) {
+          setStatus('Entrée non autorisée');
+          setBusy(false);
+          return;
+        }
         await stockIn({
           productId,
           quantity,
           reason: note ?? 'Réception / entrée stock',
         });
       } else {
+        if (!canStockOut) {
+          setStatus('Sortie non autorisée');
+          setBusy(false);
+          return;
+        }
         if (selected && Number(selected.stock) < quantity) {
           setStatus(
             `Stock insuffisant (dispo : ${formatQuantity(selected.stock)} ${stockPackagingLabel(selected)})`,
@@ -151,7 +168,7 @@ export function StockHarmonisationScreen() {
     return (
       <Screen>
         <View style={styles.blocked}>
-          <Text style={styles.blockedText}>Harmonisation réservée aux administrateurs.</Text>
+          <Text style={styles.blockedText}>Accès refusé.</Text>
         </View>
       </Screen>
     );
@@ -166,16 +183,20 @@ export function StockHarmonisationScreen() {
 
           <Text style={styles.fieldLabel}>Type</Text>
           <View style={styles.row2}>
-            <Pressable
-              style={[styles.kindChip, kind === 'in' && styles.kindChipActive]}
-              onPress={() => setKind('in')}>
-              <Text style={[styles.kindText, kind === 'in' && styles.kindTextActive]}>Entrée</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.kindChip, kind === 'out' && styles.kindChipActive]}
-              onPress={() => setKind('out')}>
-              <Text style={[styles.kindText, kind === 'out' && styles.kindTextActive]}>Sortie</Text>
-            </Pressable>
+            {canStockIn ? (
+              <Pressable
+                style={[styles.kindChip, kind === 'in' && styles.kindChipActive]}
+                onPress={() => setKind('in')}>
+                <Text style={[styles.kindText, kind === 'in' && styles.kindTextActive]}>Entrée</Text>
+              </Pressable>
+            ) : null}
+            {canStockOut ? (
+              <Pressable
+                style={[styles.kindChip, kind === 'out' && styles.kindChipActive]}
+                onPress={() => setKind('out')}>
+                <Text style={[styles.kindText, kind === 'out' && styles.kindTextActive]}>Sortie</Text>
+              </Pressable>
+            ) : null}
           </View>
 
           <Text style={styles.fieldLabel}>Entreprise</Text>
