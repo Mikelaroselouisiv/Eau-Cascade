@@ -5,12 +5,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InventorySessionKind, RegisterSessionStatus } from '@prisma/client';
-import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
+import { USER_ATTRIBUTION_SELECT, formatUserAttribution } from '../../common/user-attribution';
 import { ymdToBusinessDayEnd, ymdToBusinessDayStart } from '../../common/utils/business-timezone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../inventory/inventory.service';
-import type { CloseRegisterSessionDto, OpenRegisterSessionDto } from './dto/register-session.dto';
+import type {
+  ClaimRegisterSessionDto,
+  CloseRegisterSessionDto,
+  OpenRegisterSessionDto,
+} from './dto/register-session.dto';
 
 const SESSION_INCLUDE = {
   register: { include: { store: true, department: true } },
@@ -45,19 +49,29 @@ export class RegisterSessionsService {
   listRegisters(filters?: { companyId?: number; departmentId?: number }) {
     const companyId = filters?.companyId;
     const departmentId = filters?.departmentId;
-    return this.prisma.register.findMany({
-      where: {
-        deletedAt: null,
-        ...(companyId ? { store: { companyId } } : {}),
-        ...(departmentId
-          ? {
-              OR: [{ departmentId }, { departmentId: null }],
-            }
-          : {}),
-      },
-      include: REGISTER_INCLUDE,
-      orderBy: { code: 'asc' },
-    });
+    return this.prisma.register
+      .findMany({
+        where: {
+          deletedAt: null,
+          ...(companyId ? { store: { companyId } } : {}),
+          ...(departmentId
+            ? {
+                OR: [{ departmentId }, { departmentId: null }],
+              }
+            : {}),
+        },
+        include: REGISTER_INCLUDE,
+        orderBy: { code: 'asc' },
+      })
+      .then((rows) => {
+        if (departmentId == null) return rows;
+        return [...rows].sort((a, b) => {
+          const aMatch = a.departmentId === departmentId ? 0 : 1;
+          const bMatch = b.departmentId === departmentId ? 0 : 1;
+          if (aMatch !== bMatch) return aMatch - bMatch;
+          return a.code.localeCompare(b.code, 'fr');
+        });
+      });
   }
 
   private async ensureCompanyStore(companyId: number) {
@@ -71,7 +85,32 @@ export class RegisterSessionsService {
     });
   }
 
-  async ensureDefaultRegister(companyId: number) {
+  async ensureDefaultRegister(companyId: number, departmentId?: number) {
+    if (departmentId != null) {
+      const existing = await this.prisma.register.findFirst({
+        where: { departmentId, store: { companyId }, deletedAt: null },
+        include: REGISTER_INCLUDE,
+      });
+      if (existing) return existing;
+
+      const store = await this.ensureCompanyStore(companyId);
+      const code = `CAISSE-${companyId}-D${departmentId}`;
+      const clash = await this.prisma.register.findFirst({
+        where: { code, deletedAt: null },
+        include: REGISTER_INCLUDE,
+      });
+      if (clash?.departmentId === departmentId) return clash;
+
+      return this.prisma.register.create({
+        data: {
+          storeId: store.id,
+          departmentId,
+          code: clash ? `${code}-${Date.now()}` : code,
+        },
+        include: REGISTER_INCLUDE,
+      });
+    }
+
     const existing = await this.prisma.register.findFirst({
       where: { store: { companyId }, deletedAt: null },
       include: REGISTER_INCLUDE,
@@ -130,6 +169,69 @@ export class RegisterSessionsService {
       where: { registerId, status: RegisterSessionStatus.OPEN, deletedAt: null },
       include: SESSION_INCLUDE,
     });
+  }
+
+  getOpenSessionForDepartment(departmentId: number) {
+    return this.prisma.registerSession.findFirst({
+      where: { departmentId, status: RegisterSessionStatus.OPEN, deletedAt: null },
+      include: SESSION_INCLUDE,
+    });
+  }
+
+  private holderText(session: {
+    openedBy?: { fullName?: string | null; phone?: string | null; email?: string | null } | null;
+    openedDeviceName?: string | null;
+  }) {
+    const who = formatUserAttribution(session.openedBy);
+    const device = session.openedDeviceName?.trim();
+    return device ? `${who} · ${device}` : who;
+  }
+
+  async getSessionContext(userId: number, deviceId: string, departmentId?: number) {
+    let mine = await this.getActiveSessionForUser(userId);
+    if (mine && !mine.openedDeviceId) {
+      mine = await this.claimSession(mine.id, { deviceId }, userId);
+    }
+    const occupancy =
+      departmentId != null ? await this.getOpenSessionForDepartment(departmentId) : null;
+    const local =
+      mine && mine.openedDeviceId && mine.openedDeviceId === deviceId.trim() ? mine : null;
+    const mineElsewhere = mine && !local ? mine : null;
+    return { local, mineElsewhere, occupancy };
+  }
+
+  async claimSession(sessionId: number, dto: ClaimRegisterSessionDto, userId: number) {
+    const session = await this.prisma.registerSession.findFirst({
+      where: { id: sessionId, deletedAt: null },
+    });
+    if (!session) {
+      throw new NotFoundException('Session introuvable');
+    }
+    if (session.status !== RegisterSessionStatus.OPEN) {
+      throw new BadRequestException('Cette caisse est déjà fermée.');
+    }
+    if (session.openedById !== userId) {
+      throw new BadRequestException('Seul l’utilisateur ayant ouvert la caisse peut la reprendre.');
+    }
+
+    const claimed = await this.prisma.registerSession.update({
+      where: { id: sessionId },
+      data: {
+        openedDeviceId: dto.deviceId.trim(),
+        openedDeviceName: dto.deviceName?.trim() || null,
+      },
+      include: SESSION_INCLUDE,
+    });
+
+    await this.auditService.log({
+      userId,
+      action: 'REGISTER_SESSION_CLAIMED',
+      entity: 'RegisterSession',
+      entityId: String(sessionId),
+      metadata: { deviceId: dto.deviceId.trim(), deviceName: dto.deviceName?.trim() || null },
+    });
+
+    return claimed;
   }
 
   listSessions(filters?: {
@@ -364,12 +466,27 @@ export class RegisterSessionsService {
 
     const existingUser = await this.getActiveSessionForUser(userId);
     if (existingUser) {
-      throw new BadRequestException('Vous avez déjà une caisse ouverte.');
+      const otherDevice =
+        existingUser.openedDeviceId && existingUser.openedDeviceId !== dto.deviceId.trim();
+      throw new BadRequestException(
+        otherDevice
+          ? `Vous avez déjà une caisse ouverte sur ${existingUser.openedDeviceName?.trim() || 'un autre appareil'}.`
+          : 'Vous avez déjà une caisse ouverte.',
+      );
+    }
+
+    const existingDept = await this.getOpenSessionForDepartment(dto.departmentId);
+    if (existingDept) {
+      throw new BadRequestException(
+        `Ce département a déjà une caisse ouverte (${this.holderText(existingDept)}).`,
+      );
     }
 
     const existingRegister = await this.getOpenSessionForRegister(dto.registerId);
     if (existingRegister) {
-      throw new BadRequestException('Ce comptoir est déjà ouvert.');
+      throw new BadRequestException(
+        `Ce comptoir est déjà ouvert (${this.holderText(existingRegister)}).`,
+      );
     }
 
     const openingInventory = await this.inventoryService.createRegisterInventorySession(
@@ -384,6 +501,8 @@ export class RegisterSessionsService {
         registerId: dto.registerId,
         departmentId: dto.departmentId,
         openedById: userId,
+        openedDeviceId: dto.deviceId.trim(),
+        openedDeviceName: dto.deviceName?.trim() || null,
         openingCashAmount: dto.openingCashAmount ?? null,
         openingInventorySessionId: openingInventory.id,
       },
@@ -395,7 +514,12 @@ export class RegisterSessionsService {
       action: 'REGISTER_SESSION_OPENED',
       entity: 'RegisterSession',
       entityId: String(session.id),
-      metadata: { registerId: dto.registerId, departmentId: dto.departmentId },
+      metadata: {
+        registerId: dto.registerId,
+        departmentId: dto.departmentId,
+        deviceId: dto.deviceId.trim(),
+        deviceName: dto.deviceName?.trim() || null,
+      },
     });
 
     return session;

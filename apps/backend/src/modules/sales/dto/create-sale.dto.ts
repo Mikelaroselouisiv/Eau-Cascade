@@ -125,6 +125,13 @@ export class CreateSaleDto {
   @MinLength(8)
   clientUuid?: string;
 
+  /** UUID d’appareil POS — doit correspondre à la session caisse ouverte. */
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(64)
+  deviceId?: string;
+
   /** Vente spéciale : prix unitaires saisis manuellement (ADMIN / MANAGER uniquement). */
   @IsOptional()
   @IsBoolean()

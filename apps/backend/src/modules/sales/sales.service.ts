@@ -292,6 +292,24 @@ export class SalesService {
       const storeId = createSaleDto.storeId ?? null;
       const registerId = createSaleDto.registerId ?? null;
 
+      if (registerId != null && userId) {
+        const open = await tx.registerSession.findFirst({
+          where: {
+            registerId,
+            openedById: userId,
+            status: 'OPEN',
+            deletedAt: null,
+          },
+        });
+        if (!open) {
+          throw new BadRequestException('Ouvrez la caisse avant d’encaisser.');
+        }
+        const saleDevice = createSaleDto.deviceId?.trim();
+        if (open.openedDeviceId && saleDevice && open.openedDeviceId !== saleDevice) {
+          throw new BadRequestException('Cette caisse est ouverte sur un autre appareil.');
+        }
+      }
+
       const clientUuid = createSaleDto.clientUuid ?? null;
       // uuid : plus de DEFAULT SQL après drift Prisma (@default(uuid()) côté client seulement).
       // L’INSERT brut doit donc fournir uuid explicitement.

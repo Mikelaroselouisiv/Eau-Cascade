@@ -13,22 +13,25 @@ import { ModalShell } from '@/components/ModalShell';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import {
+  claimRegisterSession,
   closeRegisterSession,
   ensureDefaultRegister,
-  getActiveRegisterSession,
   getInventoryCountSheet,
   getProducts,
   getRegisterClosingCashPreview,
+  getRegisterSessionContext,
   listRegisters,
   openRegisterSession,
 } from '@/services/api';
 import { formatApiError } from '@/services/api-errors';
+import { getPosDeviceId, getPosDeviceName } from '@/services/pos-device';
 import type {
   InventoryCountSheetRow,
   Product,
   RegisterClosingCashPreview,
   RegisterInventoryLinePayload,
   RegisterListItem,
+  RegisterSessionContext,
   RegisterSessionDetail,
 } from '@/types/api';
 import { formatMoney } from '@/utils/datetime';
@@ -40,9 +43,17 @@ type Props = {
   companyId?: number;
   departmentId?: number;
   session: RegisterSessionDetail | null;
-  onSessionChange: (session: RegisterSessionDetail | null) => void;
+  mineElsewhere: RegisterSessionDetail | null;
+  occupancy: RegisterSessionDetail | null;
+  onContextChange: (ctx: RegisterSessionContext) => void;
   onStatus: (message: string) => void;
 };
+
+function sessionHolder(s: RegisterSessionDetail) {
+  const who = s.openedBy?.fullName?.trim() || s.openedBy?.phone?.trim() || 'Utilisateur';
+  const device = s.openedDeviceName?.trim();
+  return device ? `${who} · ${device}` : who;
+}
 
 function parseQty(raw: string): number | null {
   const trimmed = raw.trim().replace(/\s/g, '').replace(',', '.');
@@ -93,7 +104,9 @@ export function RegisterSessionBar({
   companyId,
   departmentId,
   session,
-  onSessionChange,
+  mineElsewhere,
+  occupancy,
+  onContextChange,
   onStatus,
 }: Props) {
   const [panel, setPanel] = useState<PanelMode>(null);
@@ -109,13 +122,19 @@ export function RegisterSessionBar({
   const [closingPreview, setClosingPreview] = useState<RegisterClosingCashPreview | null>(null);
 
   const refreshSession = useCallback(async () => {
-    const active = await getActiveRegisterSession();
-    onSessionChange(active);
-  }, [onSessionChange]);
+    const deviceId = await getPosDeviceId();
+    const ctx = await getRegisterSessionContext({
+      deviceId,
+      departmentId,
+    });
+    onContextChange(ctx);
+  }, [departmentId, onContextChange]);
 
   useEffect(() => {
-    void refreshSession().catch(() => onSessionChange(null));
-  }, [refreshSession, onSessionChange]);
+    void refreshSession().catch(() =>
+      onContextChange({ local: null, mineElsewhere: null, occupancy: null }),
+    );
+  }, [refreshSession, onContextChange]);
 
   const linesReady = useMemo(
     () => countProducts.every((p) => parseQty(counts[p.id] ?? '') !== null),
@@ -123,25 +142,28 @@ export function RegisterSessionBar({
   );
 
   async function openPanel(mode: PanelMode) {
-    if (!mode || departmentId == null) {
+    const closeSession = session ?? mineElsewhere;
+    const targetDept =
+      mode === 'close' ? (closeSession?.departmentId ?? departmentId) : departmentId;
+    if (!mode || targetDept == null) {
       onStatus('Département manquant pour la caisse');
       return;
     }
     setError('');
     setBusy(true);
     try {
-      const sheet = await loadRegisterCountRows(departmentId);
+      const sheet = await loadRegisterCountRows(targetDept);
       const resolvedCompanyId = companyId ?? sheet.companyId;
 
       let regs = await listRegisters({
         companyId: resolvedCompanyId,
-        departmentId,
+        departmentId: targetDept,
       });
       if (regs.length === 0 && resolvedCompanyId != null) {
-        await ensureDefaultRegister(resolvedCompanyId);
+        await ensureDefaultRegister(resolvedCompanyId, targetDept);
         regs = await listRegisters({
           companyId: resolvedCompanyId,
-          departmentId,
+          departmentId: targetDept,
         });
       }
       setRegisters(regs);
@@ -152,15 +174,15 @@ export function RegisterSessionBar({
       if (mode === 'open') {
         setOpeningCash('');
         setClosingPreview(null);
-      } else if (session) {
+      } else if (closeSession) {
         try {
-          const preview = await getRegisterClosingCashPreview(session.id);
+          const preview = await getRegisterClosingCashPreview(closeSession.id);
           setClosingPreview(preview);
           setClosingExpected(String(preview.expected));
           setClosingCounted(String(preview.expected));
         } catch {
           setClosingPreview(null);
-          const opening = Number(session.openingCashAmount ?? 0);
+          const opening = Number(closeSession.openingCashAmount ?? 0);
           setClosingExpected(Number.isFinite(opening) ? String(opening) : '0');
           setClosingCounted(Number.isFinite(opening) ? String(opening) : '0');
         }
@@ -207,13 +229,16 @@ export function RegisterSessionBar({
     setBusy(true);
     setError('');
     try {
+      const deviceId = await getPosDeviceId();
       const next = await openRegisterSession({
         registerId: selectedRegisterId,
         departmentId,
         openingCashAmount,
         lines,
+        deviceId,
+        deviceName: getPosDeviceName(),
       });
-      onSessionChange(next);
+      onContextChange({ local: next, mineElsewhere: null, occupancy: next });
       setPanel(null);
       onStatus('Caisse ouverte');
     } catch (err) {
@@ -224,7 +249,8 @@ export function RegisterSessionBar({
   }
 
   async function submitClose() {
-    if (!session) return;
+    const closeSession = session ?? mineElsewhere;
+    if (!closeSession) return;
     const lines = buildLines();
     if (!lines) {
       setError('Complétez le comptage stock');
@@ -243,12 +269,12 @@ export function RegisterSessionBar({
     setBusy(true);
     setError('');
     try {
-      await closeRegisterSession(session.id, {
+      await closeRegisterSession(closeSession.id, {
         closingCashExpected: expected,
         closingCashCounted: counted,
         lines,
       });
-      onSessionChange(null);
+      onContextChange({ local: null, mineElsewhere: null, occupancy: null });
       setPanel(null);
       onStatus('Caisse fermée');
     } catch (err) {
@@ -258,42 +284,86 @@ export function RegisterSessionBar({
     }
   }
 
+  async function submitClaim() {
+    if (!mineElsewhere) return;
+    setBusy(true);
+    setError('');
+    try {
+      const deviceId = await getPosDeviceId();
+      const next = await claimRegisterSession(mineElsewhere.id, {
+        deviceId,
+        deviceName: getPosDeviceName(),
+      });
+      onContextChange({ local: next, mineElsewhere: null, occupancy: next });
+      onStatus('Caisse reprise sur cet appareil');
+    } catch (err) {
+      onStatus(formatApiError(err, 'Impossible de reprendre la caisse'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const barLabel = session
+    ? `Ouverte · ${session.register.code}`
+    : mineElsewhere
+      ? `Ouverte sur ${mineElsewhere.openedDeviceName?.trim() || 'un autre appareil'}`
+      : occupancy
+        ? `Occupée · ${occupancy.register.code}`
+        : 'Caisse fermée';
+  const barMeta = session
+    ? `${session.department.name} · ${sessionHolder(session)}`
+    : mineElsewhere
+      ? `${mineElsewhere.department.name} · ${sessionHolder(mineElsewhere)}`
+      : occupancy
+        ? `${occupancy.department.name} · ${sessionHolder(occupancy)}`
+        : departmentId == null
+          ? 'Choisissez un département pour ouvrir'
+          : 'Ouvrez la caisse pour encaisser';
+  const canOpen = departmentId != null && !session && !mineElsewhere && !occupancy;
+
   return (
     <>
       <View style={styles.bar}>
         <View style={styles.barInfo}>
-          <Text style={styles.barLabel}>
-            {session
-              ? `Ouverte · ${session.register.code}`
-              : 'Caisse fermée'}
-          </Text>
+          <Text style={styles.barLabel}>{barLabel}</Text>
+          <Text style={styles.barMeta}>{barMeta}</Text>
+        </View>
+        <View style={styles.barActions}>
           {session ? (
-            <Text style={styles.barMeta}>{session.department.name}</Text>
-          ) : departmentId == null ? (
-            <Text style={styles.barMeta}>Choisissez un département pour ouvrir</Text>
+            <Pressable
+              style={[styles.barBtn, styles.barBtnDanger]}
+              onPress={() => void openPanel('close')}
+              disabled={busy}>
+              <Text style={styles.barBtnTextDanger}>Fermer</Text>
+            </Pressable>
+          ) : mineElsewhere ? (
+            <>
+              <Pressable
+                style={styles.barBtn}
+                onPress={() => void submitClaim()}
+                disabled={busy}>
+                <Text style={styles.barBtnText}>Reprendre</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.barBtn, styles.barBtnDanger]}
+                onPress={() => void openPanel('close')}
+                disabled={busy}>
+                <Text style={styles.barBtnTextDanger}>Fermer</Text>
+              </Pressable>
+            </>
           ) : (
-            <Text style={styles.barMeta}>Ouvrez la caisse pour encaisser</Text>
+            <Pressable
+              style={[styles.barBtn, !canOpen && styles.submitDisabled]}
+              onPress={() => void openPanel('open')}
+              disabled={busy || !canOpen}>
+              {busy && !panel ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.barBtnText}>Ouvrir</Text>
+              )}
+            </Pressable>
           )}
         </View>
-        {session ? (
-          <Pressable
-            style={[styles.barBtn, styles.barBtnDanger]}
-            onPress={() => void openPanel('close')}
-            disabled={busy}>
-            <Text style={styles.barBtnTextDanger}>Fermer</Text>
-          </Pressable>
-        ) : (
-          <Pressable
-            style={styles.barBtn}
-            onPress={() => void openPanel('open')}
-            disabled={busy || departmentId == null}>
-            {busy && !panel ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.barBtnText}>Ouvrir</Text>
-            )}
-          </Pressable>
-        )}
       </View>
 
       <ModalShell
@@ -467,6 +537,7 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   barInfo: { flex: 1, gap: 2 },
+  barActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, justifyContent: 'flex-end' },
   barLabel: { fontSize: 15, fontWeight: '700', color: BrandColors.text },
   barMeta: { fontSize: 13, color: BrandColors.textMuted },
   barBtn: {

@@ -33,6 +33,7 @@ export const SYNC_ENTITIES = [
   'BankTransaction',
   'InventorySession',
   'InventoryLine',
+  'RegisterSession',
   'PurchaseOrder',
   'PurchaseOrderLine',
   'GoodsReceipt',

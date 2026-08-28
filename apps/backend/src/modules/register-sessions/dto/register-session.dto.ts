@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -62,6 +63,28 @@ export class OpenRegisterSessionDto {
   @ValidateNested({ each: true })
   @Type(() => RegisterInventoryLineDto)
   lines: RegisterInventoryLineDto[];
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(64)
+  deviceId: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  deviceName?: string;
+}
+
+export class ClaimRegisterSessionDto {
+  @IsString()
+  @MinLength(8)
+  @MaxLength(64)
+  deviceId: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  deviceName?: string;
 }
 
 export class CloseRegisterSessionDto {

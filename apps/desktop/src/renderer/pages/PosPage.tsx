@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  claimRegisterSession,
   closeRegisterSession,
   collectSaleBalance,
   createSale,
   ensureDefaultRegister,
-  getActiveRegisterSession,
   getCompany,
   getCompanyById,
   getCompanies,
@@ -12,6 +12,7 @@ import {
   getInventoryCountSheet,
   getPrinterSettings,
   getRegisterClosingCashPreview,
+  getRegisterSessionContext,
   listBanks,
   listRegisters,
   listSaleCashGaps,
@@ -20,6 +21,7 @@ import {
 } from '../services/api';
 import { isLikelyNetworkError } from '../services/api-errors';
 import { enqueueSale, syncSalesQueue } from '../services/offline-queue';
+import { getPosDeviceId, getPosDeviceName } from '../services/pos-device';
 import { loadProductsWithCache } from '../services/product-cache';
 import type {
   CompanyListItem,
@@ -36,14 +38,20 @@ import type {
   SaleCashGapRow,
 } from '../types/api';
 import { RegisterStockCountForm } from '../components/RegisterStockCountForm';
-import { formatRegisterCode } from '../utils/registerDisplay';
 import { MoneyField } from '../components/MoneyField';
 import { useAuth } from '../context/AuthContext';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../utils/volumeUnitPrice';
 import { formatMoney, resolveCurrencyCode } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
+import { formatRegisterCode } from '../utils/registerDisplay';
 import { departmentsForUser, isAdminRole, resolvedDepartmentIds } from '../utils/user-scope';
+
+function sessionHolder(s: RegisterSessionDetail) {
+  const who = s.openedBy?.fullName?.trim() || s.openedBy?.phone?.trim() || 'Utilisateur';
+  const device = s.openedDeviceName?.trim();
+  return device ? `${who} · ${device}` : who;
+}
 
 /** Quantité décimale dans l’unité choisie (caisse, bouteille…) ; le stock est dans la même unité. */
 const QTY_DECIMALS = 4;
@@ -190,6 +198,8 @@ export function PosPage() {
   const [cashGapQuery, setCashGapQuery] = useState('');
 
   const [registerSession, setRegisterSession] = useState<RegisterSessionDetail | null>(null);
+  const [mineElsewhere, setMineElsewhere] = useState<RegisterSessionDetail | null>(null);
+  const [sessionOccupancy, setSessionOccupancy] = useState<RegisterSessionDetail | null>(null);
   const [registers, setRegisters] = useState<RegisterListItem[]>([]);
   const [selectedRegisterId, setSelectedRegisterId] = useState<number | ''>('');
   const [countProducts, setCountProducts] = useState<InventoryCountSheetRow[]>([]);
@@ -234,8 +244,13 @@ export function PosPage() {
   }, [posScopeLocked, user?.companyId, company?.id, selectedCompanyId]);
 
   async function loadRegisterContext(deptId?: number, compId?: number) {
-    const session = await getActiveRegisterSession();
-    setRegisterSession(session);
+    const ctx = await getRegisterSessionContext({
+      deviceId: getPosDeviceId(),
+      departmentId: deptId,
+    });
+    setRegisterSession(ctx.local);
+    setMineElsewhere(ctx.mineElsewhere);
+    setSessionOccupancy(ctx.occupancy);
     let resolvedCompanyId = compId;
     if (deptId != null) {
       const sheet = await getInventoryCountSheet(deptId);
@@ -250,7 +265,7 @@ export function PosPage() {
         departmentId: deptId,
       });
       if (regs.length === 0) {
-        regs = [await ensureDefaultRegister(resolvedCompanyId)];
+        regs = [await ensureDefaultRegister(resolvedCompanyId, deptId)];
       }
       setRegisters(regs);
       setSelectedRegisterId((prev) => {
@@ -850,6 +865,7 @@ export function PosPage() {
       fulfillmentType: activeDraft.fulfillmentType,
       clientUuid,
       registerId: registerSession.registerId,
+      deviceId: getPosDeviceId(),
       ...(saleMode === 'special' ? { specialSale: true } : {}),
       ...(tendered != null ? { amountReceived: tendered } : {}),
     };
@@ -997,8 +1013,12 @@ export function PosPage() {
         departmentId: effectiveDepartmentId,
         openingCashAmount,
         lines,
+        deviceId: getPosDeviceId(),
+        deviceName: getPosDeviceName(),
       });
       setRegisterSession(session);
+      setMineElsewhere(null);
+      setSessionOccupancy(session);
       setOpeningCash('');
       setRegisterPanel(null);
       setStatus('Caisse ouverte');
@@ -1010,7 +1030,8 @@ export function PosPage() {
   }
 
   async function onCloseRegister(lines: Array<{ productId: number; countedQty: number }>) {
-    if (!registerSession) return;
+    const closeSession = registerSession ?? mineElsewhere;
+    if (!closeSession) return;
     const expected = Number(closingCashExpected.replace(',', '.'));
     const counted = Number(closingCashCounted.replace(',', '.'));
     if (!Number.isFinite(expected) || expected < 0 || !Number.isFinite(counted) || counted < 0) {
@@ -1020,12 +1041,14 @@ export function PosPage() {
     setRegisterBusy(true);
     setRegisterError('');
     try {
-      await closeRegisterSession(registerSession.id, {
+      await closeRegisterSession(closeSession.id, {
         closingCashExpected: expected,
         closingCashCounted: counted,
         lines,
       });
       setRegisterSession(null);
+      setMineElsewhere(null);
+      setSessionOccupancy(null);
       setRegisterPanel(null);
       setClosingCashExpected('');
       setClosingCashCounted('');
@@ -1053,14 +1076,15 @@ export function PosPage() {
       setClosingCashExpected('');
     }
     await refreshCountProducts();
-    if (mode === 'close' && registerSession) {
+    if (mode === 'close' && (registerSession || mineElsewhere)) {
+      const closeSession = registerSession ?? mineElsewhere!;
       try {
-        const preview = await getRegisterClosingCashPreview(registerSession.id);
+        const preview = await getRegisterClosingCashPreview(closeSession.id);
         setClosingCashPreview(preview);
         setClosingCashExpected(String(preview.expected));
       } catch {
         setClosingCashPreview(null);
-        const opening = Number(registerSession.openingCashAmount ?? 0);
+        const opening = Number(closeSession.openingCashAmount ?? 0);
         setClosingCashExpected(Number.isFinite(opening) ? String(opening) : '0');
         setRegisterError('Impossible de calculer les espèces attendues.');
       }
@@ -1068,6 +1092,28 @@ export function PosPage() {
       setClosingCashPreview(null);
     }
     setRegisterPanel(mode);
+  }
+
+  async function onClaimRegister() {
+    if (!mineElsewhere) return;
+    setRegisterBusy(true);
+    setRegisterError('');
+    try {
+      const next = await claimRegisterSession(mineElsewhere.id, {
+        deviceId: getPosDeviceId(),
+        deviceName: getPosDeviceName(),
+      });
+      setRegisterSession(next);
+      setMineElsewhere(null);
+      setSessionOccupancy(next);
+      setSelectedCompanyId(next.department.company.id);
+      setSelectedDepartmentId(next.departmentId);
+      setStatus('Caisse reprise sur cet appareil');
+    } catch {
+      setRegisterError('Impossible de reprendre la caisse.');
+    } finally {
+      setRegisterBusy(false);
+    }
   }
 
   return (
@@ -1099,19 +1145,55 @@ export function PosPage() {
         {registerSession ? (
           <span className="info-text" style={{ margin: 0 }}>
             Caisse {formatRegisterCode(registerSession.register.code)} ·{' '}
-            {registerSession.department.name}
+            {registerSession.department.name} · {sessionHolder(registerSession)}
+          </span>
+        ) : mineElsewhere ? (
+          <span className="info-text" style={{ margin: 0 }}>
+            Ouverte sur {mineElsewhere.openedDeviceName?.trim() || 'un autre appareil'} ·{' '}
+            {mineElsewhere.department.name} · {sessionHolder(mineElsewhere)}
+          </span>
+        ) : sessionOccupancy ? (
+          <span className="info-text" style={{ margin: 0 }}>
+            Occupée · {sessionOccupancy.department.name} · {sessionHolder(sessionOccupancy)}
           </span>
         ) : null}
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          disabled={effectiveDepartmentId == null}
-          onClick={() =>
-            void openRegisterPanel(registerSession ? 'close' : 'open')
-          }
-        >
-          {registerSession ? 'Fermer caisse' : 'Ouvrir caisse'}
-        </button>
+        {registerSession ? (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={effectiveDepartmentId == null}
+            onClick={() => void openRegisterPanel('close')}
+          >
+            Fermer caisse
+          </button>
+        ) : mineElsewhere ? (
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={registerBusy}
+              onClick={() => void onClaimRegister()}
+            >
+              Reprendre
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => void openRegisterPanel('close')}
+            >
+              Fermer caisse
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={effectiveDepartmentId == null || sessionOccupancy != null}
+            onClick={() => void openRegisterPanel('open')}
+          >
+            Ouvrir caisse
+          </button>
+        )}
       </header>
 
       {status ? <p className="info-text">{status}</p> : null}
@@ -1171,7 +1253,7 @@ export function PosPage() {
                 onSubmit={(lines) => void onOpenRegister(lines)}
               />
             </>
-          ) : registerSession ? (
+          ) : registerSession || mineElsewhere ? (
             <RegisterStockCountForm
               key={`close-${countProducts.map((p) => p.id).join('-')}`}
               products={countProducts}

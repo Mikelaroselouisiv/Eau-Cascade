@@ -15,6 +15,7 @@ import { Permissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import {
+  ClaimRegisterSessionDto,
   CloseRegisterSessionDto,
   CreateRegisterDto,
   OpenRegisterSessionDto,
@@ -49,18 +50,44 @@ export class RegisterSessionsController {
 
   @Post('registers/ensure-default')
   @Permissions('pos.use')
-  ensureDefaultRegister(@Query('companyId') companyIdRaw: string) {
+  ensureDefaultRegister(
+    @Query('companyId') companyIdRaw: string,
+    @Query('departmentId') departmentIdRaw?: string,
+  ) {
     const companyId = Number.parseInt(companyIdRaw, 10);
     if (!Number.isFinite(companyId) || companyId <= 0) {
       throw new BadRequestException('companyId est requis.');
     }
-    return this.registerSessionsService.ensureDefaultRegister(companyId);
+    const departmentId = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : undefined;
+    return this.registerSessionsService.ensureDefaultRegister(
+      companyId,
+      Number.isFinite(departmentId) && departmentId! > 0 ? departmentId : undefined,
+    );
   }
 
   @Get('active')
   @Permissions('pos.use')
   getActive(@GetUser() user: { id: number }) {
     return this.registerSessionsService.getActiveSessionForUser(user.id);
+  }
+
+  @Get('context')
+  @Permissions('pos.use')
+  getContext(
+    @GetUser() user: { id: number },
+    @Query('deviceId') deviceId?: string,
+    @Query('departmentId') departmentIdRaw?: string,
+  ) {
+    const id = deviceId?.trim() ?? '';
+    if (id.length < 8) {
+      throw new BadRequestException('deviceId est requis.');
+    }
+    const departmentId = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : undefined;
+    return this.registerSessionsService.getSessionContext(
+      user.id,
+      id,
+      Number.isFinite(departmentId) && departmentId! > 0 ? departmentId : undefined,
+    );
   }
 
   @Get()
@@ -123,6 +150,16 @@ export class RegisterSessionsController {
   @Permissions('pos.use')
   open(@Body() dto: OpenRegisterSessionDto, @GetUser() user: { id: number }) {
     return this.registerSessionsService.openSession(dto, user.id);
+  }
+
+  @Post(':id/claim')
+  @Permissions('pos.use')
+  claim(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ClaimRegisterSessionDto,
+    @GetUser() user: { id: number },
+  ) {
+    return this.registerSessionsService.claimSession(id, dto, user.id);
   }
 
   @Post(':id/close')

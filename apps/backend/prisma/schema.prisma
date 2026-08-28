@@ -269,6 +269,9 @@ model RegisterSession {
   openedById                Int
   openedBy                  User                  @relation("RegisterSessionOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
   openedAt                  DateTime              @default(now())
+  /// UUID d’appareil POS (téléphone / poste) — la vente n’est autorisée que sur cet appareil.
+  openedDeviceId            String?
+  openedDeviceName          String?
   closedById                Int?
   closedBy                  User?                 @relation("RegisterSessionClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
   closedAt                  DateTime?

@@ -834,6 +834,7 @@ export class SyncService {
       BankTransaction: this.prisma.bankTransaction as unknown as Delegate,
       InventorySession: this.prisma.inventorySession as unknown as Delegate,
       InventoryLine: this.prisma.inventoryLine as unknown as Delegate,
+      RegisterSession: this.prisma.registerSession as unknown as Delegate,
       PurchaseOrder: this.prisma.purchaseOrder as unknown as Delegate,
       PurchaseOrderLine: this.prisma.purchaseOrderLine as unknown as Delegate,
       GoodsReceipt: this.prisma.goodsReceipt as unknown as Delegate,

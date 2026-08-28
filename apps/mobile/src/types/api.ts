@@ -126,6 +126,8 @@ export interface CreateSalePayload {
   fulfillmentType?: FulfillmentType;
   /** UUID client pour idempotence (offline / rejeu). */
   clientUuid?: string;
+  /** UUID d’appareil POS (session caisse). */
+  deviceId?: string;
   registerId?: number;
   /** Vente spéciale (prix manuels) — ADMIN / MANAGER. */
   specialSale?: boolean;
@@ -223,10 +225,18 @@ export interface RegisterSessionDetail {
   closingCashExpected: string | number | null;
   closingCashCounted: string | number | null;
   cashVariance: string | number | null;
+  openedDeviceId?: string | null;
+  openedDeviceName?: string | null;
   register: RegisterListItem;
   department: { id: number; name: string; company: { id: number; name: string } };
   openedBy?: UserAttribution | null;
   closedBy?: UserAttribution | null;
+}
+
+export interface RegisterSessionContext {
+  local: RegisterSessionDetail | null;
+  mineElsewhere: RegisterSessionDetail | null;
+  occupancy: RegisterSessionDetail | null;
 }
 
 export interface AuditLogRow {

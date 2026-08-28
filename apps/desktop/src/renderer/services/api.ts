@@ -33,6 +33,7 @@ import type {
   InventorySessionListItem,
   InventoryCountSheet,
   RegisterListItem,
+  RegisterSessionContext,
   RegisterSessionDetail,
   RegisterInventoryLinePayload,
   GlobalStockSnapshot,
@@ -832,15 +833,46 @@ export async function createRegister(payload: {
   return data;
 }
 
-export async function ensureDefaultRegister(companyId: number): Promise<RegisterListItem> {
+export async function ensureDefaultRegister(
+  companyId: number,
+  departmentId?: number,
+): Promise<RegisterListItem> {
   const { data } = await api.post<RegisterListItem>(
-    `/register-sessions/registers/ensure-default?companyId=${companyId}`,
+    '/register-sessions/registers/ensure-default',
+    null,
+    {
+      params: { companyId, departmentId },
+    },
   );
   return data;
 }
 
 export async function getActiveRegisterSession(): Promise<RegisterSessionDetail | null> {
   const { data } = await api.get<RegisterSessionDetail | null>('/register-sessions/active');
+  return data;
+}
+
+export async function getRegisterSessionContext(params: {
+  deviceId: string;
+  departmentId?: number;
+}): Promise<RegisterSessionContext> {
+  const { data } = await api.get<RegisterSessionContext>('/register-sessions/context', {
+    params: {
+      deviceId: params.deviceId,
+      departmentId: params.departmentId,
+    },
+  });
+  return data;
+}
+
+export async function claimRegisterSession(
+  sessionId: number,
+  payload: { deviceId: string; deviceName?: string },
+): Promise<RegisterSessionDetail> {
+  const { data } = await api.post<RegisterSessionDetail>(
+    `/register-sessions/${sessionId}/claim`,
+    payload,
+  );
   return data;
 }
 
@@ -878,6 +910,8 @@ export async function openRegisterSession(payload: {
   departmentId: number;
   openingCashAmount?: number;
   lines: RegisterInventoryLinePayload[];
+  deviceId: string;
+  deviceName?: string;
 }): Promise<RegisterSessionDetail> {
   const { data } = await api.post<RegisterSessionDetail>('/register-sessions/open', payload);
   return data;

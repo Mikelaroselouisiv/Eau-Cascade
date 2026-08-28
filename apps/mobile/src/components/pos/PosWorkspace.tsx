@@ -14,7 +14,6 @@ import {
 import { useFocusEffect } from 'expo-router';
 
 import { ChipScroll } from '@/components/ChipScroll';
-import { ModalShell } from '@/components/ModalShell';
 import { MoneyText } from '@/components/MoneyText';
 import { RegisterSessionBar } from '@/components/pos/RegisterSessionBar';
 import { Screen } from '@/components/Screen';
@@ -36,6 +35,7 @@ import {
 import { printReceipt } from '@/services/bluetooth-printer';
 import { isOnline } from '@/services/net';
 import { enqueueSale, syncSalesQueue } from '@/services/offline-queue';
+import { getPosDeviceId } from '@/services/pos-device';
 import { loadProductsWithCache } from '@/services/product-cache';
 import { buildSaleReceiptData } from '@/services/receipt';
 import type {
@@ -45,6 +45,7 @@ import type {
   Department,
   FulfillmentType,
   Product,
+  RegisterSessionContext,
   RegisterSessionDetail,
   SaleCashGapRow,
   SaleCashGaps,
@@ -114,6 +115,8 @@ const PAYMENT_OPTIONS: {
   { method: 'BANK', label: 'Banque', icon: 'business-outline' },
 ];
 
+type PosPane = 'products' | 'cart' | 'change';
+
 type PosWorkspaceProps = {
   mode: 'classic' | 'special';
 };
@@ -123,7 +126,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const { companyId: scopedCompanyId } = useCompanyScope();
   const cashierLabel = user?.fullName?.trim() || user?.phone || 'Caissier';
   const assignedDeptIds = resolvedDepartmentIds(user);
-  const isCashier = !isAdminRole(user?.role) && assignedDeptIds.length === 1;
+  const posScopeLocked = !isAdminRole(user?.role) && assignedDeptIds.length === 1;
   const canUsePos = canPerm('pos.use');
   const canSpecial = canPerm('sales.special_price');
   const canSell = canPerm('sales.create') || canUsePos;
@@ -138,33 +141,31 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const [amountReceived, setAmountReceived] = useState('');
   const [nameDraft, setNameDraft] = useState('');
   const [printTicket, setPrintTicket] = useState(true);
-  const [cartVisible, setCartVisible] = useState(false);
+  const [posPane, setPosPane] = useState<PosPane>('products');
   const [status, setStatus] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [registerSession, setRegisterSession] = useState<RegisterSessionDetail | null>(null);
+  const [mineElsewhere, setMineElsewhere] = useState<RegisterSessionDetail | null>(null);
+  const [sessionOccupancy, setSessionOccupancy] = useState<RegisterSessionDetail | null>(null);
   const [qtyDrafts, setQtyDrafts] = useState<Record<number, string>>({});
   const [cashGaps, setCashGaps] = useState<SaleCashGaps>({ changeOwed: [], balanceOwed: [] });
   const [cashGapBusyId, setCashGapBusyId] = useState<number | null>(null);
   const [cashGapQuery, setCashGapQuery] = useState('');
   const [banks, setBanks] = useState<BankRow[]>([]);
 
-  const companyId = isCashier
+  const companyId = posScopeLocked
     ? typeof user?.companyId === 'number'
       ? user.companyId
       : (scopedCompanyId ?? undefined)
-    : registerSession
-      ? registerSession.department.company.id
-      : selectedCompanyId === ''
-        ? undefined
-        : selectedCompanyId;
+    : selectedCompanyId === ''
+      ? undefined
+      : selectedCompanyId;
 
-  const departmentId = isCashier
+  const departmentId = posScopeLocked
     ? assignedDeptIds[0]
-    : registerSession
-      ? registerSession.departmentId
-      : selectedDepartmentId === ''
-        ? undefined
-        : selectedDepartmentId;
+    : selectedDepartmentId === ''
+      ? undefined
+      : selectedDepartmentId;
 
   const activeDraft = useMemo(
     () => drafts.find((d) => d.id === activeDraftId) ?? drafts[0],
@@ -186,14 +187,14 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const salesEnabled = registerSession != null;
 
   const loadProducts = useCallback(() => {
-    if (!isCashier && departmentId == null) {
+    if (!posScopeLocked && departmentId == null) {
       setProducts([]);
       return;
     }
     loadProductsWithCache(departmentId)
       .then(setProducts)
       .catch(() => setStatus('Catalogue indisponible (hors ligne, pas de cache)'));
-  }, [departmentId, isCashier]);
+  }, [departmentId, posScopeLocked]);
 
   const refreshCashGaps = useCallback(async () => {
     if (companyId == null) {
@@ -214,7 +215,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   }, [companyId, departmentId]);
 
   useEffect(() => {
-    if (isCashier) return;
+    if (posScopeLocked) return;
     let cancelled = false;
     void getCompanies()
       .then((list) => {
@@ -234,10 +235,10 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [isCashier, user?.id, user?.companyId]);
+  }, [posScopeLocked, user?.id, user?.companyId]);
 
   useEffect(() => {
-    if (isCashier || companyId == null) return;
+    if (posScopeLocked || companyId == null) return;
     let cancelled = false;
     void getDepartments(companyId)
       .then((depts) => {
@@ -264,10 +265,10 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [isCashier, companyId, user?.departmentId, user?.departmentIds]);
+  }, [posScopeLocked, companyId, user?.departmentId, user?.departmentIds]);
 
   const displayedProducts = useMemo(() => {
-    const rows = isCashier
+    const rows = posScopeLocked
       ? products
       : products.filter((p) => {
           const productCompanyId = p.companyId ?? p.company?.id;
@@ -281,7 +282,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
           return true;
         });
     return [...rows].sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
-  }, [products, isCashier, companyId, departmentId]);
+  }, [products, posScopeLocked, companyId, departmentId]);
 
   useEffect(() => {
     loadProducts();
@@ -326,13 +327,15 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     setQtyDrafts({});
   }, [mode]);
 
-  const handleSessionChange = useCallback((session: RegisterSessionDetail | null) => {
-    setRegisterSession(session);
-    if (session && !isCashier) {
-      setSelectedCompanyId(session.department.company.id);
-      setSelectedDepartmentId(session.departmentId);
+  const handleContextChange = useCallback((ctx: RegisterSessionContext) => {
+    setRegisterSession(ctx.local);
+    setMineElsewhere(ctx.mineElsewhere);
+    setSessionOccupancy(ctx.occupancy);
+    if (ctx.local && !posScopeLocked) {
+      setSelectedCompanyId(ctx.local.department.company.id);
+      setSelectedDepartmentId(ctx.local.departmentId);
     }
-  }, [isCashier]);
+  }, [posScopeLocked]);
 
   function resetCartDrafts() {
     const d = emptyDraft('d1');
@@ -340,17 +343,25 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     setActiveDraftId(d.id);
     setAmountReceived('');
     setQtyDrafts({});
-    setCartVisible(false);
+    setPosPane('products');
   }
 
   function selectCompany(id: number) {
-    if (registerSession != null || id === companyId) return;
+    if (id === companyId) return;
+    if (registerSession != null && registerSession.department.company.id !== id) {
+      setStatus('Fermez la caisse');
+      return;
+    }
     setSelectedCompanyId(id);
     resetCartDrafts();
   }
 
   function selectDepartment(id: number) {
-    if (registerSession != null || id === departmentId) return;
+    if (id === departmentId) return;
+    if (registerSession != null && registerSession.departmentId !== id) {
+      setStatus('Fermez la caisse');
+      return;
+    }
     setSelectedDepartmentId(id);
     resetCartDrafts();
   }
@@ -448,6 +459,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   );
 
   const cartItemCount = cart.reduce((sum, line) => sum + line.quantity, 0);
+  const cashGapCount = cashGaps.changeOwed.length + cashGaps.balanceOwed.length;
 
   const tenderPreview = useMemo(() => {
     if (!showTenderField) return null;
@@ -644,6 +656,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
         : undefined;
 
     setSubmitting(true);
+    const deviceId = await getPosDeviceId();
     const payload: CreateSalePayload = {
       items: cartSnapshot.map((l) => ({
         productSaleUnitId: l.productSaleUnitId,
@@ -666,6 +679,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       fulfillmentType,
       clientUuid: Crypto.randomUUID(),
       registerId: registerSession.registerId,
+      deviceId,
       ...(mode === 'special' ? { specialSale: true } : {}),
       ...(tendered != null ? { amountReceived: tendered } : {}),
     };
@@ -811,16 +825,18 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   }
 
   return (
-    <Screen style={styles.container}>
+    <Screen style={styles.container} keyboard={posPane === 'cart'}>
       <RegisterSessionBar
         companyId={companyId}
         departmentId={departmentId}
         session={registerSession}
-        onSessionChange={handleSessionChange}
+        mineElsewhere={mineElsewhere}
+        occupancy={sessionOccupancy}
+        onContextChange={handleContextChange}
         onStatus={setStatus}
       />
 
-      {!isCashier ? (
+      {!posScopeLocked ? (
         <View style={styles.scopeBlock}>
           <Text style={styles.scopeLabel}>Entreprise</Text>
           <ChipScroll>
@@ -832,13 +848,8 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                 return (
                   <Pressable
                     key={c.id}
-                    disabled={registerSession != null}
                     onPress={() => selectCompany(c.id)}
-                    style={[
-                      styles.scopeChip,
-                      active && styles.scopeChipActive,
-                      registerSession != null && styles.scopeChipLocked,
-                    ]}>
+                    style={[styles.scopeChip, active && styles.scopeChipActive]}>
                     <Text
                       style={[styles.scopeChipText, active && styles.scopeChipTextActive]}
                       numberOfLines={1}>
@@ -861,13 +872,8 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                 return (
                   <Pressable
                     key={d.id}
-                    disabled={registerSession != null}
                     onPress={() => selectDepartment(d.id)}
-                    style={[
-                      styles.scopeChip,
-                      active && styles.scopeChipActive,
-                      registerSession != null && styles.scopeChipLocked,
-                    ]}>
+                    style={[styles.scopeChip, active && styles.scopeChipActive]}>
                     <Text
                       style={[styles.scopeChipText, active && styles.scopeChipTextActive]}
                       numberOfLines={1}>
@@ -942,11 +948,41 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
         </Pressable>
       </View>
 
+      <View style={styles.paneTabs}>
+        {(
+          [
+            { id: 'products' as const, label: 'Produits' },
+            {
+              id: 'cart' as const,
+              label: cartItemCount > 0 ? `Panier (${cartItemCount})` : 'Panier',
+            },
+            {
+              id: 'change' as const,
+              label: cashGapCount > 0 ? `Monnaie (${cashGapCount})` : 'Monnaie',
+            },
+          ] as const
+        ).map((tab) => {
+          const active = posPane === tab.id;
+          return (
+            <Pressable
+              key={tab.id}
+              onPress={() => setPosPane(tab.id)}
+              style={[styles.paneTab, active && styles.paneTabActive]}>
+              <Text style={[styles.paneTabText, active && styles.paneTabTextActive]} numberOfLines={1}>
+                {tab.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {posPane === 'products' ? (
+      <View style={styles.productList}>
       <FlatList
         data={displayedProducts}
         keyExtractor={(p) => String(p.id)}
         numColumns={2}
-        style={styles.productList}
+        style={styles.flex}
         contentContainerStyle={styles.grid}
         columnWrapperStyle={styles.gridRow}
         keyboardShouldPersistTaps="handled"
@@ -984,39 +1020,16 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
           <View style={styles.emptyState}>
             <Ionicons name="storefront-outline" size={40} color="#9AA0A6" />
             <Text style={styles.emptyStateText}>
-              {!isCashier && departmentId == null
+              {!posScopeLocked && departmentId == null
                 ? 'Choisissez une entreprise et un département'
                 : 'Aucun produit disponible'}
             </Text>
           </View>
         }
       />
-
-      <Pressable
-        style={[styles.cartButton, !salesEnabled && styles.cartButtonEmpty]}
-        onPress={() => {
-          if (!salesEnabled) {
-            refuseClosedCaisse();
-            return;
-          }
-          setCartVisible(true);
-        }}>
-        <Ionicons name="cart-outline" size={20} color="#ffffff" />
-        <Text style={styles.cartButtonText}>
-          {cart.length === 0
-            ? drafts.length > 1
-              ? `Fiches (${drafts.length}) · monnaie / restes`
-              : 'Panier · monnaie / restes'
-            : `${clientName || 'Panier'} (${cartItemCount}) — ${formatMoney(cartTotal)}${
-                drafts.length > 1 ? ` · ${drafts.length} fiches` : ''
-              }`}
-        </Text>
-      </Pressable>
-
-      <ModalShell
-        visible={cartVisible}
-        onRequestClose={() => setCartVisible(false)}
-        body={
+      </View>
+      ) : posPane === 'cart' ? (
+        <View style={styles.cartPane}>
           <FlatList
             data={cart}
             keyExtractor={(l) => String(l.productSaleUnitId)}
@@ -1024,135 +1037,71 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
             contentContainerStyle={styles.cartListContent}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
-            ListHeaderComponent={
-              <View style={styles.cartListHeader}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.draftsRow}
-                  keyboardShouldPersistTaps="handled">
-                  {drafts.map((d, idx) => {
-                    const active = d.id === activeDraftId;
-                    return (
-                      <Pressable
-                        key={d.id}
-                        onPress={() => selectDraft(d.id)}
-                        style={[styles.draftChip, active && styles.draftChipActive]}>
-                        <Text
-                          style={[styles.draftChipText, active && styles.draftChipTextActive]}
-                          numberOfLines={1}>
-                          {d.name || `Fiche ${idx + 1}`}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                  <Pressable
-                    style={[styles.draftChip, styles.draftChipAdd]}
-                    disabled={!salesEnabled}
-                    onPress={createDraft}>
-                    <Text style={styles.draftChipText}>+ Fiche</Text>
-                  </Pressable>
-                </ScrollView>
-              </View>
-            }
-            ListFooterComponent={
-              <View style={styles.gapsBlock}>
-                {cashGaps.changeOwed.length > 0 || cashGaps.balanceOwed.length > 0 ? (
-                  <TextInput
-                    style={styles.gapsSearch}
-                    placeholder="Rechercher (#fiche, client…)"
-                    placeholderTextColor={BrandColors.textMuted}
-                    value={cashGapQuery}
-                    onChangeText={setCashGapQuery}
-                    autoCorrect={false}
-                    clearButtonMode="while-editing"
-                  />
-                ) : null}
-                <Text style={styles.gapsTitle}>Monnaie à rendre</Text>
-                {cashGaps.changeOwed.length === 0 ? (
-                  <Text style={styles.gapsEmpty}>Aucune</Text>
-                ) : filteredCashGaps.changeOwed.length === 0 ? (
-                  <Text style={styles.gapsEmpty}>Aucun résultat</Text>
-                ) : (
-                  filteredCashGaps.changeOwed.map((row) => renderCashGapRow(row, 'change'))
-                )}
-                <Text style={[styles.gapsTitle, { marginTop: Spacing.three }]}>
-                  Restes à encaisser
-                </Text>
-                {cashGaps.balanceOwed.length === 0 ? (
-                  <Text style={styles.gapsEmpty}>Aucun</Text>
-                ) : filteredCashGaps.balanceOwed.length === 0 ? (
-                  <Text style={styles.gapsEmpty}>Aucun résultat</Text>
-                ) : (
-                  filteredCashGaps.balanceOwed.map((row) => renderCashGapRow(row, 'balance'))
-                )}
-              </View>
-            }
             renderItem={({ item }) => {
               const product = productsById.get(item.productId);
               const price = effectiveUnitPrice(product, item, familyQtyMap);
               return (
                 <View style={styles.cartRow}>
-                  <View style={styles.cartRowInfo}>
-                    <Text style={styles.cartRowLabel} numberOfLines={2}>
-                      {item.label}
-                    </Text>
-                    {mode === 'special' ? (
-                      <TextInput
-                        style={styles.priceInput}
-                        keyboardType="decimal-pad"
-                        placeholder="Prix unitaire"
-                        placeholderTextColor={BrandColors.textMuted}
-                        value={item.manualUnitPrice != null ? String(item.manualUnitPrice) : ''}
-                        onChangeText={(v) =>
-                          updateActiveDraft((d) => ({
-                            ...d,
-                            cart: setCartLineManualPrice(d.cart, item.productSaleUnitId, v),
-                          }))
-                        }
-                      />
-                    ) : (
-                      <Text style={styles.cartRowMeta}>{formatMoney(price)} / unité</Text>
-                    )}
-                  </View>
-                  <View style={styles.qtyControls}>
-                    <Pressable onPress={() => bumpQty(item.productSaleUnitId, -0.5)} hitSlop={8}>
-                      <Ionicons name="remove-circle-outline" size={24} color={BrandColors.primary} />
-                    </Pressable>
+                  <Text style={styles.cartRowLabel} numberOfLines={2}>
+                    {item.label}
+                  </Text>
+                  {mode === 'special' ? (
                     <TextInput
-                      style={styles.qtyInput}
+                      style={styles.priceInput}
                       keyboardType="decimal-pad"
-                      value={qtyDrafts[item.productSaleUnitId] ?? String(item.quantity)}
+                      placeholder="Prix unitaire"
+                      placeholderTextColor={BrandColors.textMuted}
+                      value={item.manualUnitPrice != null ? String(item.manualUnitPrice) : ''}
                       onChangeText={(v) =>
-                        setQtyDrafts((prev) => ({ ...prev, [item.productSaleUnitId]: v }))
+                        updateActiveDraft((d) => ({
+                          ...d,
+                          cart: setCartLineManualPrice(d.cart, item.productSaleUnitId, v),
+                        }))
                       }
-                      onBlur={() => {
-                        const raw = (qtyDrafts[item.productSaleUnitId] ?? '').replace(',', '.');
-                        const n = Number(raw);
-                        if (Number.isFinite(n)) {
-                          updateActiveDraft((d) => ({
-                            ...d,
-                            cart: setCartLineQty(
-                              d.cart,
-                              products,
-                              item.productSaleUnitId,
-                              n,
-                              d.fulfillmentType === 'HOME',
-                            ),
-                          }));
-                        }
-                        setQtyDrafts((prev) => {
-                          const next = { ...prev };
-                          delete next[item.productSaleUnitId];
-                          return next;
-                        });
-                      }}
                     />
-                    <Pressable onPress={() => bumpQty(item.productSaleUnitId, 0.5)} hitSlop={8}>
-                      <Ionicons name="add-circle-outline" size={24} color={BrandColors.primary} />
-                    </Pressable>
+                  ) : (
+                    <Text style={styles.cartRowMeta}>{formatMoney(price)} / unité</Text>
+                  )}
+                  <View style={styles.cartRowActions}>
+                    <View style={styles.qtyControls}>
+                      <Pressable onPress={() => bumpQty(item.productSaleUnitId, -0.5)} hitSlop={10}>
+                        <Ionicons name="remove-circle-outline" size={28} color={BrandColors.primary} />
+                      </Pressable>
+                      <TextInput
+                        style={styles.qtyInput}
+                        keyboardType="decimal-pad"
+                        value={qtyDrafts[item.productSaleUnitId] ?? String(item.quantity)}
+                        onChangeText={(v) =>
+                          setQtyDrafts((prev) => ({ ...prev, [item.productSaleUnitId]: v }))
+                        }
+                        onBlur={() => {
+                          const raw = (qtyDrafts[item.productSaleUnitId] ?? '').replace(',', '.');
+                          const n = Number(raw);
+                          if (Number.isFinite(n)) {
+                            updateActiveDraft((d) => ({
+                              ...d,
+                              cart: setCartLineQty(
+                                d.cart,
+                                products,
+                                item.productSaleUnitId,
+                                n,
+                                d.fulfillmentType === 'HOME',
+                              ),
+                            }));
+                          }
+                          setQtyDrafts((prev) => {
+                            const next = { ...prev };
+                            delete next[item.productSaleUnitId];
+                            return next;
+                          });
+                        }}
+                      />
+                      <Pressable onPress={() => bumpQty(item.productSaleUnitId, 0.5)} hitSlop={10}>
+                        <Ionicons name="add-circle-outline" size={28} color={BrandColors.primary} />
+                      </Pressable>
+                    </View>
+                    <MoneyText value={price * item.quantity} style={styles.cartRowTotal} />
                   </View>
-                  <MoneyText value={price * item.quantity} style={styles.cartRowTotal} />
                 </View>
               );
             }}
@@ -1163,9 +1112,11 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
               </View>
             }
           />
-        }
-        footer={
-          <View style={styles.cartFooter}>
+          <ScrollView
+            style={styles.checkoutScroll}
+            contentContainerStyle={styles.checkoutScrollContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag">
             <View style={styles.inputWrapper}>
               <Ionicons name="person-outline" size={18} color="#9AA0A6" />
               <TextInput
@@ -1232,60 +1183,63 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                     onChangeText={(v) => updateActiveDraft((d) => ({ ...d, clientPhone: v }))}
                   />
                 </View>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="location-outline" size={18} color="#9AA0A6" />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Adresse"
-                    placeholderTextColor={BrandColors.textMuted}
-                    value={activeDraft.deliveryStops?.[0]?.address ?? activeDraft.clientAddress}
-                    onChangeText={(v) =>
-                      updateActiveDraft((d) => {
-                        const rows = [...(d.deliveryStops?.length ? d.deliveryStops : [{ address: '', quantity: '' }])];
-                        rows[0] = { ...rows[0], address: v };
-                        return { ...d, deliveryStops: rows, clientAddress: v };
-                      })
-                    }
-                  />
-                </View>
                 {(activeDraft.deliveryStops ?? [{ address: '', quantity: '' }]).map((stop, idx) => (
                   <View key={idx} style={styles.stopRow}>
-                    {idx > 0 ? (
+                    <View style={[styles.inputWrapper, styles.stopAddress]}>
+                      <Ionicons name="location-outline" size={18} color="#9AA0A6" />
                       <TextInput
-                        style={[styles.input, styles.stopAddress]}
+                        style={styles.input}
                         placeholder="Adresse"
                         placeholderTextColor={BrandColors.textMuted}
                         value={stop.address}
                         onChangeText={(v) =>
                           updateActiveDraft((d) => {
-                            const rows = [...(d.deliveryStops ?? [])];
+                            const rows = [
+                              ...(d.deliveryStops?.length
+                                ? d.deliveryStops
+                                : [{ address: '', quantity: '' }]),
+                            ];
                             rows[idx] = { ...rows[idx], address: v };
+                            return {
+                              ...d,
+                              deliveryStops: rows,
+                              clientAddress: rows[0]?.address ?? '',
+                            };
+                          })
+                        }
+                      />
+                    </View>
+                    <View style={styles.stopQtyBox}>
+                      <TextInput
+                        style={styles.stopQty}
+                        placeholder="Qté"
+                        placeholderTextColor={BrandColors.textMuted}
+                        keyboardType="decimal-pad"
+                        value={stop.quantity}
+                        onChangeText={(v) =>
+                          updateActiveDraft((d) => {
+                            const rows = [
+                              ...(d.deliveryStops?.length
+                                ? d.deliveryStops
+                                : [{ address: '', quantity: '' }]),
+                            ];
+                            rows[idx] = { ...rows[idx], quantity: v };
                             return { ...d, deliveryStops: rows };
                           })
                         }
                       />
-                    ) : null}
-                    <TextInput
-                      style={[styles.input, styles.stopQty]}
-                      placeholder="Qté"
-                      placeholderTextColor={BrandColors.textMuted}
-                      keyboardType="decimal-pad"
-                      value={stop.quantity}
-                      onChangeText={(v) =>
-                        updateActiveDraft((d) => {
-                          const rows = [...(d.deliveryStops?.length ? d.deliveryStops : [{ address: '', quantity: '' }])];
-                          rows[idx] = { ...rows[idx], quantity: v };
-                          return { ...d, deliveryStops: rows };
-                        })
-                      }
-                    />
-                    {idx > 0 ? (
+                    </View>
+                    {(activeDraft.deliveryStops?.length ?? 0) > 1 ? (
                       <Pressable
                         onPress={() =>
-                          updateActiveDraft((d) => ({
-                            ...d,
-                            deliveryStops: (d.deliveryStops ?? []).filter((_, i) => i !== idx),
-                          }))
+                          updateActiveDraft((d) => {
+                            const rows = (d.deliveryStops ?? []).filter((_, i) => i !== idx);
+                            return {
+                              ...d,
+                              deliveryStops: rows,
+                              clientAddress: rows[0]?.address ?? '',
+                            };
+                          })
                         }>
                         <Text style={styles.stopRemove}>−</Text>
                       </Pressable>
@@ -1306,7 +1260,6 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                 </Pressable>
               </>
             ) : null}
-
             <View style={styles.paymentRow}>
               {PAYMENT_OPTIONS.map(({ method, label, icon }) => {
                 const active = paymentMethod === method;
@@ -1329,7 +1282,6 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                 );
               })}
             </View>
-
             {paymentMethod === 'BANK' ? (
               <View style={styles.bankBlock}>
                 <Text style={styles.bankLabel}>Banque</Text>
@@ -1381,7 +1333,6 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                 </View>
               </View>
             ) : null}
-
             {showTenderField ? (
               <View style={styles.inputWrapper}>
                 <Ionicons name="cash-outline" size={18} color="#9AA0A6" />
@@ -1395,7 +1346,6 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                 />
               </View>
             ) : null}
-
             {tenderPreview ? (
               <View style={styles.tenderMeta}>
                 {tenderPreview.changeDue > 0.009 ? (
@@ -1408,7 +1358,6 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                 ) : null}
               </View>
             ) : null}
-
             <Pressable onPress={() => setPrintTicket((v) => !v)} style={styles.printToggle}>
               <Ionicons
                 name={printTicket ? 'checkbox' : 'square-outline'}
@@ -1417,12 +1366,10 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
               />
               <Text style={styles.printToggleLabel}>Imprimer le ticket</Text>
             </Pressable>
-
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Total</Text>
               <MoneyText value={cartTotal} style={styles.totalValue} />
             </View>
-
             <View style={styles.actionsRow}>
               <Pressable style={styles.clearButton} onPress={clearActiveCart}>
                 <Ionicons name="trash-outline" size={18} color={DANGER} />
@@ -1442,29 +1389,61 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                 </Text>
               </Pressable>
             </View>
-          </View>
-        }>
-        <View style={styles.cartHeader}>
-          <Text style={styles.cartTitle}>Panier</Text>
-          <View style={styles.cartHeaderActions}>
-            <Pressable
-              style={[styles.addDraftBtnSm, !salesEnabled && styles.buttonDisabled]}
-              disabled={!salesEnabled}
-              onPress={createDraft}>
-              <Text style={styles.addDraftBtnText}>+ Fiche</Text>
-            </Pressable>
-            <Pressable onPress={() => setCartVisible(false)} hitSlop={12} style={styles.closeButton}>
-              <Ionicons name="close" size={22} color="#60646C" />
-            </Pressable>
-          </View>
+          </ScrollView>
         </View>
-      </ModalShell>
+      ) : (
+        <ScrollView
+          style={styles.changePane}
+          contentContainerStyle={styles.changePaneContent}
+          keyboardShouldPersistTaps="handled">
+          <TextInput
+            style={styles.gapsSearch}
+            placeholder="Rechercher (#fiche, client…)"
+            placeholderTextColor={BrandColors.textMuted}
+            value={cashGapQuery}
+            onChangeText={setCashGapQuery}
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+          />
+          <View style={styles.gapsBlock}>
+            <Text style={styles.gapsTitle}>Monnaie à rendre</Text>
+            {cashGaps.changeOwed.length === 0 ? (
+              <Text style={styles.gapsEmpty}>Aucune</Text>
+            ) : filteredCashGaps.changeOwed.length === 0 ? (
+              <Text style={styles.gapsEmpty}>Aucun résultat</Text>
+            ) : (
+              filteredCashGaps.changeOwed.map((row) => renderCashGapRow(row, 'change'))
+            )}
+          </View>
+          <View style={styles.gapsBlock}>
+            <Text style={styles.gapsTitle}>Restes à encaisser</Text>
+            {cashGaps.balanceOwed.length === 0 ? (
+              <Text style={styles.gapsEmpty}>Aucun</Text>
+            ) : filteredCashGaps.balanceOwed.length === 0 ? (
+              <Text style={styles.gapsEmpty}>Aucun résultat</Text>
+            ) : (
+              filteredCashGaps.balanceOwed.map((row) => renderCashGapRow(row, 'balance'))
+            )}
+          </View>
+        </ScrollView>
+      )}
+
+      {posPane === 'products' && cart.length > 0 ? (
+        <Pressable style={styles.cartPeek} onPress={() => setPosPane('cart')}>
+          <Ionicons name="cart-outline" size={20} color="#fff" />
+          <Text style={styles.cartPeekText} numberOfLines={1}>
+            {clientName || 'Panier'} · {cartItemCount} · {formatMoney(cartTotal)}
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color="#fff" />
+        </Pressable>
+      ) : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  flex: { flex: 1 },
   blocked: { flex: 1, justifyContent: 'center', padding: Spacing.five, gap: Spacing.two },
   blockedTitle: { fontSize: 22, fontWeight: '700', color: BrandColors.text, textAlign: 'center' },
   blockedText: { fontSize: 15, color: BrandColors.textMuted, textAlign: 'center', lineHeight: 22 },
@@ -1516,10 +1495,64 @@ const styles = StyleSheet.create({
     maxWidth: 220,
   },
   scopeChipActive: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
-  scopeChipLocked: { opacity: 0.7 },
   scopeChipText: { color: BrandColors.text, fontSize: 13, fontWeight: '600' },
   scopeChipTextActive: { color: '#fff' },
   productList: { flex: 1 },
+  paneTabs: {
+    flexDirection: 'row',
+    marginHorizontal: Spacing.three,
+    marginTop: Spacing.two,
+    padding: 3,
+    borderRadius: 12,
+    backgroundColor: BrandColors.surfaceSoft,
+    borderWidth: 1,
+    borderColor: BrandColors.border,
+    gap: 3,
+  },
+  paneTab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  paneTabActive: { backgroundColor: BrandColors.primary },
+  paneTabText: { fontWeight: '700', fontSize: 13, color: BrandColors.textMuted },
+  paneTabTextActive: { color: '#fff' },
+  cartPane: { flex: 1, minHeight: 0 },
+  checkoutScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+    maxHeight: 340,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: BrandColors.border,
+    backgroundColor: BrandColors.bg,
+  },
+  checkoutScrollContent: {
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.two,
+    paddingBottom: Spacing.three,
+    gap: Spacing.two,
+  },
+  changePane: { flex: 1 },
+  changePaneContent: {
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.two,
+    paddingBottom: Spacing.five,
+    gap: Spacing.two,
+  },
+  cartPeek: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    backgroundColor: BrandColors.primary,
+    marginHorizontal: Spacing.three,
+    marginBottom: Spacing.two,
+    marginTop: Spacing.one,
+    paddingVertical: 12,
+    paddingHorizontal: Spacing.three,
+    borderRadius: 12,
+  },
+  cartPeekText: { flex: 1, color: '#fff', fontWeight: '700', fontSize: 15 },
   grid: { padding: Spacing.three, flexGrow: 1 },
   gridRow: { gap: Spacing.three },
   productCard: {
@@ -1578,19 +1611,23 @@ const styles = StyleSheet.create({
   cartListContent: { paddingHorizontal: Spacing.three, gap: Spacing.two, flexGrow: 1 },
   emptyCart: { alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.six },
   cartRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     padding: Spacing.three,
     borderRadius: Spacing.three,
-    gap: Spacing.two,
+    gap: 8,
     backgroundColor: BrandColors.surface,
     borderWidth: 1,
     borderColor: BrandColors.border,
     marginBottom: Spacing.two,
   },
-  cartRowInfo: { flex: 1, gap: 4 },
-  cartRowLabel: { fontWeight: '600', color: BrandColors.text },
+  cartRowLabel: { fontWeight: '700', color: BrandColors.text, fontSize: 15 },
   cartRowMeta: { fontSize: 13, color: BrandColors.textMuted },
+  cartRowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  cartRowTotal: { textAlign: 'right', fontWeight: '700', color: BrandColors.text, fontSize: 16 },
   priceInput: {
     borderWidth: 1,
     borderColor: BrandColors.borderStrong,
@@ -1600,17 +1637,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: BrandColors.text,
   },
-  cartRowTotal: { width: 70, textAlign: 'right', fontWeight: '700', color: BrandColors.text },
   qtyControls: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   qtyInput: {
-    minWidth: 44,
+    minWidth: 52,
     textAlign: 'center',
-    fontWeight: '600',
+    fontWeight: '700',
+    fontSize: 16,
     borderWidth: 1,
     borderColor: BrandColors.border,
     borderRadius: 8,
-    paddingVertical: 4,
-    paddingHorizontal: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
     color: BrandColors.text,
   },
   cartFooter: {
@@ -1635,7 +1672,17 @@ const styles = StyleSheet.create({
   input: { flex: 1, paddingVertical: Spacing.three, color: BrandColors.text },
   stopRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   stopAddress: { flex: 1 },
-  stopQty: { width: 72, flex: 0 },
+  stopQtyBox: {
+    width: 72,
+    flex: 0,
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    borderRadius: Spacing.three,
+    paddingHorizontal: Spacing.two,
+    backgroundColor: BrandColors.surface,
+    justifyContent: 'center',
+  },
+  stopQty: { paddingVertical: Spacing.three, color: BrandColors.text },
   stopRemove: { color: BrandColors.danger, fontWeight: '700', fontSize: 22, paddingHorizontal: 6 },
   addStop: { color: BrandColors.primary, fontWeight: '700', paddingVertical: 6 },
   fulfillRow: { flexDirection: 'row', gap: Spacing.two },
