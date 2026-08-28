@@ -82,6 +82,7 @@ type SaleDraft = {
   fulfillmentType: FulfillmentType;
   clientPhone: string;
   clientAddress: string;
+  deliveryStops: Array<{ address: string; quantity: string }>;
   bankId: number | '';
   bankAccountId: number | '';
 };
@@ -95,6 +96,7 @@ function emptyDraft(id = `d${Date.now()}`): SaleDraft {
     fulfillmentType: 'ON_SITE',
     clientPhone: '',
     clientAddress: '',
+    deliveryStops: [{ address: '', quantity: '' }],
     bankId: '',
     bankAccountId: '',
   };
@@ -394,6 +396,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                 fulfillmentType: 'ON_SITE',
                 clientPhone: '',
                 clientAddress: '',
+                deliveryStops: [{ address: '', quantity: '' }],
               }
             : d,
         ),
@@ -597,7 +600,13 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
 
     const fulfillmentType = activeDraft?.fulfillmentType ?? 'ON_SITE';
     const clientPhone = (activeDraft?.clientPhone ?? '').trim();
-    const clientAddress = (activeDraft?.clientAddress ?? '').trim();
+    const homeStops = (activeDraft?.deliveryStops ?? [])
+      .map((s) => ({
+        address: s.address.trim(),
+        quantity: Number(String(s.quantity).replace(',', '.')),
+      }))
+      .filter((s) => s.address || (Number.isFinite(s.quantity) && s.quantity > 0));
+    const clientAddress = homeStops[0]?.address ?? (activeDraft?.clientAddress ?? '').trim();
     if (fulfillmentType === 'HOME') {
       if (!draftName || draftName === 'Client') {
         setStatus('Indiquez le nom du client pour la livraison à domicile');
@@ -607,8 +616,14 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
         setStatus('Indiquez le téléphone du client');
         return;
       }
-      if (!clientAddress) {
-        setStatus('Indiquez l’adresse de livraison');
+      if (!homeStops.length || homeStops.some((s) => !s.address || !Number.isFinite(s.quantity) || s.quantity <= 0)) {
+        setStatus('Chaque adresse doit avoir une quantité');
+        return;
+      }
+      const cartQty = cart.reduce((acc, l) => acc + l.quantity, 0);
+      const stopQty = homeStops.reduce((acc, s) => acc + s.quantity, 0);
+      if (Math.abs(stopQty - cartQty) > 0.0001) {
+        setStatus('La somme des quantités par adresse doit égaler la quantité vendue');
         return;
       }
     }
@@ -646,7 +661,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       ],
       clientName: nameSnapshot,
       ...(fulfillmentType === 'HOME'
-        ? { clientPhone, clientAddress }
+        ? { clientPhone, clientAddress, deliveryStops: homeStops }
         : {}),
       fulfillmentType,
       clientUuid: Crypto.randomUUID(),
@@ -1186,7 +1201,15 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                   styles.fulfillBtn,
                   activeDraft?.fulfillmentType === 'HOME' && styles.fulfillBtnActive,
                 ]}
-                onPress={() => updateActiveDraft((d) => ({ ...d, fulfillmentType: 'HOME' }))}>
+                onPress={() =>
+                  updateActiveDraft((d) => ({
+                    ...d,
+                    fulfillmentType: 'HOME',
+                    deliveryStops: d.deliveryStops?.length
+                      ? d.deliveryStops
+                      : [{ address: '', quantity: '' }],
+                  }))
+                }>
                 <Text
                   style={[
                     styles.fulfillBtnText,
@@ -1213,12 +1236,74 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                   <Ionicons name="location-outline" size={18} color="#9AA0A6" />
                   <TextInput
                     style={styles.input}
-                    placeholder="Adresse de livraison *"
+                    placeholder="Adresse"
                     placeholderTextColor={BrandColors.textMuted}
-                    value={activeDraft.clientAddress}
-                    onChangeText={(v) => updateActiveDraft((d) => ({ ...d, clientAddress: v }))}
+                    value={activeDraft.deliveryStops?.[0]?.address ?? activeDraft.clientAddress}
+                    onChangeText={(v) =>
+                      updateActiveDraft((d) => {
+                        const rows = [...(d.deliveryStops?.length ? d.deliveryStops : [{ address: '', quantity: '' }])];
+                        rows[0] = { ...rows[0], address: v };
+                        return { ...d, deliveryStops: rows, clientAddress: v };
+                      })
+                    }
                   />
                 </View>
+                {(activeDraft.deliveryStops ?? [{ address: '', quantity: '' }]).map((stop, idx) => (
+                  <View key={idx} style={styles.stopRow}>
+                    {idx > 0 ? (
+                      <TextInput
+                        style={[styles.input, styles.stopAddress]}
+                        placeholder="Adresse"
+                        placeholderTextColor={BrandColors.textMuted}
+                        value={stop.address}
+                        onChangeText={(v) =>
+                          updateActiveDraft((d) => {
+                            const rows = [...(d.deliveryStops ?? [])];
+                            rows[idx] = { ...rows[idx], address: v };
+                            return { ...d, deliveryStops: rows };
+                          })
+                        }
+                      />
+                    ) : null}
+                    <TextInput
+                      style={[styles.input, styles.stopQty]}
+                      placeholder="Qté"
+                      placeholderTextColor={BrandColors.textMuted}
+                      keyboardType="decimal-pad"
+                      value={stop.quantity}
+                      onChangeText={(v) =>
+                        updateActiveDraft((d) => {
+                          const rows = [...(d.deliveryStops?.length ? d.deliveryStops : [{ address: '', quantity: '' }])];
+                          rows[idx] = { ...rows[idx], quantity: v };
+                          return { ...d, deliveryStops: rows };
+                        })
+                      }
+                    />
+                    {idx > 0 ? (
+                      <Pressable
+                        onPress={() =>
+                          updateActiveDraft((d) => ({
+                            ...d,
+                            deliveryStops: (d.deliveryStops ?? []).filter((_, i) => i !== idx),
+                          }))
+                        }>
+                        <Text style={styles.stopRemove}>−</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ))}
+                <Pressable
+                  onPress={() =>
+                    updateActiveDraft((d) => ({
+                      ...d,
+                      deliveryStops: [
+                        ...(d.deliveryStops?.length ? d.deliveryStops : [{ address: '', quantity: '' }]),
+                        { address: '', quantity: '' },
+                      ],
+                    }))
+                  }>
+                  <Text style={styles.addStop}>+ Adresse</Text>
+                </Pressable>
               </>
             ) : null}
 
@@ -1548,6 +1633,11 @@ const styles = StyleSheet.create({
     backgroundColor: BrandColors.surface,
   },
   input: { flex: 1, paddingVertical: Spacing.three, color: BrandColors.text },
+  stopRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  stopAddress: { flex: 1 },
+  stopQty: { width: 72, flex: 0 },
+  stopRemove: { color: BrandColors.danger, fontWeight: '700', fontSize: 22, paddingHorizontal: 6 },
+  addStop: { color: BrandColors.primary, fontWeight: '700', paddingVertical: 6 },
   fulfillRow: { flexDirection: 'row', gap: Spacing.two },
   fulfillBtn: {
     flex: 1,

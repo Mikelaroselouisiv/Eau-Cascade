@@ -35,6 +35,17 @@ export class CreateSaleItemDto {
   unitPrice?: number;
 }
 
+export class SaleDeliveryStopDto {
+  @IsString()
+  @MaxLength(500)
+  address!: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.0001)
+  quantity!: number;
+}
+
 export class CreatePaymentDto {
   @IsEnum(PaymentMethod)
   method: PaymentMethod;
@@ -95,6 +106,13 @@ export class CreateSaleDto {
   @IsString()
   @MaxLength(500)
   clientAddress?: string;
+
+  /** Arrêts à domicile (adresse + quantité). À défaut : une seule adresse `clientAddress`. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SaleDeliveryStopDto)
+  deliveryStops?: SaleDeliveryStopDto[];
 
   /** Sur place (défaut) ou à domicile. */
   @IsOptional()

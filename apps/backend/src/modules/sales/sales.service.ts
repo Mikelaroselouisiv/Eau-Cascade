@@ -78,10 +78,20 @@ export class SalesService {
         createSaleDto.clientPhone && createSaleDto.clientPhone.trim()
           ? createSaleDto.clientPhone.trim()
           : null;
-      const clientAddressRaw =
+      const stopsInput = (createSaleDto.deliveryStops ?? [])
+        .map((s) => ({
+          address: s.address.trim(),
+          quantity: Number(s.quantity),
+        }))
+        .filter((s) => s.address && Number.isFinite(s.quantity) && s.quantity > 0);
+
+      let clientAddressRaw =
         createSaleDto.clientAddress && createSaleDto.clientAddress.trim()
           ? createSaleDto.clientAddress.trim()
           : null;
+      if (!clientAddressRaw && stopsInput[0]) {
+        clientAddressRaw = stopsInput[0].address;
+      }
 
       if (fulfillmentType === FulfillmentType.HOME) {
         if (!clientNameRaw) {
@@ -90,8 +100,8 @@ export class SalesService {
         if (!clientPhoneRaw) {
           throw new BadRequestException('Le téléphone du client est obligatoire pour une livraison à domicile');
         }
-        if (!clientAddressRaw) {
-          throw new BadRequestException('L’adresse du client est obligatoire pour une livraison à domicile');
+        if (!clientAddressRaw && stopsInput.length === 0) {
+          throw new BadRequestException('Ajoutez au moins une adresse de livraison');
         }
       }
 
@@ -461,6 +471,32 @@ export class SalesService {
               quantityOrdered: Number(it.quantity),
             })),
           });
+          if (fulfillmentType === FulfillmentType.HOME) {
+            const totalQty = createdItems.reduce((acc, it) => acc + Number(it.quantity), 0);
+            const stops =
+              stopsInput.length > 0
+                ? stopsInput
+                : clientAddressRaw
+                  ? [{ address: clientAddressRaw, quantity: totalQty }]
+                  : [];
+            const stopSum = stops.reduce((acc, s) => acc + s.quantity, 0);
+            if (stops.length === 0) {
+              throw new BadRequestException('Ajoutez au moins une adresse de livraison');
+            }
+            if (Math.abs(stopSum - totalQty) > 0.0001) {
+              throw new BadRequestException(
+                'La somme des quantités par adresse doit égaler la quantité vendue.',
+              );
+            }
+            await tx.saleDeliveryStop.createMany({
+              data: stops.map((s, i) => ({
+                saleId,
+                address: s.address,
+                quantity: s.quantity,
+                sortOrder: i,
+              })),
+            });
+          }
         }
       }
 

@@ -1136,6 +1136,13 @@ select {
   font-weight: 700;
 }
 
+.pos-delivery-stop {
+  display: grid;
+  grid-template-columns: 1fr 4.5rem auto;
+  gap: 0.35rem;
+  align-items: center;
+}
+
 .pos-drafts-list {
   display: flex;
   flex-wrap: wrap;
@@ -3442,6 +3449,33 @@ button.password-field__toggle:focus-visible {
 }
 
 .delivery-line-qty {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #334155;
+}
+
+.delivery-drops {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.delivery-drop {
+  font-size: 0.82rem;
+  color: #334155;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.delivery-add-line {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
   font-size: 0.85rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;

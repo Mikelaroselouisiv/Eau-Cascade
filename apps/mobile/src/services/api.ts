@@ -1107,6 +1107,20 @@ export async function getDeliveryById(id: number): Promise<Delivery> {
   return data;
 }
 
+export async function addDeliveryDrop(
+  id: number,
+  payload: {
+    saleItemId: number;
+    quantity: number;
+    departmentId: number;
+    executorName?: string | null;
+    stopId?: number | null;
+  },
+): Promise<Delivery> {
+  const { data } = await api.post<Delivery>(`/deliveries/${id}/drops`, payload);
+  return data;
+}
+
 export async function updateDelivery(
   id: number,
   payload: {
@@ -1115,6 +1129,7 @@ export async function updateDelivery(
     note?: string | null;
     executorName?: string | null;
     stockDepartmentId?: number;
+    stopId?: number;
   },
 ): Promise<Delivery> {
   const { data } = await api.patch<Delivery>(`/deliveries/${id}`, payload);

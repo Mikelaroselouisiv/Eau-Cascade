@@ -51,4 +51,11 @@ export class UpdateDeliveryDto {
   @IsInt()
   @Min(1)
   stockDepartmentId?: number;
+
+  /** Arrêt à domicile pour « tout livrer » / lignes cumulées. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  stopId?: number;
 }

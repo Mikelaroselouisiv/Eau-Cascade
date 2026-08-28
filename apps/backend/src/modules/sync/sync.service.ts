@@ -20,7 +20,12 @@ type Delegate = {
 };
 
 /** Modèles sync sans soft-delete (pas de colonne deletedAt). */
-const NO_DELETED_AT = new Set<SyncEntityName>(['AuditLog', 'DeliveryItem']);
+const NO_DELETED_AT = new Set<SyncEntityName>([
+  'AuditLog',
+  'DeliveryItem',
+  'SaleDeliveryStop',
+  'DeliveryDrop',
+]);
 
 @Injectable()
 export class SyncService {
@@ -816,9 +821,11 @@ export class SyncService {
       CreditCustomer: this.prisma.creditCustomer as unknown as Delegate,
       Sale: this.prisma.sale as unknown as Delegate,
       SaleItem: this.prisma.saleItem as unknown as Delegate,
+      SaleDeliveryStop: this.prisma.saleDeliveryStop as unknown as Delegate,
       Payment: this.prisma.payment as unknown as Delegate,
       Delivery: this.prisma.delivery as unknown as Delegate,
       DeliveryItem: this.prisma.deliveryItem as unknown as Delegate,
+      DeliveryDrop: this.prisma.deliveryDrop as unknown as Delegate,
       StockMovement: this.prisma.stockMovement as unknown as Delegate,
       FinanceEntry: this.prisma.financeEntry as unknown as Delegate,
       CreditPayment: this.prisma.creditPayment as unknown as Delegate,

@@ -16,6 +16,7 @@ import { AuditService } from '../audit/audit.service';
 import { RolesService } from '../roles/roles.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
+import { CreateDeliveryDropDto } from './dto/create-delivery-drop.dto';
 
 type ScopeUser = {
   id?: number;
@@ -42,6 +43,10 @@ const deliveryInclude = {
       status: true,
       createdAt: true,
       user: { select: { id: true, fullName: true, phone: true } },
+      deliveryStops: {
+        select: { id: true, address: true, quantity: true, sortOrder: true },
+        orderBy: { sortOrder: 'asc' as const },
+      },
     },
   },
   items: {
@@ -58,6 +63,13 @@ const deliveryInclude = {
       },
     },
     orderBy: { id: 'asc' as const },
+  },
+  drops: {
+    include: {
+      department: { select: { id: true, name: true } },
+      stop: { select: { id: true, address: true, quantity: true } },
+    },
+    orderBy: { createdAt: 'asc' as const },
   },
 } satisfies Prisma.DeliveryInclude;
 
@@ -281,13 +293,77 @@ export class DeliveriesService {
   }
 
   /** Expose `saleRef` (= numéro imprimé sur le ticket) pour l’UI livraison. */
-  private withSaleRef<T extends { saleId: number; sale?: { id: number; txnNumber?: number | null } | null }>(
-    delivery: T,
-  ) {
+  private withSaleRef<
+    T extends {
+      saleId: number;
+      items?: Array<{
+        quantityOrdered: Prisma.Decimal | number | string;
+        quantityDelivered: Prisma.Decimal | number | string;
+      }>;
+      drops?: Array<{
+        quantity: Prisma.Decimal | number | string;
+        stopId?: number | null;
+      }>;
+      sale?: {
+        id: number;
+        txnNumber?: number | null;
+        deliveryStops?: Array<{
+          id: number;
+          quantity: Prisma.Decimal | number | string;
+        }>;
+      } | null;
+    },
+  >(delivery: T) {
+    const items = (delivery.items ?? []).map((it) => {
+      const ordered = Number(it.quantityOrdered);
+      const delivered = Number(it.quantityDelivered);
+      return {
+        ...it,
+        quantityRemaining: Math.max(0, ordered - delivered),
+      };
+    });
+    const dropQtyByStop = new Map<number, number>();
+    for (const drop of delivery.drops ?? []) {
+      if (drop.stopId == null) continue;
+      dropQtyByStop.set(
+        drop.stopId,
+        (dropQtyByStop.get(drop.stopId) ?? 0) + Number(drop.quantity),
+      );
+    }
+    const deliveryStops = (delivery.sale?.deliveryStops ?? []).map((st) => {
+      const delivered = dropQtyByStop.get(st.id) ?? 0;
+      const planned = Number(st.quantity);
+      return {
+        ...st,
+        quantityDelivered: delivered,
+        quantityRemaining: Math.max(0, planned - delivered),
+      };
+    });
+    const sale = delivery.sale
+      ? { ...delivery.sale, deliveryStops }
+      : delivery.sale;
     return {
       ...delivery,
+      items,
+      sale,
       saleRef: saleRefOf(delivery.sale, delivery.saleId),
     };
+  }
+
+  async addDrop(id: number, dto: CreateDeliveryDropDto, user: ScopeUser) {
+    return this.applyDropsAndReload(
+      id,
+      [
+        {
+          saleItemId: dto.saleItemId,
+          quantity: dto.quantity,
+          departmentId: dto.departmentId,
+          executorName: dto.executorName,
+          stopId: dto.stopId ?? null,
+        },
+      ],
+      user,
+    );
   }
 
   async update(id: number, dto: UpdateDeliveryDto, user: ScopeUser) {
@@ -314,120 +390,157 @@ export class DeliveriesService {
       }
     }
 
-    const targets = new Map<number, number>();
-    for (const item of delivery.items) {
-      targets.set(item.saleItemId, Number(item.quantityDelivered));
-    }
+    const planned: Array<{
+      saleItemId: number;
+      quantity: number;
+      departmentId: number;
+      executorName?: string | null;
+      stopId?: number | null;
+    }> = [];
 
+    const deptForDrop = dto.stockDepartmentId ?? delivery.departmentId;
     if (dto.markDelivered) {
+      if (deptForDrop == null) {
+        throw new BadRequestException('Choisissez le département de cette livraison.');
+      }
       for (const item of delivery.items) {
-        targets.set(item.saleItemId, Number(item.quantityOrdered));
+        const remaining = Number(item.quantityOrdered) - Number(item.quantityDelivered);
+        if (remaining > 0.0001) {
+          planned.push({
+            saleItemId: item.saleItemId,
+            quantity: remaining,
+            departmentId: deptForDrop,
+            executorName: dto.executorName,
+            stopId: dto.stopId ?? null,
+          });
+        }
       }
     } else if (dto.items?.length) {
+      if (deptForDrop == null) {
+        const anyIncrease = dto.items.some((row) => {
+          const existing = delivery.items.find((i) => i.saleItemId === row.saleItemId);
+          return existing != null && row.quantityDelivered > Number(existing.quantityDelivered) + 0.0001;
+        });
+        if (anyIncrease) {
+          throw new BadRequestException('Choisissez le département de cette livraison.');
+        }
+      }
       const bySaleItem = new Map(delivery.items.map((i) => [i.saleItemId, i]));
       for (const row of dto.items) {
         const existing = bySaleItem.get(row.saleItemId);
         if (!existing) {
           throw new BadRequestException(`Ligne ${row.saleItemId} introuvable`);
         }
-        const ordered = Number(existing.quantityOrdered);
-        if (row.quantityDelivered < -0.0001 || row.quantityDelivered > ordered + 0.0001) {
+        const prev = Number(existing.quantityDelivered);
+        const next = row.quantityDelivered;
+        if (next + 0.0001 < prev) {
           throw new BadRequestException(
-            `Quantité livrée invalide (ligne ${row.saleItemId})`,
+            'Ajoutez une nouvelle ligne pour livrer davantage ; on ne diminue pas une quantité déjà livrée.',
           );
         }
-        targets.set(row.saleItemId, row.quantityDelivered);
+        const delta = next - prev;
+        if (delta > 0.0001 && deptForDrop != null) {
+          planned.push({
+            saleItemId: row.saleItemId,
+            quantity: delta,
+            departmentId: deptForDrop,
+            executorName: dto.executorName,
+            stopId: dto.stopId ?? null,
+          });
+        }
       }
     }
 
-    let willMoveStock = false;
-    for (const item of delivery.items) {
-      const nextQty = targets.get(item.saleItemId);
-      if (nextQty == null) continue;
-      if (Math.abs(nextQty - Number(item.quantityDelivered)) > 0.0001) {
-        willMoveStock = true;
-        break;
-      }
+    if (planned.length) {
+      return this.applyDropsAndReload(id, planned, user, {
+        note: dto.note,
+        executorName: isHome ? dto.executorName : undefined,
+      });
     }
 
-    let stockDepartmentId = delivery.departmentId;
-    if (isHome && willMoveStock) {
-      if (stockDepartmentId == null) {
-        if (dto.stockDepartmentId == null) {
-          throw new BadRequestException(
-            'Choisissez le département depuis lequel la livraison à domicile est faite.',
-          );
-        }
-        stockDepartmentId = await this.assertHomeStockDepartment(
-          dto.stockDepartmentId,
-          delivery.companyId,
-          user,
-        );
-      } else if (
-        dto.stockDepartmentId != null &&
-        dto.stockDepartmentId !== stockDepartmentId
-      ) {
-        throw new BadRequestException(
-          'Le département source de cette livraison à domicile est déjà fixé.',
-        );
-      }
+    const updated = await this.prisma.delivery.update({
+      where: { id },
+      data: {
+        ...(dto.note !== undefined ? { note: dto.note?.trim() || null } : {}),
+        ...(isHome && dto.executorName !== undefined
+          ? { executorName: dto.executorName?.trim() || null }
+          : {}),
+      },
+      include: deliveryInclude,
+    });
+    return this.withSaleRef(updated);
+  }
+
+  private async applyDropsAndReload(
+    id: number,
+    drops: Array<{
+      saleItemId: number;
+      quantity: number;
+      departmentId: number;
+      executorName?: string | null;
+      stopId?: number | null;
+    }>,
+    user: ScopeUser,
+    extras?: { note?: string | null; executorName?: string | null },
+  ) {
+    const delivery = await this.prisma.delivery.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        items: true,
+        sale: { select: { id: true, status: true } },
+      },
+    });
+    if (!delivery) throw new NotFoundException('Livraison introuvable');
+    if (delivery.sale.status !== 'COMPLETED') {
+      throw new BadRequestException('Cette vente n’est plus livrable');
     }
+    this.assertCanAccess(user, delivery.companyId, delivery.departmentId);
+    await this.assertCanManageFulfillment(user, delivery.fulfillmentType);
+
+    const isHome = delivery.fulfillmentType === FulfillmentType.HOME;
 
     return this.prisma.$transaction(
       async (tx) => {
-        if (dto.note !== undefined) {
+        if (extras?.note !== undefined) {
           await tx.delivery.update({
             where: { id },
-            data: { note: dto.note?.trim() || null },
+            data: { note: extras.note?.trim() || null },
           });
         }
 
-        if (isHome && stockDepartmentId != null && delivery.departmentId == null) {
-          await tx.delivery.update({
-            where: { id },
-            data: { departmentId: stockDepartmentId },
+        for (const drop of drops) {
+          await this.applyDropTx(tx, {
+            delivery,
+            saleItemId: drop.saleItemId,
+            quantity: drop.quantity,
+            departmentId: drop.departmentId,
+            executorName: drop.executorName,
+            stopId: drop.stopId ?? null,
+            user,
           });
-        }
-
-        for (const item of delivery.items) {
-          const nextQty = targets.get(item.saleItemId);
-          if (nextQty == null) continue;
-          const prevQty = Number(item.quantityDelivered);
-          const deltaSaleQty = nextQty - prevQty;
-
-          if (Math.abs(nextQty - prevQty) > 0.0001) {
-            await tx.deliveryItem.update({
-              where: { id: item.id },
-              data: { quantityDelivered: nextQty },
-            });
-          }
-
-          if (Math.abs(deltaSaleQty) > 0.0001) {
-            await this.applyStockDeltaForDeliveryItem(tx, {
-              saleId: delivery.sale.id,
-              saleItemId: item.saleItemId,
-              deltaSaleQty,
-              userId: user.id,
-              fulfillmentType: delivery.fulfillmentType,
-              stockDepartmentId,
-            });
-          }
         }
 
         const items = await tx.deliveryItem.findMany({ where: { deliveryId: id } });
         const status = this.computeStatus(items);
-        const nextExecutor =
-          isHome && dto.executorName !== undefined
-            ? dto.executorName?.trim() || null
-            : undefined;
+        const lastExecutor = [...drops].reverse().find((d) => d.executorName?.trim())?.executorName?.trim();
+        const lastDept = drops[drops.length - 1]?.departmentId;
         const updated = await tx.delivery.update({
           where: { id },
           data: {
             status,
             deliveredAt: status === DeliveryStatus.DELIVERED ? new Date() : null,
-            deliveredById:
-              status === DeliveryStatus.DELIVERED ? (user.id ?? null) : null,
-            ...(nextExecutor !== undefined ? { executorName: nextExecutor } : {}),
+            deliveredById: status === DeliveryStatus.DELIVERED ? (user.id ?? null) : null,
+            ...(lastDept != null && delivery.departmentId == null
+              ? { departmentId: lastDept }
+              : {}),
+            ...(isHome && (extras?.executorName !== undefined || lastExecutor)
+              ? {
+                  executorName:
+                    extras?.executorName !== undefined
+                      ? extras.executorName?.trim() || null
+                      : lastExecutor ?? delivery.executorName,
+                }
+              : {}),
           },
           include: deliveryInclude,
         });
@@ -438,7 +551,7 @@ export class DeliveriesService {
             action: 'DELIVERY_UPDATED',
             entity: 'Delivery',
             entityId: String(id),
-            metadata: { status: updated.status },
+            metadata: { status: updated.status, drops: drops.length },
           },
         });
 
@@ -447,6 +560,117 @@ export class DeliveriesService {
       { timeout: 30000, maxWait: 10000 },
     );
   }
+
+  private async applyDropTx(
+    tx: Prisma.TransactionClient,
+    opts: {
+      delivery: {
+        id: number;
+        sale: { id: number };
+        companyId: number;
+        fulfillmentType: FulfillmentType;
+        items: Array<{
+          saleItemId: number;
+          quantityOrdered: Prisma.Decimal;
+          quantityDelivered: Prisma.Decimal;
+        }>;
+      };
+      saleItemId: number;
+      quantity: number;
+      departmentId: number;
+      executorName?: string | null;
+      stopId?: number | null;
+      user: ScopeUser;
+    },
+  ) {
+    const qty = Number(opts.quantity);
+    if (!Number.isFinite(qty) || qty <= 0.0001) {
+      throw new BadRequestException('Quantité livrée invalide');
+    }
+    const item = opts.delivery.items.find((i) => i.saleItemId === opts.saleItemId);
+    if (!item) {
+      throw new BadRequestException(`Ligne ${opts.saleItemId} introuvable`);
+    }
+    const remaining = Number(item.quantityOrdered) - Number(item.quantityDelivered);
+    if (qty > remaining + 0.0001) {
+      throw new BadRequestException(
+        `Quantité trop élevée (reste à livrer : ${remaining})`,
+      );
+    }
+
+    const isHome = opts.delivery.fulfillmentType === FulfillmentType.HOME;
+    let departmentId = opts.departmentId;
+    if (isHome) {
+      departmentId = await this.assertHomeStockDepartment(
+        departmentId,
+        opts.delivery.companyId,
+        opts.user,
+      );
+      const executor = opts.executorName?.trim();
+      if (!executor) {
+        throw new BadRequestException('Indiquez le livreur pour cette ligne.');
+      }
+    } else {
+      const dept = await tx.department.findFirst({
+        where: { id: departmentId, companyId: opts.delivery.companyId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!dept) throw new BadRequestException('Département introuvable');
+      if (!canAccessAssignedDepartment(opts.user, dept.id)) {
+        throw new ForbiddenException('Département hors périmètre');
+      }
+    }
+
+    let stopId = opts.stopId ?? null;
+    if (isHome) {
+      if (stopId == null) {
+        const first = await tx.saleDeliveryStop.findFirst({
+          where: { saleId: opts.delivery.sale.id },
+          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+          select: { id: true },
+        });
+        stopId = first?.id ?? null;
+      } else {
+        const stop = await tx.saleDeliveryStop.findFirst({
+          where: { id: stopId, saleId: opts.delivery.sale.id },
+          select: { id: true },
+        });
+        if (!stop) throw new BadRequestException('Adresse de dépôt introuvable');
+      }
+    } else {
+      stopId = null;
+    }
+
+    await tx.deliveryDrop.create({
+      data: {
+        deliveryId: opts.delivery.id,
+        saleItemId: opts.saleItemId,
+        quantity: qty,
+        departmentId,
+        executorName: opts.executorName?.trim() || null,
+        deliveredById: opts.user.id ?? null,
+        createdById: opts.user.id ?? null,
+        stopId,
+      },
+    });
+
+    const nextDelivered = Number(item.quantityDelivered) + qty;
+    await tx.deliveryItem.updateMany({
+      where: { deliveryId: opts.delivery.id, saleItemId: opts.saleItemId },
+      data: { quantityDelivered: nextDelivered },
+    });
+    item.quantityDelivered = nextDelivered as unknown as Prisma.Decimal;
+
+    await this.applyStockDeltaForDeliveryItem(tx, {
+      saleId: opts.delivery.sale.id,
+      saleItemId: opts.saleItemId,
+      deltaSaleQty: qty,
+      userId: opts.user.id,
+      fulfillmentType: opts.delivery.fulfillmentType,
+      stockDepartmentId: departmentId,
+    });
+  }
+
 
   /**
    * Sortie / réintégration stock selon le delta de quantité livrée (unités de vente → base).

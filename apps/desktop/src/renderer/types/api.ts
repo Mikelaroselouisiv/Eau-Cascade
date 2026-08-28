@@ -392,6 +392,7 @@ export interface CreateSalePayload {
   clientName?: string | null;
   clientPhone?: string | null;
   clientAddress?: string | null;
+  deliveryStops?: Array<{ address: string; quantity: number }>;
   fulfillmentType?: FulfillmentType;
   /** UUID client pour idempotence (offline / rejeu). */
   clientUuid?: string;
@@ -478,11 +479,33 @@ export interface Sale {
 
 export type DeliveryStatus = 'PENDING' | 'PARTIAL' | 'DELIVERED';
 
+export interface DeliveryStop {
+  id: number;
+  address: string;
+  quantity: number | string;
+  sortOrder?: number;
+  quantityDelivered?: number | string;
+  quantityRemaining?: number | string;
+}
+
+export interface DeliveryDrop {
+  id: number;
+  saleItemId: number;
+  quantity: number | string;
+  departmentId: number;
+  executorName?: string | null;
+  stopId?: number | null;
+  createdAt: string;
+  department?: { id: number; name: string } | null;
+  stop?: { id: number; address: string; quantity: number | string } | null;
+}
+
 export interface DeliveryItem {
   id: number;
   saleItemId: number;
   quantityOrdered: number | string;
   quantityDelivered: number | string;
+  quantityRemaining?: number | string;
   saleItem?: {
     id: number;
     lineLabel?: string | null;
@@ -525,6 +548,7 @@ export interface Delivery {
     fulfillmentType?: FulfillmentType;
     status: string;
     createdAt: string;
+    deliveryStops?: DeliveryStop[];
     user?: {
       id: number;
       fullName?: string | null;
@@ -532,6 +556,7 @@ export interface Delivery {
     } | null;
   } | null;
   items?: DeliveryItem[];
+  drops?: DeliveryDrop[];
 }
 
 export interface RevenueReport {

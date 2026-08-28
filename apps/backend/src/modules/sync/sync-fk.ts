@@ -151,6 +151,17 @@ export const ENTITY_FK_MAP: Partial<Record<SyncEntityName, SyncFkRef[]>> = {
     { uuidField: 'deliveryUuid', idField: 'deliveryId', parent: 'Delivery', required: true },
     { uuidField: 'saleItemUuid', idField: 'saleItemId', parent: 'SaleItem', required: true },
   ],
+  SaleDeliveryStop: [
+    { uuidField: 'saleUuid', idField: 'saleId', parent: 'Sale', required: true },
+  ],
+  DeliveryDrop: [
+    { uuidField: 'deliveryUuid', idField: 'deliveryId', parent: 'Delivery', required: true },
+    { uuidField: 'saleItemUuid', idField: 'saleItemId', parent: 'SaleItem', required: true },
+    { uuidField: 'departmentUuid', idField: 'departmentId', parent: 'Department', required: true },
+    { uuidField: 'stopUuid', idField: 'stopId', parent: 'SaleDeliveryStop', required: false },
+    { uuidField: 'deliveredByUuid', idField: 'deliveredById', parent: 'User', required: false },
+    { uuidField: 'createdByUuid', idField: 'createdById', parent: 'User', required: false },
+  ],
   StockMovement: [
     { uuidField: 'productUuid', idField: 'productId', parent: 'Product', required: true },
     { uuidField: 'createdByUuid', idField: 'createdById', parent: 'User', required: false },
@@ -284,6 +295,9 @@ export const RELATION_OBJECT_KEYS = new Set([
   'deliveryItem',
   'deliveredBy',
   'saleItem',
+  'stop',
+  'drops',
+  'deliveryStops',
   'stockMovements',
   'saleUnits',
   'volumePrices',

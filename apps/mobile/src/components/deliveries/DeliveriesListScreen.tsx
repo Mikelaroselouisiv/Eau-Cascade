@@ -17,6 +17,7 @@ import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import {
+  addDeliveryDrop,
   getCompanies,
   getDeliveryById,
   getDepartments,
@@ -82,7 +83,9 @@ export function DeliveriesListScreen({ status }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const [detail, setDetail] = useState<Delivery | null>(null);
-  const [qtyDrafts, setQtyDrafts] = useState<Record<number, string>>({});
+  const [dropQty, setDropQty] = useState('');
+  const [dropSaleItemId, setDropSaleItemId] = useState<number | ''>('');
+  const [dropStopId, setDropStopId] = useState<number | ''>('');
   const [executorDraft, setExecutorDraft] = useState('');
   const [stockDeptId, setStockDeptId] = useState<number | ''>('');
   const [homeDepartments, setHomeDepartments] = useState<Department[]>([]);
@@ -188,13 +191,30 @@ export function DeliveriesListScreen({ status }: Props) {
     try {
       const full = await getDeliveryById(row.id);
       setDetail(full);
-      setQtyDrafts(
-        Object.fromEntries(
-          (full.items ?? []).map((it) => [it.saleItemId, String(it.quantityDelivered)]),
-        ),
+      const remainingItem =
+        (full.items ?? []).find((it) => {
+          const rem = Number(
+            it.quantityRemaining ??
+              Math.max(0, Number(it.quantityOrdered) - Number(it.quantityDelivered)),
+          );
+          return rem > 0.0001;
+        }) ?? full.items?.[0];
+      setDropSaleItemId(remainingItem?.saleItemId ?? '');
+      setDropQty(
+        remainingItem
+          ? String(
+              Number(
+                remainingItem.quantityRemaining ??
+                  Number(remainingItem.quantityOrdered) - Number(remainingItem.quantityDelivered),
+              ),
+            )
+          : '',
       );
       setExecutorDraft(full.executorName?.trim() ?? '');
       setStockDeptId(full.departmentId ?? '');
+      const stops = full.sale?.deliveryStops ?? [];
+      const remStop = stops.find((s) => Number(s.quantityRemaining ?? s.quantity) > 0.0001);
+      setDropStopId(remStop?.id ?? stops[0]?.id ?? '');
       const cid =
         full.companyId ??
         (typeof filterCompanyId === 'number' ? filterCompanyId : sessionCompanyId);
@@ -239,44 +259,53 @@ export function DeliveriesListScreen({ status }: Props) {
   async function saveDetail(markAll = false) {
     if (!detail || !canManageDelivery(detail) || detail.status === 'DELIVERED') return;
     const home = isHomeDelivery(detail);
-    if (home && detail.departmentId == null && stockDeptId === '') {
-      setDetailError('Choisissez le département qui livre à domicile');
+    const deptId = typeof stockDeptId === 'number' ? stockDeptId : detail.departmentId;
+    if (deptId == null) {
+      setDetailError(
+        home ? 'Choisissez le département qui livre à domicile' : 'Choisissez le département',
+      );
       return;
+    }
+    if (home && !executorDraft.trim()) {
+      setDetailError('Indiquez le livreur');
+      return;
+    }
+    if (!markAll) {
+      const qty = Number(String(dropQty).replace(',', '.'));
+      if (!Number.isFinite(qty) || qty <= 0) {
+        setDetailError('Quantité invalide');
+        return;
+      }
     }
     setSaving(true);
     setDetailError(null);
     try {
-      const executorName = home ? executorDraft.trim() || null : undefined;
-      const stockPayload =
-        home && detail.departmentId == null && typeof stockDeptId === 'number'
-          ? { stockDepartmentId: stockDeptId }
-          : {};
       const updated = markAll
         ? await updateDelivery(detail.id, {
             markDelivered: true,
-            ...(executorName !== undefined ? { executorName } : {}),
-            ...stockPayload,
+            stockDepartmentId: deptId,
+            ...(home
+              ? {
+                  executorName: executorDraft.trim(),
+                  stopId: dropStopId === '' ? undefined : dropStopId,
+                }
+              : {}),
           })
-        : await updateDelivery(detail.id, {
-            items: (detail.items ?? []).map((it) => {
-              const raw = (qtyDrafts[it.saleItemId] ?? '').replace(',', '.');
-              const n = Number(raw);
-              return {
-                saleItemId: it.saleItemId,
-                quantityDelivered: Number.isFinite(n) ? n : Number(it.quantityDelivered),
-              };
-            }),
-            ...(executorName !== undefined ? { executorName } : {}),
-            ...stockPayload,
+        : await addDeliveryDrop(detail.id, {
+            saleItemId:
+              dropSaleItemId === '' ? (detail.items?.[0]?.saleItemId ?? 0) : dropSaleItemId,
+            quantity: Number(String(dropQty).replace(',', '.')),
+            departmentId: deptId,
+            ...(home
+              ? {
+                  executorName: executorDraft.trim(),
+                  stopId: dropStopId === '' ? null : dropStopId,
+                }
+              : { executorName: executorDraft.trim() || null }),
           });
       setDetail(updated);
       setExecutorDraft(updated.executorName?.trim() ?? '');
-      setStockDeptId(updated.departmentId ?? '');
-      setQtyDrafts(
-        Object.fromEntries(
-          (updated.items ?? []).map((it) => [it.saleItemId, String(it.quantityDelivered)]),
-        ),
-      );
+      setStockDeptId(updated.departmentId ?? deptId);
       await load();
     } catch (e) {
       setDetailError(formatApiError(e, 'Enregistrement impossible'));
@@ -524,21 +553,36 @@ export function DeliveriesListScreen({ status }: Props) {
                   {isHomeDelivery(detail) && detail.sale?.clientPhone?.trim() ? (
                     <Text style={styles.meta}>Tél. {detail.sale.clientPhone.trim()}</Text>
                   ) : null}
-                  {isHomeDelivery(detail) && detail.sale?.clientAddress?.trim() ? (
-                    <Text style={styles.meta}>{detail.sale.clientAddress.trim()}</Text>
-                  ) : null}
-                  {isHomeDelivery(detail) &&
-                  canManageDelivery(detail) &&
-                  detail.status !== 'DELIVERED' &&
-                  detail.departmentId == null ? (
+                  {(detail.sale?.deliveryStops?.length
+                    ? detail.sale.deliveryStops
+                    : detail.sale?.clientAddress?.trim()
+                      ? [{ id: 0, address: detail.sale.clientAddress.trim(), quantity: 0 }]
+                      : []
+                  ).map((st) => (
+                    <Text key={st.id || st.address} style={styles.meta}>
+                      {st.address}
+                      {Number(st.quantity) > 0
+                        ? ` · ${formatQuantity(Number(st.quantityDelivered ?? 0))} / ${formatQuantity(Number(st.quantity))}`
+                        : ''}
+                    </Text>
+                  ))}
+                  {canManageDelivery(detail) && detail.status !== 'DELIVERED' ? (
                     <View style={styles.executorBlock}>
-                      <Text style={styles.meta}>Département de livraison</Text>
-                      {homeDepartments.length === 0 ? (
-                        <Text style={styles.meta}>
-                          Aucun département n’est coché pour les livraisons à domicile.
-                        </Text>
-                      ) : (
-                        homeDepartments.map((d) => (
+                      <Text style={styles.meta}>
+                        {isHomeDelivery(detail) ? 'Département de livraison' : 'Département'}
+                      </Text>
+                      {(() => {
+                        const deptChoices = isHomeDelivery(detail) ? homeDepartments : departments;
+                        if (!deptChoices.length) {
+                          return (
+                            <Text style={styles.meta}>
+                              {isHomeDelivery(detail)
+                                ? 'Aucun département n’est coché pour les livraisons à domicile.'
+                                : 'Aucun département'}
+                            </Text>
+                          );
+                        }
+                        return deptChoices.map((d) => (
                           <Pressable
                             key={d.id}
                             onPress={() => setStockDeptId(d.id)}
@@ -554,8 +598,16 @@ export function DeliveriesListScreen({ status }: Props) {
                               {d.name}
                             </Text>
                           </Pressable>
-                        ))
-                      )}
+                        ));
+                      })()}
+                      <Text style={styles.meta}>Quantité livrée</Text>
+                      <TextInput
+                        style={styles.executorInput}
+                        keyboardType="decimal-pad"
+                        value={dropQty}
+                        editable={!saving}
+                        onChangeText={setDropQty}
+                      />
                     </View>
                   ) : null}
                   {isHomeDelivery(detail) &&
@@ -582,30 +634,31 @@ export function DeliveriesListScreen({ status }: Props) {
                   it.saleItem?.lineLabel ||
                   it.saleItem?.product?.name ||
                   `Article #${it.saleItemId}`;
+                const remaining = Number(
+                  it.quantityRemaining ??
+                    Math.max(0, Number(it.quantityOrdered) - Number(it.quantityDelivered)),
+                );
+                const selectedLine = dropSaleItemId === it.saleItemId;
                 const editable = canManageDelivery(detail) && detail.status !== 'DELIVERED';
                 return (
-                  <View style={styles.lineRow}>
+                  <Pressable
+                    style={styles.lineRow}
+                    disabled={!editable}
+                    onPress={() => {
+                      setDropSaleItemId(it.saleItemId);
+                      setDropQty(String(remaining));
+                    }}>
                     <View style={styles.rowInfo}>
                       <Text style={styles.rowTitle} numberOfLines={2}>
                         {label}
+                        {selectedLine && editable ? ' ·' : ''}
                       </Text>
-                      <Text style={styles.meta}>Commandé : {formatQuantity(it.quantityOrdered)}</Text>
+                      <Text style={styles.meta}>
+                        Livré {formatQuantity(it.quantityDelivered)} · Reste{' '}
+                        {formatQuantity(remaining)}
+                      </Text>
                     </View>
-                    {editable ? (
-                      <TextInput
-                        style={styles.qtyInput}
-                        keyboardType="decimal-pad"
-                        value={qtyDrafts[it.saleItemId] ?? ''}
-                        onChangeText={(v) =>
-                          setQtyDrafts((prev) => ({ ...prev, [it.saleItemId]: v }))
-                        }
-                      />
-                    ) : (
-                      <Text style={styles.rowValue}>
-                        {formatQuantity(it.quantityDelivered)} / {formatQuantity(it.quantityOrdered)}
-                      </Text>
-                    )}
-                  </View>
+                  </Pressable>
                 );
               }}
             />
@@ -637,7 +690,7 @@ export function DeliveriesListScreen({ status }: Props) {
                       style={[styles.secondaryBtn, saving && styles.disabled]}
                       disabled={saving}
                       onPress={() => void saveDetail(false)}>
-                      <Text style={styles.secondaryBtnText}>Enregistrer</Text>
+                      <Text style={styles.secondaryBtnText}>Ajouter</Text>
                     </Pressable>
                     <Pressable
                       style={[styles.primaryBtn, saving && styles.disabled]}

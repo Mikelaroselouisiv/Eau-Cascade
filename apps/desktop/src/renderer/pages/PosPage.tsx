@@ -158,6 +158,7 @@ export function PosPage() {
     fulfillmentType: FulfillmentType;
     clientPhone: string;
     clientAddress: string;
+    deliveryStops: Array<{ address: string; quantity: string }>;
     bankId: number | '';
     bankAccountId: number | '';
   };
@@ -170,6 +171,7 @@ export function PosPage() {
     fulfillmentType: 'ON_SITE',
     clientPhone: '',
     clientAddress: '',
+    deliveryStops: [{ address: '', quantity: '' }],
     bankId: '',
     bankAccountId: '',
   });
@@ -554,6 +556,7 @@ export function PosPage() {
                 fulfillmentType: 'ON_SITE',
                 clientPhone: '',
                 clientAddress: '',
+                deliveryStops: [{ address: '', quantity: '' }],
                 bankId: '',
                 bankAccountId: '',
               }
@@ -787,8 +790,22 @@ export function PosPage() {
         setStatus('Indiquez le téléphone du client', { persist: true });
         return;
       }
-      if (!activeDraft.clientAddress.trim()) {
-        setStatus('Indiquez l’adresse de livraison', { persist: true });
+      const stops = (activeDraft.deliveryStops ?? [])
+        .map((s) => ({
+          address: s.address.trim(),
+          quantity: Number(String(s.quantity).replace(',', '.')),
+        }))
+        .filter((s) => s.address || (Number.isFinite(s.quantity) && s.quantity > 0));
+      if (!stops.length || stops.some((s) => !s.address || !Number.isFinite(s.quantity) || s.quantity <= 0)) {
+        setStatus('Chaque adresse doit avoir une quantité', { persist: true });
+        return;
+      }
+      const cartQty = activeCart.reduce((acc, l) => acc + l.quantity, 0);
+      const stopQty = stops.reduce((acc, s) => acc + s.quantity, 0);
+      if (Math.abs(stopQty - cartQty) > 0.0001) {
+        setStatus('La somme des quantités par adresse doit égaler la quantité vendue', {
+          persist: true,
+        });
         return;
       }
     }
@@ -819,7 +836,15 @@ export function PosPage() {
       ...(activeDraft.fulfillmentType === 'HOME'
         ? {
             clientPhone: activeDraft.clientPhone.trim(),
-            clientAddress: activeDraft.clientAddress.trim(),
+            clientAddress: (activeDraft.deliveryStops ?? [])
+              .map((s) => s.address.trim())
+              .find(Boolean) ?? activeDraft.clientAddress.trim(),
+            deliveryStops: (activeDraft.deliveryStops ?? [])
+              .map((s) => ({
+                address: s.address.trim(),
+                quantity: Number(String(s.quantity).replace(',', '.')),
+              }))
+              .filter((s) => s.address && Number.isFinite(s.quantity) && s.quantity > 0),
           }
         : {}),
       fulfillmentType: activeDraft.fulfillmentType,
@@ -1387,7 +1412,14 @@ export function PosPage() {
                   type="button"
                   className={`pos-fulfillment-btn${activeDraft.fulfillmentType === 'HOME' ? ' active' : ''}`}
                   disabled={!salesEnabled}
-                  onClick={() => updateActiveDraft((d) => ({ ...d, fulfillmentType: 'HOME' }))}
+                  onClick={() =>
+                    updateActiveDraft((d) => ({
+                      ...d,
+                      fulfillmentType: 'HOME',
+                      deliveryStops:
+                        d.deliveryStops?.length ? d.deliveryStops : [{ address: '', quantity: '' }],
+                    }))
+                  }
                 >
                   À domicile
                 </button>
@@ -1416,15 +1448,68 @@ export function PosPage() {
                     />
                   </label>
                   <label className="pos-draft-name-label">
-                    Adresse de livraison *
-                    <input
-                      value={activeDraft.clientAddress}
+                    Adresses
+                    {(activeDraft.deliveryStops ?? [{ address: '', quantity: '' }]).map((stop, idx) => (
+                      <div key={idx} className="pos-delivery-stop">
+                        <input
+                          value={stop.address}
+                          disabled={!salesEnabled}
+                          onChange={(e) =>
+                            updateActiveDraft((d) => {
+                              const rows = [...(d.deliveryStops ?? [{ address: '', quantity: '' }])];
+                              rows[idx] = { ...rows[idx], address: e.target.value };
+                              return { ...d, deliveryStops: rows, clientAddress: rows[0]?.address ?? '' };
+                            })
+                          }
+                          placeholder="Rue, commune…"
+                        />
+                        <input
+                          value={stop.quantity}
+                          disabled={!salesEnabled}
+                          onChange={(e) =>
+                            updateActiveDraft((d) => {
+                              const rows = [...(d.deliveryStops ?? [{ address: '', quantity: '' }])];
+                              rows[idx] = { ...rows[idx], quantity: e.target.value };
+                              return { ...d, deliveryStops: rows };
+                            })
+                          }
+                          placeholder="Qté"
+                          inputMode="decimal"
+                        />
+                        {(activeDraft.deliveryStops?.length ?? 0) > 1 ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            disabled={!salesEnabled}
+                            onClick={() =>
+                              updateActiveDraft((d) => ({
+                                ...d,
+                                deliveryStops: (d.deliveryStops ?? []).filter((_, i) => i !== idx),
+                              }))
+                            }
+                          >
+                            −
+                          </button>
+                        ) : null}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
                       disabled={!salesEnabled}
-                      onChange={(e) =>
-                        updateActiveDraft((d) => ({ ...d, clientAddress: e.target.value }))
+                      onClick={() =>
+                        updateActiveDraft((d) => ({
+                          ...d,
+                          fulfillmentType: 'HOME',
+                          deliveryStops: [
+                            ...(d.deliveryStops?.length ? d.deliveryStops : [{ address: '', quantity: '' }]),
+                            { address: '', quantity: '' },
+                          ],
+                        }))
                       }
-                      placeholder="Rue, commune…"
-                    />
+                    >
+                      + Adresse
+                    </button>
                   </label>
                 </>
               ) : null}
