@@ -424,15 +424,12 @@ if ($Desktop -eq 'none') {
           npm run "dist:win:$ed"
           if ($LASTEXITCODE -ne 0) { throw "Build dist:win:$ed échoué" }
         }
+        Invoke-OrDry "upload-desktop-installer.ps1 -Edition $ed" {
+          & $UploadScript -Edition $ed
+        }
       }
     } finally {
       Pop-Location
-    }
-
-    foreach ($ed in $localEditions) {
-      Invoke-OrDry "upload-desktop-installer.ps1 -Edition $ed" {
-        & $UploadScript -Edition $ed
-      }
     }
   }
 }
