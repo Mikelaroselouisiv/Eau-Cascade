@@ -43,11 +43,11 @@ type AccountingScopeValue = {
 const AccountingScopeContext = createContext<AccountingScopeValue | null>(null);
 
 export function AccountingScopeProvider({ children }: { children: ReactNode }) {
-  const { can, canPerm } = useAuth();
+  const { canPerm } = useAuth();
   const { companyId, ready } = useCompanyScope();
-  const canView = can(['ADMIN', 'ACCOUNTANT']) || canPerm('accounting.view');
-  const canWrite = canPerm('accounting.write') || can(['ADMIN']);
-  const canManage = canPerm('accounting.manage') || can(['ADMIN']);
+  const canView = canPerm('accounting.view');
+  const canWrite = canPerm('accounting.write');
+  const canManage = canPerm('accounting.manage');
 
   const [years, setYears] = useState<FiscalYearRow[]>([]);
   const [openYear, setOpenYear] = useState<FiscalYearRow | null>(null);

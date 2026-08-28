@@ -19,10 +19,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const message =
-      exception instanceof HttpException
-        ? exception.getResponse()
-        : 'Internal server error';
+    const message = this.extractMessage(exception);
 
     if (!(exception instanceof HttpException)) {
       const err = exception as Error;
@@ -35,5 +32,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       message,
     });
+  }
+
+  /** Nest encapsule souvent `{ statusCode, message, error }` — exposer le message utile. */
+  private extractMessage(exception: unknown): string | string[] | unknown {
+    if (!(exception instanceof HttpException)) {
+      return 'Internal server error';
+    }
+    const raw = exception.getResponse();
+    if (typeof raw === 'string') return raw;
+    if (raw && typeof raw === 'object' && 'message' in raw) {
+      return (raw as { message: unknown }).message;
+    }
+    return raw;
   }
 }

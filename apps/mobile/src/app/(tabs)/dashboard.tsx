@@ -21,9 +21,9 @@ function isForbidden(e: unknown): boolean {
 }
 
 export default function DashboardScreen() {
-  const { user, can } = useAuth();
+  const { user, canPerm } = useAuth();
   const companyId = typeof user?.companyId === 'number' ? user.companyId : undefined;
-  const canSeeSummary = can(['ADMIN', 'MANAGER', 'ACCOUNTANT']);
+  const canSeeSummary = canPerm('dashboard.view');
 
   const [summary, setSummary] = useState<DashboardSummaryReport | null>(null);
   const [recentSales, setRecentSales] = useState<Sale[]>([]);

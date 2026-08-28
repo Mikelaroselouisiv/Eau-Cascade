@@ -116,12 +116,12 @@ type PosWorkspaceProps = {
 };
 
 export function PosWorkspace({ mode }: PosWorkspaceProps) {
-  const { user, can, canPerm } = useAuth();
+  const { user, canPerm } = useAuth();
   const { companyId: scopedCompanyId } = useCompanyScope();
   const cashierLabel = user?.fullName?.trim() || user?.phone || 'Caissier';
   const isCashier = user?.role === 'CASHIER';
-  const canUsePos = canPerm('pos.use') || can(['ADMIN', 'MANAGER', 'CASHIER']);
-  const canSpecial = canPerm('sales.special_price') || can(['ADMIN', 'MANAGER']);
+  const canUsePos = canPerm('pos.use');
+  const canSpecial = canPerm('sales.special_price');
   const canSell = canPerm('sales.create') || canUsePos;
 
   const [products, setProducts] = useState<Product[]>([]);

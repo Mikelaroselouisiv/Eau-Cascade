@@ -24,8 +24,10 @@ import {
   listRoles,
   updateRole,
 } from '@/services/api';
+import { formatApiError } from '@/services/api-errors';
 import type { AppRoleRow, PermissionDefinition } from '@/types/api';
 import { PERMISSION_GROUPS } from '@/utils/permissionGroups';
+import { normalizeRoleCode } from '@/utils/roleLabels';
 
 export function RolesConfigScreen() {
   const { can, canPerm } = useAuth();
@@ -92,7 +94,7 @@ export function RolesConfigScreen() {
     else setList([...new Set([...list.filter((p) => p !== '*'), ...usable])]);
   }
 
-  function groupedPermissions() {
+  function groupedPermissions(selected: string[]) {
     const byCode = new Map(permissions.map((p) => [p.code, p]));
     const used = new Set<string>();
     const sections: Array<{ id: string; label: string; items: PermissionDefinition[] }> = [];
@@ -104,7 +106,11 @@ export function RolesConfigScreen() {
       if (items.length) sections.push({ id: group.id, label: group.label, items });
     }
     const orphan = permissions.filter((p) => !used.has(p.code));
-    if (orphan.length) sections.push({ id: 'other', label: 'Autres', items: orphan });
+    const extras = selected
+      .filter((c) => !byCode.has(c))
+      .map((code) => ({ code, label: code }));
+    const other = [...orphan, ...extras];
+    if (other.length) sections.push({ id: 'other', label: 'Autres', items: other });
     return sections;
   }
 
@@ -120,7 +126,7 @@ export function RolesConfigScreen() {
           </Text>
         </Pressable>
         {!hasStar
-          ? groupedPermissions().map((section) => {
+          ? groupedPermissions(list).map((section) => {
               const codes = section.items.map((p) => p.code).filter((c) => c !== '*');
               const allOn = codes.length > 0 && codes.every((c) => list.includes(c));
               return (
@@ -166,24 +172,29 @@ export function RolesConfigScreen() {
       setEdit(null);
       setStatus('Rôle mis à jour');
       await load();
-    } catch {
-      setStatus('Enregistrement impossible');
+    } catch (err) {
+      setStatus(formatApiError(err, 'Enregistrement impossible'));
     } finally {
       setBusy(false);
     }
   }
 
   async function submitCreate() {
-    if (!newCode.trim() || !newLabel.trim() || newPerms.length === 0) {
+    const code = normalizeRoleCode(newCode);
+    if (!code || !newLabel.trim() || newPerms.length === 0) {
       setStatus('Code, libellé et au moins une autorisation');
+      return;
+    }
+    if (!/^[A-Z][A-Z0-9_]{1,39}$/.test(code)) {
+      setStatus('Code de rôle invalide');
       return;
     }
     setBusy(true);
     try {
       await createRole({
-        code: newCode.trim().toUpperCase(),
+        code,
         label: newLabel.trim(),
-        description: newDesc.trim() || undefined,
+        ...(newDesc.trim() ? { description: newDesc.trim() } : {}),
         permissions: newPerms,
       });
       setShowCreate(false);
@@ -193,8 +204,8 @@ export function RolesConfigScreen() {
       setNewPerms([]);
       setStatus('Rôle créé');
       await load();
-    } catch {
-      setStatus('Création impossible');
+    } catch (err) {
+      setStatus(formatApiError(err, 'Création impossible'));
     } finally {
       setBusy(false);
     }

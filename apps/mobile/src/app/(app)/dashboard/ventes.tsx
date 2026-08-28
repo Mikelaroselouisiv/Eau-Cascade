@@ -66,7 +66,7 @@ export default function VentesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canManageSales = can(['ADMIN', 'MANAGER']) || canPerm('sales.cancel');
+  const canManageSales = canPerm('sales.cancel');
   const canDeleteSales = can(['ADMIN']) || canPerm('sales.delete');
   const canSeeUnlimitedSalesRange = can(['ADMIN']) || canPerm('reports.view');
   const canSeeSalesTotals = canSeeUnlimitedSalesRange || canPerm('sales.recent_totals');

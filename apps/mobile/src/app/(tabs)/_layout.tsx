@@ -4,11 +4,11 @@ import { LogoutButton } from '@/components/LogoutButton';
 import { useAuth } from '@/context/AuthContext';
 
 export default function TabsLayout() {
-  const { user, can } = useAuth();
+  const { user, canPerm } = useAuth();
 
   if (!user) return <Redirect href="/login" />;
 
-  const canSeeDashboard = can(['ADMIN', 'MANAGER', 'ACCOUNTANT']);
+  const canSeeDashboard = canPerm('dashboard.view');
 
   return (
     <Tabs screenOptions={{ headerShown: true, headerRight: () => <LogoutButton /> }}>

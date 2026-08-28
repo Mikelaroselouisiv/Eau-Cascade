@@ -308,12 +308,7 @@ type AccessFns = {
 
 export function canAccessMenuItem(item: MenuItem, access: AccessFns): boolean {
   if (item.key === 'home') return true;
-  if (item.permission) {
-    if (item.permission === 'credit.view') {
-      return access.can(['ADMIN', 'MANAGER']) || access.canPerm('credit.view');
-    }
-    return access.canPerm(item.permission);
-  }
+  if (item.permission) return access.canPerm(item.permission);
   return access.can(item.roles);
 }
 
@@ -322,25 +317,21 @@ export function filterMenuItems(items: MenuItem[], access: AccessFns): MenuItem[
 }
 
 export function canAccessTab(tab: SectionTab, access: AccessFns): boolean {
-  const byPerm = tab.permission ? access.canPerm(tab.permission) : false;
-  const byRole = tab.roles ? access.can(tab.roles) : false;
   if (tab.name === 'synthese') {
-    return byRole || access.canPerm('dashboard.synthesis') || access.canPerm('reports.view');
+    return access.canPerm('dashboard.synthesis') || access.canPerm('reports.view');
   }
   if (tab.name === 'stock' && tab.title === 'Stock') {
-    return byRole || access.canPerm('stock.global') || access.canPerm('reports.view');
+    return access.canPerm('stock.global') || access.canPerm('reports.view');
   }
   if (tab.name === 'depenses') {
     return (
-      byRole ||
       access.canPerm('finance.view') ||
       access.canPerm('finance.write') ||
       access.canPerm('finance.expense')
     );
   }
-  if (tab.permission && tab.roles) return byPerm || byRole;
-  if (tab.permission) return byPerm;
-  if (tab.roles) return byRole;
+  if (tab.permission) return access.canPerm(tab.permission);
+  if (tab.roles) return access.can(tab.roles);
   return true;
 }
 

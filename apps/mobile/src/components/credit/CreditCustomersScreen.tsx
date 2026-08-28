@@ -75,10 +75,10 @@ function matchesMode(c: CreditCustomerListItem, mode: CreditListMode): boolean {
 }
 
 export function CreditCustomersScreen({ mode }: Props) {
-  const { can, canPerm } = useAuth();
+  const { canPerm } = useAuth();
   const { companyId, ready } = useCompanyScope();
-  const allowed = can(['ADMIN', 'MANAGER']) || canPerm('credit.view');
-  const canManage = canPerm('credit.manage') || can(['ADMIN', 'MANAGER']);
+  const allowed = canPerm('credit.view');
+  const canManage = canPerm('credit.manage');
 
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');

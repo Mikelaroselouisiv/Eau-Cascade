@@ -150,13 +150,16 @@ export const SYSTEM_ROLE_LABELS: Record<string, string> = {
  */
 export const SALES_RECENT_TOTALS_DAYS = 2;
 
+/**
+ * Valeurs initiales **uniquement** à la création d’un rôle système manquant.
+ * Une fois la ligne `AppRole` existante, Config → Rôles (table) est la source de vérité.
+ * Ne jamais réécrire / fusionner ces listes sur un rôle déjà enregistré.
+ */
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   ADMIN: ['*'],
   /**
-   * Gérant = exploitation terrain (caisse, stock local, ventes du jour, crédit).
-   * Peut contrôler **plusieurs départements** de son entreprise (UserDepartment).
-   * Pas de chiffres globaux / banque / compta / synthèse — à réactiver via Rôles si besoin.
-   * `sales.recent_totals` : totaux ventes limités aux 2 derniers jours.
+   * Bootstrap gérant (premier insert seulement).
+   * Périmètre multi-départements = code de rôle MANAGER (UserDepartment), pas cette liste.
    */
   MANAGER: [
     'dashboard.view',

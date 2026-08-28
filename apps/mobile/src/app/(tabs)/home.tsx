@@ -18,10 +18,10 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function HomeScreen() {
-  const { user, can } = useAuth();
+  const { user, canPerm } = useAuth();
   const router = useRouter();
   const pendingCount = usePendingSalesCount();
-  const canSeeDashboard = can(['ADMIN', 'MANAGER', 'ACCOUNTANT']);
+  const canSeeDashboard = canPerm('dashboard.view');
   const displayName = user?.fullName?.trim() || user?.phone || '';
 
   const shortcuts = [

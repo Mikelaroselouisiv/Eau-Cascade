@@ -54,12 +54,9 @@ function compareProducts(a: Product, b: Product): number {
 }
 
 export function ProductsCatalogScreen() {
-  const { user, can, canPerm } = useAuth();
-  const canManage = canPerm('products.manage') || can(['ADMIN', 'MANAGER', 'STOCK_MANAGER']);
-  const allowed =
-    can(['ADMIN', 'MANAGER', 'STOCK_MANAGER']) ||
-    canPerm('products.view') ||
-    canPerm('products.manage');
+  const { user, canPerm } = useAuth();
+  const canManage = canPerm('products.manage');
+  const allowed = canPerm('products.view') || canPerm('products.manage');
   const sessionCompanyId = typeof user?.companyId === 'number' ? user.companyId : undefined;
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);

@@ -31,13 +31,10 @@ import { formatMoney } from '@/utils/datetime';
 type TierDraft = { minQuantity: string; unitPrice: string };
 
 export function ProductFamiliesScreen() {
-  const { user, can, canPerm } = useAuth();
+  const { user, canPerm } = useAuth();
   const sessionCompanyId = typeof user?.companyId === 'number' ? user.companyId : null;
-  const allowed =
-    can(['ADMIN', 'MANAGER', 'STOCK_MANAGER']) ||
-    canPerm('products.view') ||
-    canPerm('products.manage');
-  const canManage = can(['ADMIN', 'MANAGER', 'STOCK_MANAGER']) || canPerm('products.manage');
+  const allowed = canPerm('products.view') || canPerm('products.manage');
+  const canManage = canPerm('products.manage');
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [companyId, setCompanyId] = useState<number | null>(sessionCompanyId);
   const [products, setProducts] = useState<Product[]>([]);

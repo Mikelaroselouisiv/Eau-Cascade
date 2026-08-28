@@ -5,14 +5,13 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import {
-  ALL_PERMISSION_CODES,
   DEFAULT_ROLE_PERMISSIONS,
   PERMISSIONS,
   permissionsSatisfy,
   SYSTEM_ROLE_LABELS,
 } from '../../common/permissions';
+import { isValidRoleCode, normalizeRoleCode } from '../../common/role-code';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
 
@@ -94,28 +93,48 @@ export class RolesService implements OnModuleInit {
   }
 
   async create(dto: CreateRoleDto) {
-    const code = dto.code.trim().toUpperCase().replace(/\s+/g, '_');
-    if (!/^[A-Z][A-Z0-9_]{1,39}$/.test(code)) {
+    const code = normalizeRoleCode(dto.code);
+    if (!isValidRoleCode(code)) {
       throw new BadRequestException(
-        'Code de rôle invalide (lettres/chiffres/_, commence par une lettre).',
+        'Code de rôle invalide (lettres, chiffres, _ ; commence par une lettre).',
       );
     }
-    const existing = await this.prisma.appRole.findFirst({ where: { code } });
-    if (existing) {
-      throw new ConflictException('Ce code de rôle existe déjà.');
+    const permissions = this.sanitizePermissions(dto.permissions);
+    if (permissions.length === 0) {
+      throw new BadRequestException('Cochez au moins une autorisation.');
     }
-    this.validatePermissions(dto.permissions);
-    const created = await this.prisma.appRole.create({
-      data: {
-        code,
-        label: dto.label.trim(),
-        description: dto.description?.trim() || null,
-        permissions: dto.permissions,
-        isSystem: false,
-      },
-    });
-    this.cache.delete(code);
-    return created;
+    const existing = await this.prisma.appRole.findFirst({ where: { code } });
+    if (existing && !existing.deletedAt) {
+      throw new ConflictException(`Le rôle « ${code} » existe déjà.`);
+    }
+    const data = {
+      code,
+      label: dto.label.trim(),
+      description: dto.description?.trim() || null,
+      permissions,
+      isActive: true,
+      deletedAt: null as Date | null,
+    };
+    if (existing?.deletedAt) {
+      const restored = await this.prisma.appRole.update({
+        where: { id: existing.id },
+        data: { ...data, isSystem: existing.isSystem },
+      });
+      this.cache.delete(code);
+      return restored;
+    }
+    try {
+      const created = await this.prisma.appRole.create({
+        data: { ...data, isSystem: false },
+      });
+      this.cache.delete(code);
+      return created;
+    } catch (err) {
+      if (this.isUniqueConflict(err)) {
+        throw new ConflictException(`Le rôle « ${code} » existe déjà.`);
+      }
+      throw err;
+    }
   }
 
   async update(id: number, dto: UpdateRoleDto) {
@@ -123,15 +142,14 @@ export class RolesService implements OnModuleInit {
     if (!existing || existing.deletedAt) {
       throw new NotFoundException('Rôle introuvable');
     }
-    if (dto.permissions) {
-      this.validatePermissions(dto.permissions);
-    }
+    const permissions =
+      dto.permissions === undefined ? undefined : this.sanitizePermissions(dto.permissions);
     const updated = await this.prisma.appRole.update({
       where: { id },
       data: {
         label: dto.label?.trim(),
         description: dto.description === undefined ? undefined : dto.description?.trim() || null,
-        permissions: dto.permissions,
+        permissions,
         isActive: dto.isActive,
       },
     });
@@ -161,13 +179,23 @@ export class RolesService implements OnModuleInit {
     return deleted;
   }
 
-  private validatePermissions(perms: string[]) {
-    const allowed = new Set<string>(['*', ...ALL_PERMISSION_CODES]);
-    for (const p of perms) {
-      if (!allowed.has(p)) {
-        throw new BadRequestException(`Autorisation inconnue : ${p}`);
-      }
-    }
+  /**
+   * Nettoie la liste. Le catalogue `PERMISSIONS` sert à l’UI ; on n’interdit pas
+   * un code encore présent en base (sinon PATCH → 400 et la matrice ne bouge pas).
+   */
+  private sanitizePermissions(perms: string[]) {
+    return Array.from(
+      new Set(perms.map((p) => String(p).trim()).filter((p) => p.length > 0)),
+    );
+  }
+
+  private isUniqueConflict(err: unknown): boolean {
+    return (
+      typeof err === 'object' &&
+      err != null &&
+      'code' in err &&
+      (err as { code?: string }).code === 'P2002'
+    );
   }
 
   private async ensureSystemRoles() {

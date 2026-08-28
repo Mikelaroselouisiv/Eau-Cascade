@@ -74,8 +74,7 @@ export function PurchasingScreen() {
   const { can, canPerm } = useAuth();
   const { companyId, ready } = useCompanyScope();
   const isAdmin = can(['ADMIN']) || canPerm('*');
-  const allowed =
-    can(['ADMIN', 'MANAGER', 'STOCK_MANAGER']) || canPerm('purchasing.manage');
+  const allowed = canPerm('purchasing.manage');
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [products, setProducts] = useState<Product[]>([]);

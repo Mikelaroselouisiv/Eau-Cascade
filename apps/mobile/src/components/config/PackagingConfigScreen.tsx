@@ -28,9 +28,8 @@ import {
 import type { CompanyListItem, Department, PackagingUnit } from '@/types/api';
 
 export function PackagingConfigScreen() {
-  const { can, canPerm } = useAuth();
-  const allowed =
-    can(['ADMIN', 'MANAGER', 'STOCK_MANAGER']) || canPerm('packaging.manage');
+  const { canPerm } = useAuth();
+  const allowed = canPerm('packaging.manage');
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);

@@ -32,7 +32,7 @@ import {
 import { buildTicketPreviewText } from '../utils/ticketPreview';
 import { buildDisbursementOrderPreviewText } from '../utils/disbursementOrderPreview';
 import { formatRegisterCode } from '../utils/registerDisplay';
-import { formatRoleLabel } from '../utils/roleLabels';
+import { formatRoleLabel, normalizeRoleCode } from '../utils/roleLabels';
 import { isManagerRole } from '../utils/user-scope';
 import { formatQuantity } from '../utils/formatQuantity';
 import { PasswordField } from '../components/PasswordField';
@@ -55,28 +55,7 @@ import type {
   SessionUser,
 } from '../types/api';
 import axios from 'axios';
-
-function formatApiError(err: unknown, fallback: string): string {
-  if (axios.isAxiosError(err)) {
-    const d = err.response?.data;
-    if (typeof d === 'string' && d.trim()) return d;
-    if (d && typeof d === 'object') {
-      const m = (d as { message?: unknown; error?: unknown }).message;
-      if (typeof m === 'string') return m;
-      if (Array.isArray(m)) return m.join(', ');
-      const e = (d as { error?: unknown }).error;
-      if (typeof e === 'string') return e;
-    }
-    if (err.code === 'ERR_NETWORK') {
-      return 'Pas de réponse du serveur (réseau ou API arrêtée).';
-    }
-    if (typeof err.message === 'string' && err.message.trim()) {
-      return err.message;
-    }
-  }
-  if (err instanceof Error && err.message.trim()) return err.message;
-  return fallback;
-}
+import { formatApiError } from '../services/api-errors';
 
 type Tab = 'company' | 'printer' | 'packaging' | 'banques' | 'users' | 'roles';
 type PrinterDocType = 'RECEIPT' | 'DISBURSEMENT_ORDER';
@@ -2638,16 +2617,21 @@ function RolesSection({
   async function addRole(e: FormEvent) {
     e.preventDefault();
     setCreateMsg('');
-    if (!newCode.trim() || !newLabel.trim() || newPerms.length === 0) {
+    const code = normalizeRoleCode(newCode);
+    if (!code || !newLabel.trim() || newPerms.length === 0) {
       setCreateMsg('Code, libellé et au moins une autorisation sont requis.');
+      return;
+    }
+    if (!/^[A-Z][A-Z0-9_]{1,39}$/.test(code)) {
+      setCreateMsg('Code de rôle invalide (lettres, chiffres, _ ; commence par une lettre).');
       return;
     }
     setBusy(true);
     try {
       await createRole({
-        code: newCode.trim(),
+        code,
         label: newLabel.trim(),
-        description: newDesc.trim() || undefined,
+        ...(newDesc.trim() ? { description: newDesc.trim() } : {}),
         permissions: newPerms,
       });
       resetCreateForm();
@@ -2855,11 +2839,15 @@ function PermissionPicker({
       if (items.length) sections.push({ id: g.id, label: g.label, items });
     }
     const orphan = permissions.filter((p) => !used.has(p.code));
-    if (orphan.length) {
-      sections.push({ id: 'other', label: 'Autres', items: orphan });
+    const extras = selected
+      .filter((c) => !byCode.has(c))
+      .map((code) => ({ code, label: code }));
+    const other = [...orphan, ...extras];
+    if (other.length) {
+      sections.push({ id: 'other', label: 'Autres', items: other });
     }
     return sections;
-  }, [permissions, byCode]);
+  }, [permissions, byCode, selected]);
 
   function toggle(code: string, checked: boolean) {
     if (code === '*') {

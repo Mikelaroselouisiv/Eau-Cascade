@@ -27,9 +27,9 @@ import type { BankAccountRow, BankSummary, BankTransactionRow } from '@/types/ap
 import { formatDateTime } from '@/utils/datetime';
 
 export default function BanqueScreen() {
-  const { can, canPerm } = useAuth();
+  const { canPerm } = useAuth();
   const { companyId, ready } = useCompanyScope();
-  const canManage = can(['ADMIN', 'MANAGER']) || canPerm('banks.manage');
+  const canManage = canPerm('banks.manage');
   const [summary, setSummary] = useState<BankSummary | null>(null);
   const [accounts, setAccounts] = useState<BankAccountRow[]>([]);
   const [txs, setTxs] = useState<BankTransactionRow[]>([]);

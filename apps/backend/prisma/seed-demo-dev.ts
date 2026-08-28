@@ -91,11 +91,11 @@ async function ensureRoles() {
           isActive: true,
         },
       });
-    } else if (!existing.permissions.includes('*')) {
-      const merged = Array.from(new Set([...existing.permissions, ...perms]));
+    } else {
+      // Ne pas fusionner les défauts du code : Config → Rôles est la source de vérité.
       await prisma.appRole.update({
         where: { id: existing.id },
-        data: { permissions: merged, isActive: true, deletedAt: null },
+        data: { isActive: true, deletedAt: null },
       });
     }
   }

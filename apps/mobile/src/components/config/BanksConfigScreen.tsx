@@ -27,8 +27,8 @@ import type { BankRow, CompanyListItem } from '@/types/api';
 import { formatMoney } from '@/utils/datetime';
 
 export function BanksConfigScreen() {
-  const { can, canPerm } = useAuth();
-  const canManage = can(['ADMIN', 'MANAGER']) || canPerm('banks.manage');
+  const { canPerm } = useAuth();
+  const canManage = canPerm('banks.manage');
   const allowed = canManage || canPerm('banks.view');
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);

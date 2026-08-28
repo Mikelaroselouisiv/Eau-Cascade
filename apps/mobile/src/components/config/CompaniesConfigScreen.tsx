@@ -33,7 +33,7 @@ export function CompaniesConfigScreen() {
   const { can, canPerm } = useAuth();
   const canCreate = can(['ADMIN']) || canPerm('company.manage');
   const canEdit =
-    can(['ADMIN', 'MANAGER']) || canPerm('company.manage') || canPerm('config.manage');
+    canPerm('company.manage') || canPerm('config.manage');
   const canDelete = can(['ADMIN']) || canPerm('company.manage');
   const allowed = canEdit || canPerm('config.view');
 

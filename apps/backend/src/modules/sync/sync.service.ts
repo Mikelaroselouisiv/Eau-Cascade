@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { BankTransactionType, Prisma } from '@prisma/client';
+import { normalizeRoleCode } from '../../common/role-code';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SyncPushDto, SyncRecordDto } from './dto/sync.dto';
 import {
@@ -346,10 +347,10 @@ export class SyncService {
       }) as Promise<Record<string, unknown> | null>;
     }
     if (entity === 'AppRole') {
-      const code = record.data?.code;
-      if (code == null || code === '') return null;
+      const code = normalizeRoleCode(record.data?.code);
+      if (!code) return null;
       return this.prisma.appRole.findFirst({
-        where: { code: String(code) },
+        where: { code },
       }) as Promise<Record<string, unknown> | null>;
     }
     if (entity === 'UserDepartment') {
@@ -436,6 +437,9 @@ export class SyncService {
     if (entity === 'Sale') {
       this.preserveSaleTxnNumber(data, opts?.existing);
     }
+    if (entity === 'AppRole' && opts?.existing?.isSystem === true) {
+      data.isSystem = true;
+    }
     await this.delegate(entity).update({
       where: { uuid: whereUuid },
       data,
@@ -476,10 +480,48 @@ export class SyncService {
     }
 
     await this.resolveForeignKeys(entity, raw);
+    if (entity === 'AppRole') {
+      this.normalizeAppRolePayload(raw);
+    }
     // Ne jamais planter le sync si le nœud source a des colonnes
     // plus récentes que le Prisma client local (ex. txnNumber avant redeploy).
     this.stripUnknownScalarFields(entity, raw);
     return raw;
+  }
+
+  /** Code + permissions : même forme d’un nœud à l’autre (String[]). */
+  private normalizeAppRolePayload(raw: Record<string, unknown>): void {
+    if (raw.code != null) {
+      raw.code = normalizeRoleCode(raw.code);
+    }
+    if (raw.permissions === undefined) {
+      delete raw.permissions;
+      return;
+    }
+    raw.permissions = this.coercePermissionList(raw.permissions);
+  }
+
+  private coercePermissionList(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return Array.from(new Set(value.map((v) => String(v).trim()).filter(Boolean)));
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const t = value.trim();
+      if (t.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(t) as unknown;
+          if (Array.isArray(parsed)) return this.coercePermissionList(parsed);
+        } catch {
+          /* liste Postgres {a,b} */
+        }
+      }
+      return t
+        .replace(/^{|}$/g, '')
+        .split(',')
+        .map((s) => s.trim().replace(/^"|"$/g, ''))
+        .filter(Boolean);
+    }
+    return [];
   }
 
   private stripUnknownScalarFields(
