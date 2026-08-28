@@ -16,13 +16,21 @@ import { Screen } from '@/components/Screen';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import { getDeliveryById, getDepartments, getSaleById, listDeliveries, updateDelivery } from '@/services/api';
+import {
+  getCompanies,
+  getDeliveryById,
+  getDepartments,
+  getSaleById,
+  listDeliveries,
+  updateDelivery,
+} from '@/services/api';
 import { formatApiError } from '@/services/api-errors';
 import { printReceipt } from '@/services/bluetooth-printer';
 import { buildSaleReceiptDataFromSale } from '@/services/receipt';
-import type { Delivery, DeliveryStatus, Department } from '@/types/api';
+import type { CompanyListItem, Delivery, DeliveryStatus, Department } from '@/types/api';
 import { formatDateTime, formatMoney } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
+import { canEditDeliveryExecutor, departmentsForUser, isAdminRole } from '@/utils/user-scope';
 
 const STATUS_LABEL: Record<DeliveryStatus, string> = {
   PENDING: 'Non livré',
@@ -50,9 +58,10 @@ export function DeliveriesListScreen({ status }: Props) {
   const canManageOnsite = canPerm('deliveries.manage_onsite');
   const canManageHome = canPerm('deliveries.manage_home');
   const canPrintFiche = canPerm('deliveries.print');
-  const canChangeExecutor = user?.role === 'ADMIN' || user?.role === 'MANAGER';
+  const canChangeExecutor = canEditDeliveryExecutor(user?.role);
   const lockedScope = user?.role === 'CASHIER' || user?.role === 'LIVREUR';
-  const companyId = typeof user?.companyId === 'number' ? user.companyId : undefined;
+  const canFilter = !lockedScope;
+  const sessionCompanyId = typeof user?.companyId === 'number' ? user.companyId : undefined;
 
   function canManageDelivery(d: Delivery) {
     if (canManageAll) return true;
@@ -62,6 +71,10 @@ export function DeliveriesListScreen({ status }: Props) {
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [fulfillmentFilter, setFulfillmentFilter] = useState<'' | 'ON_SITE' | 'HOME'>('');
+  const [companies, setCompanies] = useState<CompanyListItem[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [filterCompanyId, setFilterCompanyId] = useState<number | ''>('');
+  const [filterDepartmentId, setFilterDepartmentId] = useState<number | ''>('');
   const [items, setItems] = useState<Delivery[]>([]);
   const [total, setTotal] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -79,7 +92,7 @@ export function DeliveriesListScreen({ status }: Props) {
 
   const load = useCallback(
     async (opts?: { append?: boolean; currentCount?: number }) => {
-      if (lockedScope && companyId == null) {
+      if (lockedScope && sessionCompanyId == null) {
         setError('Entreprise manquante pour ce compte');
         setItems([]);
         return;
@@ -88,7 +101,12 @@ export function DeliveriesListScreen({ status }: Props) {
         setError(null);
         const skip = opts?.append ? (opts.currentCount ?? 0) : 0;
         const res = await listDeliveries({
-          companyId,
+          companyId: canFilter
+            ? filterCompanyId === ''
+              ? undefined
+              : filterCompanyId
+            : sessionCompanyId,
+          departmentId: canFilter && filterDepartmentId !== '' ? filterDepartmentId : undefined,
           status,
           fulfillmentType: fulfillmentFilter || undefined,
           q: query || undefined,
@@ -97,23 +115,59 @@ export function DeliveriesListScreen({ status }: Props) {
         });
         setTotal(res.total);
         setItems((prev) => (opts?.append ? [...prev, ...res.items] : res.items));
-      } catch {
+      } catch (err) {
         if (!opts?.append) setItems([]);
-        setError('Impossible de charger les livraisons');
+        setError(formatApiError(err, 'Impossible de charger les livraisons'));
       }
     },
-    [companyId, lockedScope, query, status, fulfillmentFilter],
+    [
+      canFilter,
+      filterCompanyId,
+      filterDepartmentId,
+      fulfillmentFilter,
+      lockedScope,
+      query,
+      sessionCompanyId,
+      status,
+    ],
   );
 
   useFocusEffect(
     useCallback(() => {
       void load();
-      if (companyId != null) {
-        void getDepartments(companyId)
-          .then((list) => setHomeDepartments(list.filter((d) => d.offersHomeDelivery)))
-          .catch(() => setHomeDepartments([]));
+      if (canFilter) {
+        void getCompanies()
+          .then((list) => {
+            setCompanies(list);
+            if (!isAdminRole(user?.role) && sessionCompanyId != null) {
+              setFilterCompanyId((prev) => (prev === '' ? sessionCompanyId : prev));
+            } else if (list.length === 1) {
+              setFilterCompanyId((prev) => (prev === '' ? list[0].id : prev));
+            }
+          })
+          .catch(() => setCompanies([]));
       }
-    }, [load, companyId]),
+      const cid = canFilter
+        ? filterCompanyId === ''
+          ? undefined
+          : filterCompanyId
+        : sessionCompanyId;
+      if (cid != null) {
+        void getDepartments(cid)
+          .then((list) => {
+            const scoped = canFilter ? departmentsForUser(list, user) : list;
+            setDepartments(scoped);
+            setHomeDepartments(scoped.filter((d) => d.offersHomeDelivery));
+          })
+          .catch(() => {
+            setDepartments([]);
+            setHomeDepartments([]);
+          });
+      } else {
+        setDepartments([]);
+        setHomeDepartments([]);
+      }
+    }, [load, canFilter, filterCompanyId, sessionCompanyId, user]),
   );
 
   async function onRefresh() {
@@ -141,8 +195,15 @@ export function DeliveriesListScreen({ status }: Props) {
       );
       setExecutorDraft(full.executorName?.trim() ?? '');
       setStockDeptId(full.departmentId ?? '');
-    } catch {
-      setError('Impossible d’ouvrir la fiche');
+      const cid =
+        full.companyId ??
+        (typeof filterCompanyId === 'number' ? filterCompanyId : sessionCompanyId);
+      if (isHomeDelivery(full) && full.departmentId == null && cid != null) {
+        const list = await getDepartments(cid);
+        setHomeDepartments(departmentsForUser(list, user).filter((d) => d.offersHomeDelivery));
+      }
+    } catch (err) {
+      setError(formatApiError(err, 'Impossible d’ouvrir la fiche'));
     }
   }
 
@@ -224,6 +285,25 @@ export function DeliveriesListScreen({ status }: Props) {
     }
   }
 
+  async function saveExecutorOnly() {
+    if (!detail || (!canManageDelivery(detail) && !canChangeExecutor)) return;
+    if (!isHomeDelivery(detail)) return;
+    setSaving(true);
+    setDetailError(null);
+    try {
+      const updated = await updateDelivery(detail.id, {
+        executorName: executorDraft.trim() || null,
+      });
+      setDetail(updated);
+      setExecutorDraft(updated.executorName?.trim() ?? '');
+      await load();
+    } catch (e) {
+      setDetailError(formatApiError(e, 'Enregistrement impossible'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Screen>
       <View style={styles.searchRow}>
@@ -262,6 +342,79 @@ export function DeliveriesListScreen({ status }: Props) {
           </Pressable>
         ))}
       </View>
+      {canFilter ? (
+        <>
+          {companies.length > 1 ? (
+            <View style={styles.filterRow}>
+              <Pressable
+                style={[styles.filterChip, filterCompanyId === '' && styles.filterChipActive]}
+                onPress={() => {
+                  setFilterCompanyId('');
+                  setFilterDepartmentId('');
+                }}>
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    filterCompanyId === '' && styles.filterChipTextActive,
+                  ]}>
+                  Entreprises
+                </Text>
+              </Pressable>
+              {companies.map((c) => (
+                <Pressable
+                  key={c.id}
+                  style={[styles.filterChip, filterCompanyId === c.id && styles.filterChipActive]}
+                  onPress={() => {
+                    setFilterCompanyId(c.id);
+                    setFilterDepartmentId('');
+                  }}>
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      filterCompanyId === c.id && styles.filterChipTextActive,
+                    ]}
+                    numberOfLines={1}>
+                    {c.name}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+          {departments.length > 0 ? (
+            <View style={styles.filterRow}>
+              <Pressable
+                style={[styles.filterChip, filterDepartmentId === '' && styles.filterChipActive]}
+                onPress={() => setFilterDepartmentId('')}>
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    filterDepartmentId === '' && styles.filterChipTextActive,
+                  ]}>
+                  Départements
+                </Text>
+              </Pressable>
+              {departments.map((d) => (
+                <Pressable
+                  key={d.id}
+                  style={[
+                    styles.filterChip,
+                    filterDepartmentId === d.id && styles.filterChipActive,
+                  ]}
+                  onPress={() => setFilterDepartmentId(d.id)}>
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      filterDepartmentId === d.id && styles.filterChipTextActive,
+                    ]}
+                    numberOfLines={1}>
+                    {d.name}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </>
+      ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Text style={styles.count}>{total} livraison(s)</Text>
 
@@ -406,7 +559,9 @@ export function DeliveriesListScreen({ status }: Props) {
                     </View>
                   ) : null}
                   {isHomeDelivery(detail) &&
-                  (canManageDelivery(detail) || detail.executorName?.trim()) ? (
+                  (canManageDelivery(detail) ||
+                    canChangeExecutor ||
+                    detail.executorName?.trim()) ? (
                     <View style={styles.executorBlock}>
                       <Text style={styles.meta}>Exécuté par</Text>
                       <TextInput
@@ -495,6 +650,13 @@ export function DeliveriesListScreen({ status }: Props) {
                       )}
                     </Pressable>
                   </>
+                ) : isHomeDelivery(detail) && canChangeExecutor ? (
+                  <Pressable
+                    style={[styles.secondaryBtn, saving && styles.disabled]}
+                    disabled={saving}
+                    onPress={() => void saveExecutorOnly()}>
+                    <Text style={styles.secondaryBtnText}>Enregistrer le nom</Text>
+                  </Pressable>
                 ) : null}
               </View>
             </View>
@@ -520,6 +682,7 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Spacing.two,
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,

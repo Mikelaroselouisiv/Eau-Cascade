@@ -16,15 +16,7 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { usePendingSalesCount } from '@/hooks/usePendingSalesCount';
 import { filterMenuItems, MENU_ITEMS } from '@/navigation/menu';
-
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: 'Administrateur',
-  MANAGER: 'Gestionnaire',
-  CASHIER: 'Caissier',
-  STOCK_MANAGER: 'Gestionnaire de stock',
-  ACCOUNTANT: 'Comptable',
-  LIVREUR: 'Livreur',
-};
+import { formatRoleLabel } from '@/utils/roleLabels';
 
 export default function HomeScreen() {
   const { user, can, canPerm } = useAuth();
@@ -32,7 +24,7 @@ export default function HomeScreen() {
   const pendingCount = usePendingSalesCount();
   const reduceMotion = useReducedMotion();
   const displayName = user?.fullName?.trim() || user?.phone || '';
-  const roleLabel = user?.role ? (ROLE_LABELS[user.role] ?? user.role) : '';
+  const roleLabel = user?.role ? formatRoleLabel(user.role, user.roleLabel) : '';
 
   const shortcuts = filterMenuItems(MENU_ITEMS, { can, canPerm })
     .filter((item) => item.key !== 'home')

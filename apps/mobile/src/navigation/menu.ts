@@ -230,14 +230,14 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
       name: 'banques',
       title: 'Banques',
       icon: 'card-outline',
-      permission: 'banks.manage',
+      permission: 'banks.view',
       roles: ['ADMIN', 'MANAGER'],
     },
     {
       name: 'utilisateurs',
       title: 'Utilisateurs',
       icon: 'people-outline',
-      permission: 'users.manage',
+      permission: 'users.view',
       roles: ['ADMIN'],
     },
     {
@@ -332,6 +332,12 @@ export function canAccessTab(tab: SectionTab, access: AccessFns): boolean {
   }
   if (tab.name === 'harmonisation') {
     return access.canPerm('stock.adjust') || access.canPerm('stock.manage');
+  }
+  if (tab.name === 'utilisateurs') {
+    return access.canPerm('users.view') || access.canPerm('users.manage');
+  }
+  if (tab.name === 'banques') {
+    return access.canPerm('banks.view') || access.canPerm('banks.manage');
   }
   if (tab.permission) return access.canPerm(tab.permission);
   if (tab.roles) return access.can(tab.roles);

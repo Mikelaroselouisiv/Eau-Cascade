@@ -8,14 +8,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { usePendingSalesCount } from '@/hooks/usePendingSalesCount';
-
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: 'Administrateur',
-  MANAGER: 'Gestionnaire',
-  CASHIER: 'Caissier',
-  STOCK_MANAGER: 'Gestionnaire de stock',
-  ACCOUNTANT: 'Comptable',
-};
+import { formatRoleLabel } from '@/utils/roleLabels';
 
 export default function HomeScreen() {
   const { user, canPerm } = useAuth();
@@ -40,7 +33,9 @@ export default function HomeScreen() {
             Bonjour{displayName ? `, ${displayName}` : ''}
           </ThemedText>
           {user?.role && (
-            <ThemedText themeColor="textSecondary">{ROLE_LABELS[user.role] ?? user.role}</ThemedText>
+            <ThemedText themeColor="textSecondary">
+              {formatRoleLabel(user.role, user.roleLabel)}
+            </ThemedText>
           )}
         </View>
 

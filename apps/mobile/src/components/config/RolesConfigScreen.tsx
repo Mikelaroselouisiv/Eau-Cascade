@@ -55,8 +55,8 @@ export function RolesConfigScreen() {
     try {
       setError(null);
       setRoles((await listRoles()).filter((r) => r.isActive));
-    } catch {
-      setError('Impossible de charger les rôles');
+    } catch (err) {
+      setError(formatApiError(err, 'Impossible de charger les rôles'));
     }
   }, [allowed]);
 
@@ -279,7 +279,9 @@ export function RolesConfigScreen() {
                               setStatus('Rôle supprimé');
                               await load();
                             })
-                            .catch(() => setStatus('Suppression impossible'));
+                            .catch((err) =>
+                              setStatus(formatApiError(err, 'Suppression impossible')),
+                            );
                         },
                       },
                     ]);

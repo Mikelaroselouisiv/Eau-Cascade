@@ -20,15 +20,7 @@ import { useAuth } from '@/context/AuthContext';
 import { usePendingSalesCount } from '@/hooks/usePendingSalesCount';
 import { filterMenuItems, MENU_ITEMS } from '@/navigation/menu';
 import { getInstalledAppVersion } from '@/services/app-update';
-
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: 'Administrateur',
-  MANAGER: 'Gestionnaire',
-  CASHIER: 'Caissier',
-  STOCK_MANAGER: 'Gestionnaire de stock',
-  ACCOUNTANT: 'Comptable',
-  LIVREUR: 'Livreur',
-};
+import { formatRoleLabel } from '@/utils/roleLabels';
 
 export function AppMenu() {
   const { menuOpen, closeMenu } = useAppShell();
@@ -89,7 +81,7 @@ function AppMenuPanel() {
           {user ? (
             <Text style={styles.userMeta}>
               {user.fullName?.trim() || user.phone}
-              {user.role ? ` · ${ROLE_LABELS[user.role] ?? user.role}` : ''}
+              {user.role ? ` · ${formatRoleLabel(user.role, user.roleLabel)}` : ''}
             </Text>
           ) : null}
           {pendingCount > 0 ? (

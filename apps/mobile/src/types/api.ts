@@ -5,6 +5,7 @@ export interface SessionUser {
   phone: string;
   email?: string | null;
   role: UserRole;
+  roleLabel?: string | null;
   fullName?: string | null;
   isActive?: boolean;
   companyId?: number | null;

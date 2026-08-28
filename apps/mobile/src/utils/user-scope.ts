@@ -2,6 +2,10 @@ export function isAdminRole(role?: string | null): boolean {
   return role === 'ADMIN';
 }
 
+export function canEditDeliveryExecutor(role?: string | null): boolean {
+  return role === 'ADMIN' || role === 'MANAGER';
+}
+
 export function resolvedDepartmentIds(user: {
   departmentId?: number | null;
   departmentIds?: number[] | null;

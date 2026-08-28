@@ -31,8 +31,9 @@ import type { AppRoleRow, Department, SessionUser } from '@/types/api';
 import { formatRoleLabel } from '@/utils/roleLabels';
 
 export function UsersConfigScreen() {
-  const { can, canPerm } = useAuth();
-  const allowed = can(['ADMIN']) || canPerm('users.manage');
+  const { user: sessionUser, canPerm, refreshUser } = useAuth();
+  const canWrite = canPerm('users.manage');
+  const allowed = canWrite || canPerm('users.view');
 
   const [users, setUsers] = useState<SessionUser[]>([]);
   const [roles, setRoles] = useState<AppRoleRow[]>([]);
@@ -69,8 +70,8 @@ export function UsersConfigScreen() {
       setUsers(u);
       setRoles(r.filter((x) => x.isActive));
       setDepartments(d);
-    } catch {
-      setError('Impossible de charger les utilisateurs');
+    } catch (err) {
+      setError(formatApiError(err, 'Impossible de charger les utilisateurs'));
     }
   }, [allowed]);
 
@@ -84,9 +85,22 @@ export function UsersConfigScreen() {
     return formatRoleLabel(code, roles.find((r) => r.code === code)?.label);
   }
 
-  function deptLabel(id: number | null | undefined) {
-    if (id == null) return '—';
-    return departments.find((d) => d.id === id)?.name ?? `#${id}`;
+  function userDepartmentLabel(u: SessionUser) {
+    const ids = Array.from(
+      new Set([
+        ...(u.departmentIds ?? []),
+        ...(u.departmentId != null ? [u.departmentId] : []),
+      ]),
+    );
+    if (!ids.length) return '—';
+    const labels = ids
+      .map((id) => {
+        const d = departments.find((x) => x.id === id);
+        if (!d) return null;
+        return d.company ? `${d.company.name} — ${d.name}` : d.name;
+      })
+      .filter((x): x is string => Boolean(x));
+    return labels.length ? labels.join(', ') : '—';
   }
 
   async function submitCreate() {
@@ -95,6 +109,10 @@ export function UsersConfigScreen() {
         setStatus('Cochez au moins un département');
         return;
       }
+    }
+    if (phone.trim().length < 6) {
+      setStatus('Téléphone trop court');
+      return;
     }
     if (password !== passwordConfirm) {
       setStatus('Mots de passe différents');
@@ -158,12 +176,17 @@ export function UsersConfigScreen() {
         return;
       }
     }
+    if (editPhone.trim().length < 6) {
+      setStatus('Téléphone trop court');
+      return;
+    }
     setBusy(true);
     try {
       await updateUser(edit.id, {
         phone: editPhone.trim(),
         fullName: editName.trim(),
         role: editRole,
+        companyId: editRole === 'ADMIN' ? null : undefined,
         departmentId: editRole === 'ADMIN' ? null : editExtraDeptIds[0],
         departmentIds: editRole === 'ADMIN' ? [] : editExtraDeptIds,
         ...(editPassword.trim() ? { password: editPassword.trim() } : {}),
@@ -171,6 +194,7 @@ export function UsersConfigScreen() {
       setEdit(null);
       setStatus('Utilisateur mis à jour');
       await load();
+      if (sessionUser?.id === edit.id) await refreshUser();
     } catch (err) {
       setStatus(formatApiError(err, 'Mise à jour impossible'));
     } finally {
@@ -182,7 +206,7 @@ export function UsersConfigScreen() {
     return (
       <Screen>
         <View style={styles.blocked}>
-          <Text style={styles.blockedText}>Utilisateurs réservés aux administrateurs.</Text>
+          <Text style={styles.blockedText}>Aucun accès</Text>
         </View>
       </Screen>
     );
@@ -207,6 +231,7 @@ export function UsersConfigScreen() {
           void load().finally(() => setRefreshing(false));
         }}
         ListHeaderComponent={
+          canWrite ? (
           <Pressable
             style={styles.primaryBtn}
             onPress={() => {
@@ -215,19 +240,23 @@ export function UsersConfigScreen() {
             }}>
             <Text style={styles.primaryBtnText}>+ Utilisateur</Text>
           </Pressable>
+          ) : null
         }
         ListEmptyComponent={<Text style={styles.empty}>Aucun utilisateur</Text>}
         renderItem={({ item: u }) => (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{u.fullName?.trim() || u.phone}</Text>
             <Text style={styles.meta}>
-              {u.phone} · {roleLabel(u.role)} · {deptLabel(u.departmentId)}
+              {u.phone} · {roleLabel(u.role)} · {userDepartmentLabel(u)}
             </Text>
             <Text style={styles.meta}>{u.isActive === false ? 'Inactif' : 'Actif'}</Text>
+            {canWrite ? (
             <View style={styles.rowActions}>
               <Pressable
                 onPress={() => {
-                  void updateUser(u.id, { isActive: !(u.isActive !== false) }).then(() => load());
+                  void updateUser(u.id, { isActive: !(u.isActive !== false) })
+                    .then(() => load())
+                    .catch((err) => setStatus(formatApiError(err, 'Mise à jour impossible')));
                 }}>
                 <Text style={styles.link}>{u.isActive === false ? 'Activer' : 'Désactiver'}</Text>
               </Pressable>
@@ -247,7 +276,9 @@ export function UsersConfigScreen() {
                             setStatus('Utilisateur supprimé');
                             await load();
                           })
-                          .catch(() => setStatus('Suppression impossible'));
+                          .catch((err) =>
+                            setStatus(formatApiError(err, 'Suppression impossible')),
+                          );
                       },
                     },
                   ]);
@@ -255,6 +286,7 @@ export function UsersConfigScreen() {
                 <Text style={styles.danger}>Supprimer</Text>
               </Pressable>
             </View>
+            ) : null}
           </View>
         )}
       />

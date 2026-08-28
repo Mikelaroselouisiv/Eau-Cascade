@@ -23,7 +23,7 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useCompanyScope } from '@/hooks/useCompanyScope';
 import { usePendingSalesCount } from '@/hooks/usePendingSalesCount';
-import { isLikelyNetworkError } from '@/services/api-errors';
+import { formatApiError, isLikelyNetworkError } from '@/services/api-errors';
 import {
   collectSaleBalance,
   createSale,
@@ -537,8 +537,8 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       const r = await settleSaleChange(row.id);
       setStatus(`Monnaie remise — fiche #${saleDisplayRef(row)} (${formatMoney(r.changeSettled)})`);
       await refreshCashGaps();
-    } catch {
-      setStatus('Impossible de remettre la monnaie');
+    } catch (err) {
+      setStatus(formatApiError(err, 'Impossible de remettre la monnaie'));
     } finally {
       setCashGapBusyId(null);
     }
@@ -550,8 +550,8 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       await collectSaleBalance(row.id, row.balanceDue);
       setStatus(`Reste encaissé — fiche #${saleDisplayRef(row)} (${formatMoney(row.balanceDue)})`);
       await refreshCashGaps();
-    } catch {
-      setStatus('Impossible d’encaisser le reste');
+    } catch (err) {
+      setStatus(formatApiError(err, 'Impossible d’encaisser le reste'));
     } finally {
       setCashGapBusyId(null);
     }
@@ -726,7 +726,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       } else if (methodSnapshot === 'BANK' && (isLikelyNetworkError(e) || !online)) {
         setStatus('Paiement banque indisponible hors ligne');
       } else {
-        setStatus('Échec vente (stock, caisse ou données)');
+        setStatus(formatApiError(e, 'Échec vente (stock, caisse ou données)'));
       }
     } finally {
       setSubmitting(false);
