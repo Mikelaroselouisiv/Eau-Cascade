@@ -143,7 +143,7 @@ export function CreditPage() {
   const [downPayment, setDownPayment] = useState('');
   const [saleNote, setSaleNote] = useState('');
   const [saleBusy, setSaleBusy] = useState(false);
-  const [printTicket, setPrintTicket] = useState(false);
+  const [printTicket, setPrintTicket] = useState(true);
 
   const [payAmount, setPayAmount] = useState('');
   const [paySaleId, setPaySaleId] = useState<number | ''>('');
@@ -339,7 +339,7 @@ export function CreditPage() {
     setDownPayment('');
     setSaleNote('');
     setProductQ('');
-    setPrintTicket(false);
+    setPrintTicket(true);
     try {
       const list = await getProducts(detail.departmentId ?? undefined);
       setProducts(list);

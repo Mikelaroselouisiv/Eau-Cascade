@@ -187,7 +187,7 @@ export function PosPage() {
   const [drafts, setDrafts] = useState<SaleDraft[]>(() => [emptyDraft('d1')]);
   const [activeDraftId, setActiveDraftId] = useState<string>('d1');
   const [status, setStatus] = useAutoClearMessage();
-  const [printTicket, setPrintTicket] = useState(false);
+  const [printTicket, setPrintTicket] = useState(true);
   const [amountReceived, setAmountReceived] = useState('');
   const [banks, setBanks] = useState<BankRow[]>([]);
   const [cashGaps, setCashGaps] = useState<{
