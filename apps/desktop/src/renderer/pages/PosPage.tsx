@@ -9,7 +9,6 @@ import {
   getCompanyById,
   getCompanies,
   getDepartments,
-  getInventoryCountSheet,
   getPrinterSettings,
   getRegisterClosingCashPreview,
   getRegisterSessionContext,
@@ -22,6 +21,7 @@ import {
 import { isLikelyNetworkError } from '../services/api-errors';
 import { enqueueSale, syncSalesQueue } from '../services/offline-queue';
 import { getPosDeviceId, getPosDeviceName } from '../services/pos-device';
+import { loadRegisterCountRows } from '../services/register-count-sheet';
 import { loadProductsWithCache } from '../services/product-cache';
 import type {
   CompanyListItem,
@@ -253,9 +253,13 @@ export function PosPage() {
     setSessionOccupancy(ctx.occupancy);
     let resolvedCompanyId = compId;
     if (deptId != null) {
-      const sheet = await getInventoryCountSheet(deptId);
-      setCountProducts(sheet.products);
-      resolvedCompanyId = resolvedCompanyId ?? sheet.department.company.id;
+      try {
+        const sheet = await loadRegisterCountRows(deptId);
+        setCountProducts(sheet.products);
+        resolvedCompanyId = resolvedCompanyId ?? sheet.companyId;
+      } catch {
+        setCountProducts([]);
+      }
     } else {
       setCountProducts([]);
     }
@@ -1064,8 +1068,12 @@ export function PosPage() {
 
   async function refreshCountProducts() {
     if (effectiveDepartmentId == null) return;
-    const sheet = await getInventoryCountSheet(effectiveDepartmentId);
-    setCountProducts(sheet.products);
+    try {
+      const sheet = await loadRegisterCountRows(effectiveDepartmentId);
+      setCountProducts(sheet.products);
+    } catch {
+      setCountProducts([]);
+    }
   }
 
   async function openRegisterPanel(mode: 'open' | 'close') {
