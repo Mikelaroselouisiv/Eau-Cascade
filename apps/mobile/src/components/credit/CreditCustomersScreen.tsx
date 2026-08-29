@@ -28,6 +28,7 @@ import {
   listCreditCustomers,
   recordCreditPayment,
 } from '@/services/api';
+import { formatApiError } from '@/services/api-errors';
 import type {
   BankRow,
   CreditCustomerDetail,
@@ -40,9 +41,9 @@ import { formatDateTime, formatMoney } from '@/utils/datetime';
 import { saleDisplayRef } from '@/utils/saleRef';
 import {
   addLineToCart,
-  effectiveUnitPrice,
-  familyQtyByProduct,
+  setCartLineManualPrice,
   setCartLineQty,
+  specialPricesReady,
   type CartLine,
 } from '@/utils/posCart';
 
@@ -112,30 +113,19 @@ export function CreditCustomersScreen({ mode }: Props) {
     [customers, mode],
   );
 
-  const productsById = useMemo(() => {
-    const byId = new Map<number, Product>();
-    for (const product of products) byId.set(product.id, product);
-    return byId;
-  }, [products]);
-
-  const familyQtyMap = useMemo(
-    () => familyQtyByProduct(cart, productsById),
-    [cart, productsById],
-  );
-
   const cartTotal = useMemo(
     () =>
       Math.round(
-        cart.reduce(
-          (sum, line) =>
-            sum +
-            effectiveUnitPrice(productsById.get(line.productId), line, familyQtyMap) *
-              line.quantity,
-          0,
-        ) * 100,
+        cart.reduce((sum, line) => {
+          const price = line.manualUnitPrice;
+          if (price == null || !Number.isFinite(price)) return sum;
+          return sum + price * line.quantity;
+        }, 0) * 100,
       ) / 100,
-    [cart, productsById, familyQtyMap],
+    [cart],
   );
+
+  const pricesReady = useMemo(() => specialPricesReady(cart), [cart]);
 
   const filteredProducts = useMemo(() => {
     const query = productQuery.trim().toLocaleLowerCase('fr');
@@ -276,6 +266,10 @@ export function CreditCustomersScreen({ mode }: Props) {
 
   async function submitCreditSale() {
     if (!detail || cart.length === 0 || saleBusy) return;
+    if (!pricesReady) {
+      setSaleStatus('Chaque ligne doit avoir un prix unitaire.');
+      return;
+    }
     const rawDown = downPayment.trim().replace(',', '.');
     const down = rawDown ? Number(rawDown) : 0;
     if (!Number.isFinite(down) || down < 0 || down > cartTotal) {
@@ -290,6 +284,7 @@ export function CreditCustomersScreen({ mode }: Props) {
         items: cart.map((line) => ({
           productSaleUnitId: line.productSaleUnitId,
           quantity: line.quantity,
+          unitPrice: line.manualUnitPrice as number,
         })),
         downPayment: down > 0.009 ? down : undefined,
         downPaymentMethod: 'CASH',
@@ -300,8 +295,8 @@ export function CreditCustomersScreen({ mode }: Props) {
         `Vente #${result.txnNumber ?? result.saleId} — total ${formatMoney(result.total)}, reste ${formatMoney(result.balanceDue)}`,
       );
       await refreshDetail(detail.id);
-    } catch {
-      setSaleStatus('Échec de la vente à crédit');
+    } catch (err) {
+      setSaleStatus(formatApiError(err, 'Échec de la vente à crédit'));
     } finally {
       setSaleBusy(false);
     }
@@ -663,59 +658,78 @@ export function CreditCustomersScreen({ mode }: Props) {
             <Text style={styles.section}>Panier</Text>
             {cart.length === 0 ? <Text style={styles.empty}>Panier vide</Text> : null}
             {cart.map((line) => {
-              const product = productsById.get(line.productId);
-              const price = effectiveUnitPrice(product, line, familyQtyMap);
+              const price =
+                line.manualUnitPrice != null && Number.isFinite(line.manualUnitPrice)
+                  ? line.manualUnitPrice
+                  : 0;
+              const lineTotal =
+                line.manualUnitPrice == null || !Number.isFinite(line.manualUnitPrice)
+                  ? 0
+                  : price * line.quantity;
               return (
                 <View key={line.productSaleUnitId} style={styles.creditCartRow}>
-                  <View style={styles.rowInfo}>
-                    <Text style={styles.rowTitle}>{line.label}</Text>
-                    <Text style={styles.meta}>{formatMoney(price)} / unité</Text>
-                  </View>
-                  <TextInput
-                    style={styles.qtyInput}
-                    keyboardType="decimal-pad"
-                    value={
-                      saleQtyDrafts[line.productSaleUnitId] ?? String(line.quantity)
-                    }
-                    onChangeText={(value) =>
-                      setSaleQtyDrafts((previous) => ({
-                        ...previous,
-                        [line.productSaleUnitId]: value,
-                      }))
-                    }
-                    onBlur={() => {
-                      const raw =
-                        saleQtyDrafts[line.productSaleUnitId] ?? String(line.quantity);
-                      const quantity = Number(raw.replace(',', '.'));
-                      if (Number.isFinite(quantity)) {
-                        setCart((previous) =>
-                          setCartLineQty(
-                            previous,
-                            products,
-                            line.productSaleUnitId,
-                            quantity,
-                          ),
-                        );
+                  <Text style={styles.rowTitle}>{line.label}</Text>
+                  <View style={styles.creditCartControls}>
+                    <TextInput
+                      style={styles.priceInput}
+                      keyboardType="decimal-pad"
+                      placeholder="Prix unitaire"
+                      placeholderTextColor={BrandColors.textMuted}
+                      value={
+                        line.manualUnitPrice != null ? String(line.manualUnitPrice) : ''
                       }
-                      setSaleQtyDrafts((previous) => {
-                        const next = { ...previous };
-                        delete next[line.productSaleUnitId];
-                        return next;
-                      });
-                    }}
-                  />
-                  <MoneyText value={price * line.quantity} style={styles.rowValue} />
-                  <Pressable
-                    hitSlop={8}
-                    onPress={() =>
-                      setCart((previous) =>
-                        previous.filter(
-                          (item) => item.productSaleUnitId !== line.productSaleUnitId,
-                        ),
-                      )
-                    }>
-                    <Text style={styles.danger}>×</Text>
-                  </Pressable>
+                      onChangeText={(value) =>
+                        setCart((previous) =>
+                          setCartLineManualPrice(previous, line.productSaleUnitId, value),
+                        )
+                      }
+                    />
+                    <TextInput
+                      style={styles.qtyInput}
+                      keyboardType="decimal-pad"
+                      value={
+                        saleQtyDrafts[line.productSaleUnitId] ?? String(line.quantity)
+                      }
+                      onChangeText={(value) =>
+                        setSaleQtyDrafts((previous) => ({
+                          ...previous,
+                          [line.productSaleUnitId]: value,
+                        }))
+                      }
+                      onBlur={() => {
+                        const raw =
+                          saleQtyDrafts[line.productSaleUnitId] ?? String(line.quantity);
+                        const quantity = Number(raw.replace(',', '.'));
+                        if (Number.isFinite(quantity)) {
+                          setCart((previous) =>
+                            setCartLineQty(
+                              previous,
+                              products,
+                              line.productSaleUnitId,
+                              quantity,
+                            ),
+                          );
+                        }
+                        setSaleQtyDrafts((previous) => {
+                          const next = { ...previous };
+                          delete next[line.productSaleUnitId];
+                          return next;
+                        });
+                      }}
+                    />
+                    <MoneyText value={lineTotal} style={styles.rowValue} />
+                    <Pressable
+                      hitSlop={8}
+                      onPress={() =>
+                        setCart((previous) =>
+                          previous.filter(
+                            (item) => item.productSaleUnitId !== line.productSaleUnitId,
+                          ),
+                        )
+                      }>
+                      <Text style={styles.danger}>×</Text>
+                    </Pressable>
+                  </View>
                 </View>
               );
             })}
@@ -747,9 +761,9 @@ export function CreditCustomersScreen({ mode }: Props) {
             <Pressable
               style={[
                 styles.primaryBtn,
-                (saleBusy || cart.length === 0) && styles.disabled,
+                (saleBusy || cart.length === 0 || !pricesReady) && styles.disabled,
               ]}
-              disabled={saleBusy || cart.length === 0}
+              disabled={saleBusy || cart.length === 0 || !pricesReady}
               onPress={() => void submitCreditSale()}>
               {saleBusy ? (
                 <ActivityIndicator color="#fff" />
@@ -895,14 +909,27 @@ const styles = StyleSheet.create({
   },
   productChipName: { color: BrandColors.text, fontWeight: '700' },
   creditCartRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: Spacing.two,
     borderWidth: 1,
     borderColor: BrandColors.border,
     borderRadius: 12,
     padding: Spacing.two,
     backgroundColor: BrandColors.surface,
+  },
+  creditCartControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  priceInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 14,
+    color: BrandColors.text,
   },
   qtyInput: {
     width: 56,

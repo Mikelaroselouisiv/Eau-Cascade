@@ -96,6 +96,12 @@ export class CreditSaleItemDto {
   @IsNumber()
   @Min(0.0001)
   quantity: number;
+
+  /** Prix unitaire saisi à la main (comme la vente spéciale). */
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitPrice: number;
 }
 
 export class CreateCreditSaleDto {

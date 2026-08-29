@@ -1625,7 +1625,7 @@ export async function updateCreditCustomer(
 
 export async function createCreditSale(payload: {
   creditCustomerId: number;
-  items: Array<{ productSaleUnitId: number; quantity: number }>;
+  items: Array<{ productSaleUnitId: number; quantity: number; unitPrice: number }>;
   downPayment?: number;
   downPaymentMethod?: 'CASH' | 'CARD' | 'MOBILE_MONEY';
   note?: string;

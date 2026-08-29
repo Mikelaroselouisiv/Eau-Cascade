@@ -4043,9 +4043,14 @@ button.password-field__toggle:focus-visible {
 
 .credit-cart-line {
   display: grid;
-  grid-template-columns: 1fr 70px auto auto;
+  grid-template-columns: minmax(0, 1fr) 110px 72px auto auto;
   gap: 0.4rem;
-  align-items: center;
+  align-items: end;
+}
+
+.credit-cart-line .cart-price-label {
+  margin-top: 0;
+  max-width: none;
 }
 
 .credit-cart-total {

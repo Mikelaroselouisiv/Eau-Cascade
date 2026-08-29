@@ -9,7 +9,6 @@ import {
   PaymentMethod,
   Prisma,
 } from '@prisma/client';
-import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AccountingPostingService } from '../accounting/accounting-posting.service';
@@ -242,7 +241,6 @@ export class CreditService {
         item: (typeof dto.items)[number];
         psu: {
           id: number;
-          salePrice: { toString(): string } | number;
           labelOverride: string | null;
           unitsPerPackage: { toString(): string } | number;
           product: {
@@ -252,35 +250,27 @@ export class CreditService {
             departmentId: number | null;
             isService: boolean;
             trackStock: boolean;
-            productFamilyId: number | null;
-            productFamily: {
-              tiers: Array<{ minQuantity: unknown; unitPrice: unknown }>;
-            } | null;
           };
           packagingUnit: { label: string };
-          volumePrices: Array<{ minQuantity: unknown; unitPrice: unknown }>;
         };
         baseQuantity: number;
       }> = [];
 
       for (const item of dto.items) {
+        if (
+          item.unitPrice == null ||
+          !Number.isFinite(Number(item.unitPrice)) ||
+          Number(item.unitPrice) < 0
+        ) {
+          throw new BadRequestException(
+            'Chaque ligne de vente à crédit doit avoir un prix unitaire',
+          );
+        }
         const psu = await tx.productSaleUnit.findUnique({
           where: { id: item.productSaleUnitId },
           include: {
-            product: {
-              include: {
-                productFamily: {
-                  include: {
-                    tiers: {
-                      where: { deletedAt: null },
-                      orderBy: { minQuantity: 'asc' },
-                    },
-                  },
-                },
-              },
-            },
+            product: true,
             packagingUnit: true,
-            volumePrices: { orderBy: { minQuantity: 'asc' } },
           },
         });
         if (!psu) throw new NotFoundException(`Unité de vente ${item.productSaleUnitId} introuvable`);
@@ -316,33 +306,10 @@ export class CreditService {
         loaded.push({ item, psu, baseQuantity });
       }
 
-      const familyQty = new Map<number, number>();
-      for (const line of loaded) {
-        const fid = line.psu.product.productFamilyId;
-        if (fid == null) continue;
-        familyQty.set(fid, (familyQty.get(fid) ?? 0) + Number(line.item.quantity));
-      }
-
       for (const line of loaded) {
         const { item, psu, baseQuantity } = line;
         const product = psu.product;
-        const tierRows = psu.volumePrices.map((v) => ({
-          minQuantity: Number(v.minQuantity),
-          unitPrice: Number(v.unitPrice),
-        }));
-        const familyTiers =
-          product.productFamily?.tiers.map((t) => ({
-            minQuantity: Number(t.minQuantity),
-            unitPrice: Number(t.unitPrice),
-          })) ?? [];
-        const familyPrice =
-          product.productFamilyId != null
-            ? resolveFamilyUnitPrice(familyTiers, familyQty.get(product.productFamilyId) ?? 0)
-            : null;
-        const unitPrice =
-          familyPrice != null
-            ? familyPrice
-            : resolveVolumeUnitPrice(Number(psu.salePrice), tierRows, item.quantity);
+        const unitPrice = Number(item.unitPrice);
         const subtotal = unitPrice * item.quantity;
         total += subtotal;
         const lineLabel = psu.labelOverride

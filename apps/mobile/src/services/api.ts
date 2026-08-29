@@ -1200,7 +1200,7 @@ export async function getCreditCustomer(id: number): Promise<CreditCustomerDetai
 
 export async function createCreditSale(payload: {
   creditCustomerId: number;
-  items: { productSaleUnitId: number; quantity: number }[];
+  items: { productSaleUnitId: number; quantity: number; unitPrice: number }[];
   downPayment?: number;
   downPaymentMethod?: 'CASH' | 'CARD' | 'MOBILE_MONEY';
   note?: string;

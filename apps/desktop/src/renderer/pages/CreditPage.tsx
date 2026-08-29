@@ -32,7 +32,6 @@ import type {
 } from '../types/api';
 import { formatMoney } from '../utils/currency';
 import { formatDateTime } from '../utils/datetime';
-import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../utils/volumeUnitPrice';
 
 function formatApiError(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -68,44 +67,22 @@ type CartLine = {
   productName: string;
   unitLabel: string;
   quantity: number;
+  /** Prix unitaire saisi (comme la vente spéciale) — null = non renseigné */
+  manualUnitPrice: number | null;
 };
 
-function creditFamilyQty(
-  cart: CartLine[],
-  productsById: Map<number, Product>,
-): Map<number, number> {
-  const qty = new Map<number, number>();
-  for (const line of cart) {
-    const p = productsById.get(line.productId);
-    const fid = p?.productFamilyId ?? p?.productFamily?.id;
-    if (fid == null) continue;
-    qty.set(fid, (qty.get(fid) ?? 0) + Number(line.quantity));
-  }
-  return qty;
+function creditLineUnitPrice(line: CartLine): number {
+  if (line.manualUnitPrice == null || !Number.isFinite(line.manualUnitPrice)) return 0;
+  return line.manualUnitPrice;
 }
 
-function creditLineUnitPrice(
-  product: Product | undefined,
-  line: CartLine,
-  familyQty: Map<number, number>,
-): number {
-  if (!product) return 0;
-  const su = product.saleUnits?.find((s) => s.id === line.productSaleUnitId);
-  if (!su) return 0;
-  const fid = product.productFamilyId ?? product.productFamily?.id;
-  if (fid != null) {
-    const familyTiers = (product.productFamily?.tiers ?? []).map((t) => ({
-      minQuantity: Number(t.minQuantity),
-      unitPrice: Number(t.unitPrice),
-    }));
-    const familyPrice = resolveFamilyUnitPrice(familyTiers, familyQty.get(fid) ?? 0);
-    if (familyPrice != null) return familyPrice;
-  }
-  const tiers = (su.volumePrices ?? []).map((v) => ({
-    minQuantity: Number(v.minQuantity),
-    unitPrice: Number(v.unitPrice),
-  }));
-  return resolveVolumeUnitPrice(Number(su.salePrice), tiers, line.quantity);
+function creditPricesReady(cart: CartLine[]): boolean {
+  return (
+    cart.length > 0 &&
+    cart.every(
+      (l) => l.manualUnitPrice != null && Number.isFinite(l.manualUnitPrice) && l.manualUnitPrice >= 0,
+    )
+  );
 }
 
 export function CreditPage() {
@@ -237,27 +214,13 @@ export function CreditPage() {
     return customers.filter((c) => c.status === statusFilter);
   }, [customers, statusFilter]);
 
-  const productsById = useMemo(() => {
-    const m = new Map<number, Product>();
-    for (const p of products) m.set(p.id, p);
-    return m;
-  }, [products]);
-
-  const familyQtyMap = useMemo(
-    () => creditFamilyQty(cart, productsById),
-    [cart, productsById],
-  );
-
   const cartTotal = useMemo(
     () =>
-      Math.round(
-        cart.reduce((a, l) => {
-          const p = productsById.get(l.productId);
-          return a + creditLineUnitPrice(p, l, familyQtyMap) * l.quantity;
-        }, 0) * 100,
-      ) / 100,
-    [cart, productsById, familyQtyMap],
+      Math.round(cart.reduce((a, l) => a + creditLineUnitPrice(l) * l.quantity, 0) * 100) / 100,
+    [cart],
   );
+
+  const pricesReady = useMemo(() => creditPricesReady(cart), [cart]);
 
   const filteredProducts = useMemo(() => {
     const q = productQ.trim().toLowerCase();
@@ -366,6 +329,7 @@ export function CreditPage() {
           productName: p.name,
           unitLabel: unit.labelOverride || unit.packagingUnit.label,
           quantity: 1,
+          manualUnitPrice: null,
         },
       ];
     });
@@ -374,11 +338,19 @@ export function CreditPage() {
   async function submitCreditSale(e: FormEvent) {
     e.preventDefault();
     if (!detail || !canManage || cart.length === 0) return;
+    if (!pricesReady) {
+      setMessage('Chaque ligne doit avoir un prix unitaire.', { persist: true });
+      return;
+    }
     setSaleBusy(true);
     try {
       const result = await createCreditSale({
         creditCustomerId: detail.id,
-        items: cart.map((l) => ({ productSaleUnitId: l.productSaleUnitId, quantity: l.quantity })),
+        items: cart.map((l) => ({
+          productSaleUnitId: l.productSaleUnitId,
+          quantity: l.quantity,
+          unitPrice: l.manualUnitPrice as number,
+        })),
         downPayment: Number(downPayment) > 0 ? Number(downPayment) : undefined,
         downPaymentMethod: 'CASH',
         note: saleNote.trim() || undefined,
@@ -403,14 +375,11 @@ export function CreditPage() {
             cashier: cashierLabel,
             dateTime: formatDateTime(new Date().toISOString()),
             receiptClientName: detail.name,
-            items: cart.map((l) => {
-              const pr = productsById.get(l.productId);
-              return {
+            items: cart.map((l) => ({
                 name: `${l.productName} (${l.unitLabel})`,
                 qty: l.quantity,
-                price: creditLineUnitPrice(pr, l, familyQtyMap),
-              };
-            }),
+                price: creditLineUnitPrice(l),
+              })),
             total: result.total,
             paymentMode: 'À crédit',
             paperWidth: printer?.paperWidth === 80 ? 80 : 58,
@@ -910,16 +879,50 @@ export function CreditPage() {
               </div>
               <div className="credit-cart">
                 {cart.map((l) => {
-                  const pr = productsById.get(l.productId);
-                  const unitP = creditLineUnitPrice(pr, l, familyQtyMap);
+                  const unitP = creditLineUnitPrice(l);
+                  const lineTotal =
+                    l.manualUnitPrice == null || !Number.isFinite(l.manualUnitPrice)
+                      ? 0
+                      : unitP * l.quantity;
                   return (
                   <div key={l.productSaleUnitId} className="credit-cart-line">
                     <span>
                       {l.productName} ({l.unitLabel})
-                      <small className="muted" style={{ display: 'block' }}>
-                        {formatMoney(unitP)} / u
-                      </small>
                     </span>
+                    <label className="cart-price-label">
+                      Prix unitaire
+                      <input
+                        className="cart-price-input"
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step="0.01"
+                        value={l.manualUnitPrice == null ? '' : String(l.manualUnitPrice)}
+                        placeholder="0.00"
+                        onChange={(e) => {
+                          const raw = e.target.value.trim().replace(',', '.');
+                          if (raw === '') {
+                            setCart((prev) =>
+                              prev.map((x) =>
+                                x.productSaleUnitId === l.productSaleUnitId
+                                  ? { ...x, manualUnitPrice: null }
+                                  : x,
+                              ),
+                            );
+                            return;
+                          }
+                          const parsed = Number(raw);
+                          if (!Number.isFinite(parsed) || parsed < 0) return;
+                          setCart((prev) =>
+                            prev.map((x) =>
+                              x.productSaleUnitId === l.productSaleUnitId
+                                ? { ...x, manualUnitPrice: parsed }
+                                : x,
+                            ),
+                          );
+                        }}
+                      />
+                    </label>
                     <input
                       type="number"
                       min={0.0001}
@@ -934,7 +937,7 @@ export function CreditPage() {
                         );
                       }}
                     />
-                    <span>{formatMoney(unitP * l.quantity)}</span>
+                    <span>{formatMoney(lineTotal)}</span>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
@@ -979,7 +982,11 @@ export function CreditPage() {
                 <button type="button" className="btn btn-ghost" onClick={() => setShowSaleModal(false)}>
                   Annuler
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={saleBusy || cart.length === 0}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={saleBusy || cart.length === 0 || !pricesReady}
+                >
                   {saleBusy ? 'Validation…' : 'Valider la vente à crédit'}
                 </button>
               </div>
