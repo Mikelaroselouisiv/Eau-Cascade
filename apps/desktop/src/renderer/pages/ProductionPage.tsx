@@ -77,7 +77,7 @@ export function ProductionPage() {
     () => departments.filter((d) => d.kind === 'PRODUCTION_DISTRIBUTION'),
     [departments],
   );
-  const scopedDepts = useMemo(() => departmentsForUser(user, departments), [user, departments]);
+  const scopedDepts = useMemo(() => departmentsForUser(departments, user), [user, departments]);
   const currentPlant = plants.find((d) => d.id === departmentId);
 
   useEffect(() => {
@@ -96,7 +96,7 @@ export function ProductionPage() {
     }
     void getDepartments(companyId)
       .then((rows) => {
-        const scoped = departmentsForUser(user, rows);
+        const scoped = departmentsForUser(rows, user);
         setDepartments(scoped);
         const firstPlant = scoped.find((d) => d.kind === 'PRODUCTION_DISTRIBUTION');
         setDepartmentId((prev) =>
