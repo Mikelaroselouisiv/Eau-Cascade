@@ -36,3 +36,7 @@ Docs : `docs/DEPLOYMENT.md`, `docs/GCP_EAU_CASCADE.md`
 ## UI — pas de tutoriel
 
 Ne pas ajouter de phrases d’aide / consigne sous les champs (« Cochez tous les… », « Choisissez X pour afficher Y »). Libellés + contrôles seulement. Détail : `.cursor/rules/no-tutorial-ui-copy.mdc`
+
+## Synchronisation (critique)
+
+Toute nouvelle table métier (livraison, drop, session production, transfert interne, flux usine, etc.) doit entrer dans le cycle sync : `uuid`, `updatedAt`, `SYNC_ENTITIES`, `apps/sync-agent/src/entities.js`, `ENTITY_FK_MAP`, `delegate()`. Les livraisons classiques (`Delivery` / `DeliveryItem` / `DeliveryDrop`) en font partie. Détail : `.cursor/rules/sync-entities.mdc`

@@ -40,9 +40,18 @@ export async function replicateDirection({
 
     for (;;) {
       pages += 1;
-      const { data } = await from.get('/sync/pull', {
-        params: { entity, since, take: 200 },
-      });
+      let data;
+      try {
+        const res = await from.get('/sync/pull', {
+          params: { entity, since, take: 200 },
+        });
+        data = res.data;
+      } catch (err) {
+        errors += 1;
+        partialErrors = true;
+        errorSamples.push(`pull: ${err?.message || 'error'}`);
+        break;
+      }
       const records = data.records || [];
       if (records.length === 0) {
         if (data.nextCursor) cursors[entity] = data.nextCursor;
@@ -50,11 +59,19 @@ export async function replicateDirection({
       }
 
       pulled += records.length;
-      const pushRes = await to.post('/sync/push', {
-        entity,
-        sourceNodeId,
-        records,
-      });
+      let pushRes;
+      try {
+        pushRes = await to.post('/sync/push', {
+          entity,
+          sourceNodeId,
+          records,
+        });
+      } catch (err) {
+        errors += 1;
+        partialErrors = true;
+        errorSamples.push(`push: ${err?.message || 'error'}`);
+        break;
+      }
       const batchApplied = pushRes.data?.applied ?? 0;
       const batchSkipped = pushRes.data?.skipped ?? 0;
       const batchErrors = pushRes.data?.errors ?? 0;

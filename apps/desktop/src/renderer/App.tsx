@@ -7,6 +7,7 @@ import { CreditPage } from './pages/CreditPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DefaultRedirect } from './pages/DefaultRedirect';
 import { DeliveryPage } from './pages/DeliveryPage';
+import { ProductionPage } from './pages/ProductionPage';
 import { LoginPage } from './pages/LoginPage';
 import { PosPage } from './pages/PosPage';
 import { ProtectedRoute } from './pages/ProtectedRoute';
@@ -57,6 +58,14 @@ export default function App() {
               element={
                 <RequirePermission permission="pos.use">
                   <PosPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="production"
+              element={
+                <RequirePermission anyOf={['production.use', 'transfers.manage', 'transfers.confirm']}>
+                  <ProductionPage />
                 </RequirePermission>
               }
             />

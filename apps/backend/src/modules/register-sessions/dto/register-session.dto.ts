@@ -1,6 +1,5 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMinSize,
   IsArray,
   IsInt,
   IsNumber,
@@ -58,11 +57,11 @@ export class OpenRegisterSessionDto {
   @Min(0)
   openingCashAmount?: number;
 
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => RegisterInventoryLineDto)
-  lines: RegisterInventoryLineDto[];
+  lines: RegisterInventoryLineDto[] = [];
 
   @IsString()
   @MinLength(8)
@@ -98,9 +97,9 @@ export class CloseRegisterSessionDto {
   @Min(0)
   closingCashCounted: number;
 
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => RegisterInventoryLineDto)
-  lines: RegisterInventoryLineDto[];
+  lines: RegisterInventoryLineDto[] = [];
 }

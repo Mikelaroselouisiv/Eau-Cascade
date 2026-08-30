@@ -269,8 +269,9 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
 
   const displayedProducts = useMemo(() => {
     const rows = posScopeLocked
-      ? products
+      ? products.filter((p) => p.nature !== 'RAW_MATERIAL')
       : products.filter((p) => {
+          if (p.nature === 'RAW_MATERIAL') return false;
           const productCompanyId = p.companyId ?? p.company?.id;
           const productDeptId = p.department?.id;
           if (companyId != null && productCompanyId != null && productCompanyId !== companyId) {

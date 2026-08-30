@@ -309,8 +309,8 @@ export class RegisterSessionsService {
 
   /**
    * Espèces attendues à la fermeture :
-   * fond d’ouverture + encaissements espèces (session) + monnaie non rendue − dépenses (session).
-   * Inclut toutes les ventes POS de la session (classiques et spéciales) liées à la caisse / ouvreur.
+   * fond d’ouverture + encaissements espèces POS + encaissements crédit espèces
+   * + monnaie non rendue − dépenses (session).
    */
   async getClosingCashPreview(sessionId: number, userId: number) {
     const session = await this.prisma.registerSession.findFirst({
@@ -375,6 +375,25 @@ export class RegisterSessionsService {
       expenseRows.reduce((acc, e) => acc + Number(e.amount), 0),
     );
 
+    const creditCashRows = await this.prisma.creditPayment.findMany({
+      where: {
+        deletedAt: null,
+        method: 'CASH',
+        OR: [
+          { registerSessionId: session.id },
+          {
+            registerSessionId: null,
+            userId: session.openedById,
+            createdAt: { gte: openedAt },
+          },
+        ],
+      },
+      select: { amount: true },
+    });
+    const creditCash = this.round2(
+      creditCashRows.reduce((acc, p) => acc + Number(p.amount), 0),
+    );
+
     // Monnaie encore due aux clients : cash toujours dans le tiroir (session courante).
     const unsettledChangeRows = await this.prisma.sale.findMany({
       where: {
@@ -387,12 +406,13 @@ export class RegisterSessionsService {
       unsettledChangeRows.reduce((acc, s) => acc + Number(s.changeDue), 0),
     );
 
-    const expected = this.round2(openingCash + salesCash + unsettledChange - expenses);
+    const expected = this.round2(openingCash + salesCash + creditCash + unsettledChange - expenses);
 
     return {
       openingCash,
       salesTotal,
       salesCash,
+      creditCash,
       expenses,
       unsettledChange,
       expected: expected < 0 ? 0 : expected,
@@ -492,7 +512,7 @@ export class RegisterSessionsService {
     const openingInventory = await this.inventoryService.createRegisterInventorySession(
       dto.departmentId,
       InventorySessionKind.OPENING,
-      dto.lines,
+      dto.lines ?? [],
       userId,
     );
 
@@ -542,7 +562,7 @@ export class RegisterSessionsService {
     const closingInventory = await this.inventoryService.createRegisterInventorySession(
       session.departmentId,
       InventorySessionKind.CLOSING,
-      dto.lines,
+      dto.lines ?? [],
       userId,
     );
 

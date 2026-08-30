@@ -80,6 +80,36 @@ enum FulfillmentType {
   HOME
 }
 
+/// Type A = stock PF a priori. Type B = usine (MP a priori, PF en écoulement).
+enum DepartmentKind {
+  DISTRIBUTION
+  PRODUCTION_DISTRIBUTION
+}
+
+enum ProductionSessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum InternalTransferStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+enum ProductNature {
+  FINISHED_GOOD
+  RAW_MATERIAL
+}
+
+/// Flux de produit fini côté usine (pas un stock détenu).
+enum ProductionFlowKind {
+  PRODUCED
+  TRANSFER_IN
+  FLOW_CLIENT
+  FLOW_TRANSFER_OUT
+}
+
 /// Direction / curseur de sync (métronome local ↔ GCP).
 enum SyncDirection {
   PULL
@@ -180,6 +210,7 @@ model Department {
   description    String?
   /// Si vrai, ce département peut être choisi comme source de stock pour une livraison à domicile.
   offersHomeDelivery Boolean               @default(false)
+  kind           DepartmentKind            @default(DISTRIBUTION)
   users          User[]
   managerLinks   UserDepartment[]
   products       Product[]
@@ -193,6 +224,10 @@ model Department {
   deliveries        Delivery[]
   deliveryDrops     DeliveryDrop[]
   creditCustomers   CreditCustomer[]
+  productionSessions ProductionSession[]
+  transfersFrom      InternalTransfer[]     @relation("TransferFromDept")
+  transfersTo        InternalTransfer[]     @relation("TransferToDept")
+  productionFlows    ProductionFlow[]
   createdAt      DateTime                  @default(now())
   updatedAt      DateTime                  @updatedAt
   deletedAt      DateTime?
@@ -283,9 +318,38 @@ model RegisterSession {
   openingInventorySession   InventorySession      @relation("RegisterOpeningInventory", fields: [openingInventorySessionId], references: [id], onDelete: Restrict)
   closingInventorySessionId Int?                  @unique
   closingInventorySession   InventorySession?     @relation("RegisterClosingInventory", fields: [closingInventorySessionId], references: [id], onDelete: SetNull)
+  creditPayments            CreditPayment[]
   createdAt                 DateTime              @default(now())
   updatedAt                 DateTime              @updatedAt
   deletedAt                 DateTime?
+}
+
+/// Ouverture de production (usine) : parallèle à RegisterSession, autre personne (chef de prod).
+model ProductionSession {
+  id                        Int                       @id @default(autoincrement())
+  uuid                      String                    @unique @default(uuid())
+  departmentId              Int
+  department                Department                @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  status                    ProductionSessionStatus   @default(OPEN)
+  openedById                Int
+  openedBy                  User                      @relation("ProductionSessionOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
+  openedAt                  DateTime                  @default(now())
+  openedDeviceId            String?
+  openedDeviceName          String?
+  closedById                Int?
+  closedBy                  User?                     @relation("ProductionSessionClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  closedAt                  DateTime?
+  note                      String?
+  openingInventorySessionId Int                       @unique
+  openingInventorySession   InventorySession          @relation("ProductionOpeningInventory", fields: [openingInventorySessionId], references: [id], onDelete: Restrict)
+  closingInventorySessionId Int?                      @unique
+  closingInventorySession   InventorySession?         @relation("ProductionClosingInventory", fields: [closingInventorySessionId], references: [id], onDelete: SetNull)
+  flows                     ProductionFlow[]
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  deletedAt                 DateTime?
+
+  @@index([departmentId, status])
 }
 
 model Product {
@@ -309,6 +373,8 @@ model Product {
   updatedBy    User?             @relation("ProductUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   isService    Boolean           @default(false)
   trackStock   Boolean           @default(true)
+  /// PF (écoulement / stock selon le type de dépt) vs MP (stock usine).
+  nature       ProductNature     @default(FINISHED_GOOD)
   cost         Decimal           @default(0) @db.Decimal(12, 2)
   stock        Decimal           @default(0) @db.Decimal(12, 3)
   stockMin     Decimal           @default(0) @db.Decimal(12, 3)
@@ -320,6 +386,8 @@ model Product {
   goodsReceiptLines  GoodsReceiptLine[]
   recipeAsParent     ProductRecipe? @relation("RecipeParent")
   recipeAsComponent  RecipeComponent[] @relation("RecipeComponent")
+  productionFlows    ProductionFlow[]
+  transferItems      InternalTransferItem[]
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   deletedAt    DateTime?
@@ -488,6 +556,7 @@ model Delivery {
   deliveredBy   User?          @relation("DeliveryDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
   items         DeliveryItem[]
   drops         DeliveryDrop[]
+  productionFlows ProductionFlow[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   deletedAt     DateTime?
@@ -546,6 +615,7 @@ model DeliveryDrop {
   createdById    Int?
   createdBy      User?    @relation("DeliveryDropCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([deliveryId, createdAt])
   @@index([saleItemId])
@@ -611,6 +681,8 @@ model InventorySession {
   stockMovements StockMovement[]
   registerSessionOpening RegisterSession? @relation("RegisterOpeningInventory")
   registerSessionClosing RegisterSession? @relation("RegisterClosingInventory")
+  productionSessionOpening ProductionSession? @relation("ProductionOpeningInventory")
+  productionSessionClosing ProductionSession? @relation("ProductionClosingInventory")
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
   deletedAt      DateTime?
@@ -734,6 +806,74 @@ model RecipeComponent {
   @@unique([recipeId, componentProductId])
 }
 
+/// Transfert interne PF : usine → distributeur (ou autre usine). Confirmation destinataire.
+model InternalTransfer {
+  id              Int                    @id @default(autoincrement())
+  uuid            String                 @unique @default(uuid())
+  companyId       Int
+  fromDepartmentId Int
+  fromDepartment  Department             @relation("TransferFromDept", fields: [fromDepartmentId], references: [id], onDelete: Restrict)
+  toDepartmentId  Int
+  toDepartment    Department             @relation("TransferToDept", fields: [toDepartmentId], references: [id], onDelete: Restrict)
+  status          InternalTransferStatus @default(PENDING)
+  note            String?
+  createdById     Int?
+  createdBy       User?                  @relation("InternalTransferCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  confirmedById   Int?
+  confirmedBy     User?                  @relation("InternalTransferConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  confirmedAt     DateTime?
+  rejectedAt      DateTime?
+  items           InternalTransferItem[]
+  flows           ProductionFlow[]
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  deletedAt       DateTime?
+
+  @@index([toDepartmentId, status])
+  @@index([fromDepartmentId, status])
+  @@index([companyId, createdAt])
+}
+
+model InternalTransferItem {
+  id         Int              @id @default(autoincrement())
+  uuid       String           @unique @default(uuid())
+  transferId Int
+  transfer   InternalTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId  Int
+  product    Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity   Decimal          @db.Decimal(12, 4)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  deletedAt  DateTime?
+
+  @@index([transferId])
+}
+
+/// Compteurs usine : produit vs écoulé (PF jamais détenu en stock).
+model ProductionFlow {
+  id                   Int                 @id @default(autoincrement())
+  uuid                 String              @unique @default(uuid())
+  departmentId         Int
+  department           Department          @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  productId            Int
+  product              Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  kind                 ProductionFlowKind
+  quantity             Decimal             @db.Decimal(12, 4)
+  productionSessionId  Int?
+  productionSession    ProductionSession?  @relation(fields: [productionSessionId], references: [id], onDelete: SetNull)
+  internalTransferId   Int?
+  internalTransfer     InternalTransfer?   @relation(fields: [internalTransferId], references: [id], onDelete: SetNull)
+  deliveryId           Int?
+  delivery             Delivery?           @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  createdById          Int?
+  createdBy            User?               @relation("ProductionFlowCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@index([departmentId, kind, createdAt])
+  @@index([productId, createdAt])
+}
+
 model ExpenseCategory {
   id        Int      @id @default(autoincrement())
   uuid      String   @unique @default(uuid())
@@ -809,6 +949,9 @@ model CreditPayment {
   note             String?
   userId           Int?
   user             User?          @relation("CreditPaymentUser", fields: [userId], references: [id], onDelete: SetNull)
+  /// Session caisse de l’encaisseur (espèces → comptage de clôture).
+  registerSessionId Int?
+  registerSession   RegisterSession? @relation(fields: [registerSessionId], references: [id], onDelete: SetNull)
   financeEntryId   Int?           @unique
   financeEntry     FinanceEntry?  @relation(fields: [financeEntryId], references: [id], onDelete: SetNull)
   createdAt        DateTime       @default(now())
@@ -818,6 +961,7 @@ model CreditPayment {
   @@index([creditCustomerId, createdAt])
   @@index([saleId, createdAt])
   @@index([bankAccountId])
+  @@index([registerSessionId])
 }
 
 /// Banque (établissement) où l’entreprise détient des comptes.
@@ -943,6 +1087,11 @@ model User {
   bankTransactions BankTransaction[] @relation("BankTransactionUser")
   registerSessionsOpened RegisterSession[] @relation("RegisterSessionOpenedBy")
   registerSessionsClosed RegisterSession[] @relation("RegisterSessionClosedBy")
+  productionSessionsOpened ProductionSession[] @relation("ProductionSessionOpenedBy")
+  productionSessionsClosed ProductionSession[] @relation("ProductionSessionClosedBy")
+  transfersCreated InternalTransfer[] @relation("InternalTransferCreatedBy")
+  transfersConfirmed InternalTransfer[] @relation("InternalTransferConfirmedBy")
+  productionFlowsCreated ProductionFlow[] @relation("ProductionFlowCreatedBy")
   deliveriesDelivered Delivery[] @relation("DeliveryDeliveredBy")
   deliveryDropsDelivered DeliveryDrop[] @relation("DeliveryDropDeliveredBy")
   deliveryDropsCreated DeliveryDrop[] @relation("DeliveryDropCreatedBy")

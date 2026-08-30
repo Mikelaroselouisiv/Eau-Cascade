@@ -131,6 +131,7 @@ export function CreditCustomersScreen({ mode }: Props) {
     const query = productQuery.trim().toLocaleLowerCase('fr');
     return products.filter(
       (product) =>
+        product.nature !== 'RAW_MATERIAL' &&
         product.saleUnits.length > 0 &&
         (!query ||
           product.name.toLocaleLowerCase('fr').includes(query) ||

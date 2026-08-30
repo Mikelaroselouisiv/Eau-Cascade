@@ -9,6 +9,7 @@ import { AuditJournalPanel } from '@/components/monitor/AuditJournalPanel';
 import { KpiCard } from '@/components/monitor/KpiCard';
 import { PeriodChips } from '@/components/monitor/PeriodChips';
 import { RegisterSessionsPanel } from '@/components/monitor/RegisterSessionsPanel';
+import { ProductionSessionsPanel } from '@/components/monitor/ProductionSessionsPanel';
 import { TopProductsDonut } from '@/components/monitor/TopProductsDonut';
 import { RefreshableScroll } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
@@ -155,11 +156,18 @@ export default function SyntheseScreen() {
         ) : null}
 
         {companyId != null && view === 'sessions' ? (
-          <RegisterSessionsPanel
-            companyId={companyId}
-            {...periodDateRange(period)}
-            refreshKey={refreshKey}
-          />
+          <>
+            <RegisterSessionsPanel
+              companyId={companyId}
+              {...periodDateRange(period)}
+              refreshKey={refreshKey}
+            />
+            <ProductionSessionsPanel
+              companyId={companyId}
+              {...periodDateRange(period)}
+              refreshKey={refreshKey}
+            />
+          </>
         ) : null}
 
         {companyId != null && view === 'audit' ? (

@@ -1,4 +1,4 @@
-export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STOCK_MANAGER' | 'ACCOUNTANT' | 'LIVREUR';
+export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STOCK_MANAGER' | 'ACCOUNTANT' | 'LIVREUR' | 'CHEF_PRODUCTION';
 
 export interface SessionUser {
   id: number;
@@ -78,6 +78,8 @@ export interface ProductSaleUnit {
   volumePrices?: ProductVolumePrice[];
 }
 
+export type ProductNature = 'FINISHED_GOOD' | 'RAW_MATERIAL';
+
 export interface Product {
   id: number;
   companyId?: number;
@@ -90,6 +92,7 @@ export interface Product {
   description?: string | null;
   isService: boolean;
   trackStock: boolean;
+  nature?: ProductNature;
   cost: string | number;
   stock: string | number;
   stockMin: string | number;
@@ -239,6 +242,58 @@ export interface RegisterSessionContext {
   occupancy: RegisterSessionDetail | null;
 }
 
+export type ProductionSessionStatus = 'OPEN' | 'CLOSED';
+export type InternalTransferStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED';
+
+export interface ProductionSessionDetail {
+  id: number;
+  departmentId: number;
+  status: ProductionSessionStatus;
+  openedAt: string;
+  closedAt?: string | null;
+  openedDeviceId?: string | null;
+  openedDeviceName?: string | null;
+  department?: { id: number; name: string };
+  openedBy?: UserAttribution | null;
+  closedBy?: UserAttribution | null;
+  usage?: Array<{
+    productId: number;
+    name: string;
+    openedQty: number;
+    remainingQty: number;
+    usedQty: number;
+  }>;
+}
+
+export interface ProductionSessionContext {
+  local: ProductionSessionDetail | null;
+  mineElsewhere: ProductionSessionDetail | null;
+  occupancy: ProductionSessionDetail | null;
+}
+
+export interface ProductionCountSheet {
+  department: { id: number; name: string; company: { name: string } };
+  products: InventoryCountSheetRow[];
+}
+
+export interface InternalTransferItemRow {
+  id: number;
+  productId: number;
+  quantity: string | number;
+  product: { id: number; name: string; sku?: string | null };
+}
+
+export interface InternalTransferRow {
+  id: number;
+  fromDepartmentId: number;
+  toDepartmentId: number;
+  status: InternalTransferStatus;
+  createdAt: string;
+  fromDepartment: { id: number; name: string; kind?: 'DISTRIBUTION' | 'PRODUCTION_DISTRIBUTION' };
+  toDepartment: { id: number; name: string; kind?: 'DISTRIBUTION' | 'PRODUCTION_DISTRIBUTION' };
+  items: InternalTransferItemRow[];
+}
+
 export interface AuditLogRow {
   id: number;
   action: string;
@@ -254,6 +309,7 @@ export interface RegisterClosingCashPreview {
   /** Total des ventes de la session (classiques + spéciales). */
   salesTotal?: number;
   salesCash: number;
+  creditCash?: number;
   expenses: number;
   unsettledChange: number;
   expected: number;
@@ -533,7 +589,7 @@ export interface DeliveryItem {
     quantity?: number | string;
     unitPrice?: number | string;
     subtotal?: number | string;
-    product?: { id: number; name: string } | null;
+    product?: { id: number; name: string; departmentId?: number | null } | null;
   } | null;
 }
 
@@ -860,6 +916,7 @@ export interface Department {
   name: string;
   description?: string | null;
   offersHomeDelivery?: boolean;
+  kind?: 'DISTRIBUTION' | 'PRODUCTION_DISTRIBUTION';
   company?: { id: number; name: string };
 }
 

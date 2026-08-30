@@ -214,6 +214,7 @@ export function PosPage() {
     openingCash: number;
     salesTotal?: number;
     salesCash: number;
+    creditCash?: number;
     expenses: number;
     unsettledChange: number;
     expected: number;
@@ -402,10 +403,11 @@ export function PosPage() {
   }, [user, posScopeLocked, selectedDepartmentId]);
 
   const displayedProducts = useMemo(() => {
-    if (posScopeLocked) return products;
-    if (selectedCompanyId === '' && selectedDepartmentId === '') return products;
+    const sellable = products.filter((p) => p.nature !== 'RAW_MATERIAL');
+    if (posScopeLocked) return sellable;
+    if (selectedCompanyId === '' && selectedDepartmentId === '') return sellable;
 
-    return products.filter((p) => {
+    return sellable.filter((p) => {
       const companyId = p.companyId ?? p.company?.id;
       const deptId = p.department?.id;
       if (selectedCompanyId !== '' && companyId !== selectedCompanyId) return false;
@@ -1288,6 +1290,12 @@ export function PosPage() {
                         <span>Dont encaissements espèces</span>
                         <strong>{formatMoney(closingCashPreview.salesCash)}</strong>
                       </div>
+                      {(closingCashPreview.creditCash ?? 0) > 0.009 ? (
+                        <div className="pos-closing-cash-row">
+                          <span>Encaissements crédit</span>
+                          <strong>{formatMoney(closingCashPreview.creditCash ?? 0)}</strong>
+                        </div>
+                      ) : null}
                       {closingCashPreview.unsettledChange > 0.009 ? (
                         <div className="pos-closing-cash-row">
                           <span>Monnaie non rendue</span>

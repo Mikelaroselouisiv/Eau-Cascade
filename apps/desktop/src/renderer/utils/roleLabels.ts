@@ -6,6 +6,7 @@ export const ROLE_LABELS_FALLBACK: Record<string, string> = {
   STOCK_MANAGER: 'Responsable stock',
   ACCOUNTANT: 'Comptable',
   LIVREUR: 'Livreur',
+  CHEF_PRODUCTION: 'Chef de production',
 };
 
 export function formatRoleLabel(

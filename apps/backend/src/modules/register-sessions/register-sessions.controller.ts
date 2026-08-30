@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { RegisterSessionStatus } from '@prisma/client';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Permissions } from '../../common/decorators/permissions.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import {
@@ -66,7 +66,7 @@ export class RegisterSessionsController {
   }
 
   @Get('active')
-  @Permissions('pos.use')
+  @PermissionsAny('pos.use', 'credit.manage')
   getActive(@GetUser() user: { id: number }) {
     return this.registerSessionsService.getActiveSessionForUser(user.id);
   }

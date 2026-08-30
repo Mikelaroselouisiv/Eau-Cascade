@@ -5,6 +5,7 @@ export type UserRole =
   | 'STOCK_MANAGER'
   | 'ACCOUNTANT'
   | 'LIVREUR'
+  | 'CHEF_PRODUCTION'
   | (string & {});
 
 export interface UserAttribution {
@@ -369,6 +370,7 @@ export interface Product {
   description?: string | null;
   isService: boolean;
   trackStock: boolean;
+  nature?: ProductNature;
   cost: string | number;
   stock: string | number;
   stockMin: string | number;
@@ -522,7 +524,7 @@ export interface DeliveryItem {
     quantity?: number | string;
     unitPrice?: number | string;
     subtotal?: number | string;
-    product?: { id: number; name: string } | null;
+    product?: { id: number; name: string; departmentId?: number | null } | null;
   } | null;
 }
 
@@ -662,6 +664,9 @@ export interface DepartmentPrinterSettings {
   disbursementPreviewSampleBody?: string | null;
 }
 
+export type DepartmentKind = 'DISTRIBUTION' | 'PRODUCTION_DISTRIBUTION';
+export type ProductNature = 'FINISHED_GOOD' | 'RAW_MATERIAL';
+
 /** Département : mini-périmètre au sein de l’entreprise (produits, stocks rattachés). */
 export interface Department {
   id: number;
@@ -669,6 +674,7 @@ export interface Department {
   name: string;
   description?: string | null;
   offersHomeDelivery?: boolean;
+  kind?: DepartmentKind;
   company?: { id: number; name: string };
 }
 
@@ -1015,4 +1021,89 @@ export interface FixedAssetRow {
   monthlyDepreciation: number;
   netBookValue: number;
   remainingDepreciable: number;
+}
+
+export type ProductionSessionStatus = 'OPEN' | 'CLOSED';
+export type InternalTransferStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED';
+
+export interface ProductionInventoryLine {
+  productId: number;
+  countedQty: number;
+}
+
+export interface ProductionFlowRow {
+  id: number;
+  kind: 'PRODUCED' | 'TRANSFER_IN' | 'FLOW_CLIENT' | 'FLOW_TRANSFER_OUT';
+  quantity: string | number;
+  product: { id: number; name: string };
+}
+
+export interface ProductionSessionDetail {
+  id: number;
+  departmentId: number;
+  status: ProductionSessionStatus;
+  openedAt: string;
+  closedAt?: string | null;
+  openedDeviceId?: string | null;
+  openedDeviceName?: string | null;
+  note?: string | null;
+  department?: Department;
+  openedBy?: UserAttribution | null;
+  closedBy?: UserAttribution | null;
+  openingInventorySession?: {
+    lines: Array<{
+      productId: number;
+      countedQty: string | number | null;
+      product: { id: number; name: string };
+    }>;
+  } | null;
+  closingInventorySession?: {
+    lines: Array<{
+      productId: number;
+      countedQty: string | number | null;
+      product: { id: number; name: string };
+    }>;
+  } | null;
+  usage?: Array<{
+    productId: number;
+    name: string;
+    openedQty: number;
+    remainingQty: number;
+    usedQty: number;
+  }>;
+  flows?: ProductionFlowRow[];
+}
+
+export interface ProductionSessionContext {
+  local: ProductionSessionDetail | null;
+  mineElsewhere: ProductionSessionDetail | null;
+  occupancy: ProductionSessionDetail | null;
+}
+
+export interface ProductionCountSheet {
+  department: { id: number; name: string; company: { name: string } };
+  products: Array<{ id: number; name: string; sku?: string | null; stock: number; unitLabel?: string }>;
+}
+
+export interface InternalTransferItemRow {
+  id: number;
+  productId: number;
+  quantity: string | number;
+  product: { id: number; name: string; sku?: string | null };
+}
+
+export interface InternalTransferRow {
+  id: number;
+  companyId: number;
+  fromDepartmentId: number;
+  toDepartmentId: number;
+  status: InternalTransferStatus;
+  note?: string | null;
+  createdAt: string;
+  confirmedAt?: string | null;
+  fromDepartment: { id: number; name: string; kind?: DepartmentKind };
+  toDepartment: { id: number; name: string; kind?: DepartmentKind };
+  createdBy?: UserAttribution | null;
+  confirmedBy?: UserAttribution | null;
+  items: InternalTransferItemRow[];
 }

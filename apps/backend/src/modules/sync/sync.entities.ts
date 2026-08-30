@@ -27,17 +27,21 @@ export const SYNC_ENTITIES = [
   'Delivery',
   'DeliveryItem',
   'DeliveryDrop',
-  'StockMovement',
-  'FinanceEntry',
-  'CreditPayment',
-  'BankTransaction',
   'InventorySession',
   'InventoryLine',
   'RegisterSession',
+  'ProductionSession',
+  'InternalTransfer',
+  'InternalTransferItem',
   'PurchaseOrder',
   'PurchaseOrderLine',
   'GoodsReceipt',
   'GoodsReceiptLine',
+  'StockMovement',
+  'ProductionFlow',
+  'FinanceEntry',
+  'CreditPayment',
+  'BankTransaction',
   'CashClosure',
   'AuditLog',
 ] as const;
@@ -56,6 +60,7 @@ export const APPEND_ONLY_ENTITIES = new Set<SyncEntityName>([
   'CashClosure',
   'CreditPayment',
   'DeliveryDrop',
+  'ProductionFlow',
 ]);
 
 /** Config mutable : LWW symétrique sur max(updatedAt, deletedAt) — admin depuis n’importe quel nœud. */

@@ -36,6 +36,12 @@ import type {
   RegisterSessionContext,
   RegisterSessionDetail,
   RegisterInventoryLinePayload,
+  ProductionSessionContext,
+  ProductionSessionDetail,
+  ProductionCountSheet,
+  InternalTransferRow,
+  DepartmentKind,
+  ProductNature,
   GlobalStockSnapshot,
   GoodsReceiptListItem,
   ProductRecipeDetail,
@@ -174,6 +180,7 @@ export async function createProduct(payload: {
   sku?: string;
   barcode?: string;
   isService?: boolean;
+  nature?: ProductNature;
   trackStock?: boolean;
   cost?: number;
   stockMin?: number;
@@ -201,6 +208,7 @@ export async function updateProduct(
     barcode: string;
     description: string;
     isService: boolean;
+    nature: ProductNature;
     trackStock: boolean;
     cost: number;
     stock: number;
@@ -362,6 +370,7 @@ export async function createDepartment(payload: {
   description?: string;
   companyId?: number;
   offersHomeDelivery?: boolean;
+  kind?: DepartmentKind;
 }) {
   const { data } = await api.post<Department>('/departments', payload);
   return data;
@@ -369,7 +378,7 @@ export async function createDepartment(payload: {
 
 export async function updateDepartment(
   id: number,
-  payload: { name?: string; description?: string; offersHomeDelivery?: boolean },
+  payload: { name?: string; description?: string; offersHomeDelivery?: boolean; kind?: DepartmentKind },
 ) {
   const { data } = await api.patch<Department>(`/departments/${id}`, payload);
   return data;
@@ -932,11 +941,127 @@ export async function closeRegisterSession(
   return data;
 }
 
+export async function getProductionSessionContext(params: {
+  deviceId: string;
+  departmentId?: number;
+}): Promise<ProductionSessionContext> {
+  const { data } = await api.get<ProductionSessionContext>('/production-sessions/context', {
+    params: {
+      deviceId: params.deviceId,
+      departmentId: params.departmentId,
+    },
+  });
+  return data;
+}
+
+export async function claimProductionSession(
+  sessionId: number,
+  payload: { deviceId: string; deviceName?: string },
+): Promise<ProductionSessionDetail> {
+  const { data } = await api.post<ProductionSessionDetail>(
+    `/production-sessions/${sessionId}/claim`,
+    payload,
+  );
+  return data;
+}
+
+export async function getProductionCountSheet(departmentId: number): Promise<ProductionCountSheet> {
+  const { data } = await api.get<ProductionCountSheet>('/production-sessions/count-sheet', {
+    params: { departmentId },
+  });
+  return data;
+}
+
+export async function openProductionSession(payload: {
+  departmentId: number;
+  lines: Array<{ productId: number; countedQty: number }>;
+  deviceId: string;
+  deviceName?: string;
+}): Promise<ProductionSessionDetail> {
+  const { data } = await api.post<ProductionSessionDetail>('/production-sessions/open', payload);
+  return data;
+}
+
+export async function closeProductionSession(
+  sessionId: number,
+  payload: { lines: Array<{ productId: number; countedQty: number }>; note?: string },
+): Promise<ProductionSessionDetail> {
+  const { data } = await api.post<ProductionSessionDetail>(
+    `/production-sessions/${sessionId}/close`,
+    payload,
+  );
+  return data;
+}
+
+export async function listProductionSessions(params?: {
+  companyId?: number;
+  departmentId?: number;
+  openedById?: number;
+  status?: 'OPEN' | 'CLOSED';
+  dateFrom?: string;
+  dateTo?: string;
+  sortBy?: 'openedAt' | 'userName';
+  sortDir?: 'asc' | 'desc';
+  take?: number;
+}): Promise<ProductionSessionDetail[]> {
+  const { data } = await api.get<ProductionSessionDetail[]>('/production-sessions', {
+    params: {
+      companyId: params?.companyId ?? undefined,
+      departmentId: params?.departmentId ?? undefined,
+      openedById: params?.openedById ?? undefined,
+      status: params?.status ?? undefined,
+      dateFrom: params?.dateFrom ?? undefined,
+      dateTo: params?.dateTo ?? undefined,
+      sortBy: params?.sortBy ?? undefined,
+      sortDir: params?.sortDir ?? undefined,
+      take: params?.take ?? undefined,
+    },
+  });
+  return data;
+}
+
+export async function getProductionSession(id: number): Promise<ProductionSessionDetail> {
+  const { data } = await api.get<ProductionSessionDetail>(`/production-sessions/${id}`);
+  return data;
+}
+
+export async function listInternalTransfers(params?: {
+  companyId?: number;
+  fromDepartmentId?: number;
+  toDepartmentId?: number;
+  status?: 'PENDING' | 'CONFIRMED' | 'REJECTED';
+  inbox?: boolean;
+}): Promise<InternalTransferRow[]> {
+  const { data } = await api.get<InternalTransferRow[]>('/internal-transfers', { params });
+  return data;
+}
+
+export async function createInternalTransfer(payload: {
+  fromDepartmentId: number;
+  toDepartmentId: number;
+  items: Array<{ productId: number; quantity: number }>;
+  note?: string;
+}): Promise<InternalTransferRow> {
+  const { data } = await api.post<InternalTransferRow>('/internal-transfers', payload);
+  return data;
+}
+
+export async function confirmInternalTransfer(id: number): Promise<InternalTransferRow> {
+  const { data } = await api.post<InternalTransferRow>(`/internal-transfers/${id}/confirm`);
+  return data;
+}
+
+export async function rejectInternalTransfer(id: number): Promise<InternalTransferRow> {
+  const { data } = await api.post<InternalTransferRow>(`/internal-transfers/${id}/reject`);
+  return data;
+}
+
 export async function getRegisterClosingCashPreview(sessionId: number): Promise<{
   openingCash: number;
   /** Somme des totaux de vente de la session (classique + spéciale). */
   salesTotal?: number;
   salesCash: number;
+  creditCash?: number;
   expenses: number;
   unsettledChange: number;
   expected: number;
@@ -945,6 +1070,7 @@ export async function getRegisterClosingCashPreview(sessionId: number): Promise<
     openingCash: number;
     salesTotal?: number;
     salesCash: number;
+    creditCash?: number;
     expenses: number;
     unsettledChange: number;
     expected: number;

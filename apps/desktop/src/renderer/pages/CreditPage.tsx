@@ -226,8 +226,12 @@ export function CreditPage() {
     const q = productQ.trim().toLowerCase();
     const forCompany =
       typeof companyId === 'number'
-        ? products.filter((p) => p.companyId == null || p.companyId === companyId)
-        : products;
+        ? products.filter(
+            (p) =>
+              p.nature !== 'RAW_MATERIAL' &&
+              (p.companyId == null || p.companyId === companyId),
+          )
+        : products.filter((p) => p.nature !== 'RAW_MATERIAL');
     if (!q) return forCompany.slice(0, 40);
     return forCompany
       .filter(

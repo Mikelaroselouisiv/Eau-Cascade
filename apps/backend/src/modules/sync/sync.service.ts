@@ -25,7 +25,11 @@ const NO_DELETED_AT = new Set<SyncEntityName>([
   'DeliveryItem',
   'SaleDeliveryStop',
   'DeliveryDrop',
+  'ProductionFlow',
 ]);
+
+/** Modèles sans updatedAt : curseur pull sur createdAt. */
+const NO_UPDATED_AT = new Set<SyncEntityName>(['AuditLog']);
 
 @Injectable()
 export class SyncService {
@@ -43,7 +47,7 @@ export class SyncService {
     }
     const limit = Math.min(Math.max(take || 200, 1), 1000);
     const cursor = this.parsePullCursor(since);
-    const timeField = entity === 'AuditLog' ? 'createdAt' : 'updatedAt';
+    const timeField = NO_UPDATED_AT.has(entity) ? 'createdAt' : 'updatedAt';
 
     const where =
       cursor.uuid != null
@@ -182,7 +186,12 @@ export class SyncService {
     });
 
     if (APPEND_ONLY_ENTITIES.has(entity)) {
-      if (existing) return 'skipped';
+      if (existing) {
+        if (entity === 'CreditPayment') {
+          await this.healCreditPaymentRegisterSession(existing, record);
+        }
+        return 'skipped';
+      }
       await this.createFromSync(entity, record);
       return 'created';
     }
@@ -225,6 +234,28 @@ export class SyncService {
 
     await this.createFromSync(entity, record);
     return 'created';
+  }
+
+  /**
+   * CreditPayment est append-only : si la session caisse n’était pas encore
+   * sur ce nœud au premier insert, rattacher dès que le uuid est résoluble.
+   */
+  private async healCreditPaymentRegisterSession(
+    existing: Record<string, unknown>,
+    record: SyncRecordDto,
+  ): Promise<void> {
+    if (existing.registerSessionId != null) return;
+    const sessionUuid = record.data?.registerSessionUuid;
+    if (typeof sessionUuid !== 'string' || !sessionUuid.trim()) return;
+    const session = await this.prisma.registerSession.findUnique({
+      where: { uuid: sessionUuid.trim() },
+      select: { id: true },
+    });
+    if (!session) return;
+    await this.prisma.creditPayment.update({
+      where: { uuid: String(existing.uuid) },
+      data: { registerSessionId: session.id },
+    });
   }
 
   /**
@@ -305,6 +336,11 @@ export class SyncService {
       const exRank = this.deliveryStatusRank(existing.status);
       if (inRank !== exRank) return inRank > exRank;
     }
+    if (entity === 'InternalTransfer') {
+      const inRank = this.transferStatusRank(record.data?.status);
+      const exRank = this.transferStatusRank(existing.status);
+      if (inRank !== exRank) return inRank > exRank;
+    }
     if (entity === 'DeliveryItem') {
       const inQty = Number(record.data?.quantityDelivered ?? 0);
       const exQty = Number(existing.quantityDelivered ?? 0);
@@ -320,6 +356,12 @@ export class SyncService {
     const s = String(status ?? 'PENDING');
     if (s === 'DELIVERED') return 2;
     if (s === 'PARTIAL') return 1;
+    return 0;
+  }
+
+  private transferStatusRank(status: unknown): number {
+    const s = String(status ?? 'PENDING');
+    if (s === 'CONFIRMED' || s === 'REJECTED') return 1;
     return 0;
   }
 
@@ -835,6 +877,10 @@ export class SyncService {
       InventorySession: this.prisma.inventorySession as unknown as Delegate,
       InventoryLine: this.prisma.inventoryLine as unknown as Delegate,
       RegisterSession: this.prisma.registerSession as unknown as Delegate,
+      ProductionSession: this.prisma.productionSession as unknown as Delegate,
+      InternalTransfer: this.prisma.internalTransfer as unknown as Delegate,
+      InternalTransferItem: this.prisma.internalTransferItem as unknown as Delegate,
+      ProductionFlow: this.prisma.productionFlow as unknown as Delegate,
       PurchaseOrder: this.prisma.purchaseOrder as unknown as Delegate,
       PurchaseOrderLine: this.prisma.purchaseOrderLine as unknown as Delegate,
       GoodsReceipt: this.prisma.goodsReceipt as unknown as Delegate,

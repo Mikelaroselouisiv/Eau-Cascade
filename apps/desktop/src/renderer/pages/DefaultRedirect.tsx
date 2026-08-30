@@ -7,6 +7,9 @@ export function DefaultRedirect() {
   if (canPerm('pos.use') && user.role === 'CASHIER') {
     return <Navigate to="/app/pos" replace />;
   }
+  if (canPerm('production.use') && user.role === 'CHEF_PRODUCTION') {
+    return <Navigate to="/app/production" replace />;
+  }
   if (canPerm('deliveries.view') && user.role === 'LIVREUR') {
     return <Navigate to="/app/livraisons" replace />;
   }

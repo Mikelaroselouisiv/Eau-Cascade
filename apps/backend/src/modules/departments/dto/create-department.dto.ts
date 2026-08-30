@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { DepartmentKind } from '@prisma/client';
 
 export class CreateDepartmentDto {
   @IsString()
@@ -15,6 +16,10 @@ export class CreateDepartmentDto {
   @IsOptional()
   @IsBoolean()
   offersHomeDelivery?: boolean;
+
+  @IsOptional()
+  @IsEnum(DepartmentKind)
+  kind?: DepartmentKind;
 
   @IsOptional()
   @Type(() => Number)

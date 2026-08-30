@@ -1,0 +1,31 @@
+---
+description: Toute nouvelle table métier doit être synchronisée (uuid, pull/push, FK).
+alwaysApply: true
+---
+
+# Synchronisation — obligatoire
+
+Chaque modèle Prisma métier (vente, livraison, session, stock, production…) **doit** être répliqué Server ↔ GCP. Remote parle à l’API cloud ; Server a Postgres local + `sync-agent`. Oublier une entité = un magasin et le cloud divergent.
+
+## Livraisons (déjà dans le cycle — ne pas retirer)
+
+`Sale` → `SaleItem` → `SaleDeliveryStop` → `Payment` → **`Delivery`** → **`DeliveryItem`** → **`DeliveryDrop`**.
+
+Les exécutions livreur (`DeliveryDrop`) font partie du cycle. Un pull qui 500 sur cette table **coupe** le reste (caisse, production, stocks).
+
+## Production / usine
+
+`ProductionSession`, `InternalTransfer`, `InternalTransferItem`, `ProductionFlow` : mêmes listes, mêmes FK uuid.
+
+## Quand tu ajoutes un modèle
+
+1. `uuid String @unique @default(uuid())`
+2. `updatedAt DateTime @updatedAt` (si append-only sans update : au minimum `createdAt`, et l’ajouter à `NO_UPDATED_AT` / `NO_DELETED_AT` dans `sync.service.ts`)
+3. `SYNC_ENTITIES` (`apps/backend/src/modules/sync/sync.entities.ts`)
+4. `ENTITY_ORDER` (`apps/sync-agent/src/entities.js`) — parents avant enfants
+5. `ENTITY_FK_MAP` — **jamais** d’id numérique d’un nœud ; seulement `*Uuid` → id local
+6. `delegate()` dans `sync.service.ts`
+7. `APPEND_ONLY_ENTITIES` si événement (drop, flux, mouvement) ; sinon LWW
+8. Si statut métier (livraison, transfert) : règle `shouldApplyIncoming` (le plus avancé gagne)
+
+Ne pas inventer un canal hors `/sync/pull` + `/sync/push`.

@@ -32,18 +32,23 @@ export const ENTITY_ORDER = [
   'Delivery',
   'DeliveryItem',
   'DeliveryDrop',
-  'StockMovement',
-  'FinanceEntry',
-  'CreditPayment',
-  // Dépôts POS/crédit : après comptes + paiements.
-  'BankTransaction',
   'InventorySession',
   'InventoryLine',
   'RegisterSession',
+  'ProductionSession',
+  'InternalTransfer',
+  'InternalTransferItem',
   'PurchaseOrder',
   'PurchaseOrderLine',
   'GoodsReceipt',
   'GoodsReceiptLine',
+  // Après inventaire + réceptions : inventorySessionUuid / goodsReceiptUuid.
+  'StockMovement',
+  'ProductionFlow',
+  'FinanceEntry',
+  // Après RegisterSession (registerSessionUuid) et FinanceEntry (financeEntryUuid).
+  'CreditPayment',
+  'BankTransaction',
   'CashClosure',
   'AuditLog',
 ];

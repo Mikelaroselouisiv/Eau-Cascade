@@ -34,6 +34,7 @@ import type {
   GlobalStockSnapshotItem,
   Product,
   RegisterSessionDetail,
+  ProductionSessionDetail,
   Sale,
   StockMovementRow,
 } from '../types/api';
@@ -47,6 +48,8 @@ import { DashboardBeneficesTab } from '../components/DashboardBeneficesTab';
 import { DashboardSyntheseTab } from '../components/DashboardSyntheseTab';
 import { RegisterSessionModal } from '../components/RegisterSessionModal';
 import { RegisterSessionsPanel } from '../components/RegisterSessionsPanel';
+import { ProductionSessionsPanel } from '../components/ProductionSessionsPanel';
+import { ProductionSessionModal } from '../components/ProductionSessionModal';
 import { MoneyField } from '../components/MoneyField';
 import { SaleDetailModal } from '../components/SaleDetailModal';
 import { VentesDepartmentModal } from '../components/VentesDepartmentModal';
@@ -184,6 +187,7 @@ export function DashboardPage() {
   const [movementsDateFrom, setMovementsDateFrom] = useState('');
   const [movementsDateTo, setMovementsDateTo] = useState('');
   const [registerSessionModal, setRegisterSessionModal] = useState<RegisterSessionDetail | null>(null);
+  const [productionSessionModal, setProductionSessionModal] = useState<ProductionSessionDetail | null>(null);
   const [globalCompanyIds, setGlobalCompanyIds] = useState<number[]>([]);
   const [globalDeptIds, setGlobalDeptIds] = useState<number[]>([]);
   const [globalItems, setGlobalItems] = useState<GlobalStockSnapshotItem[]>([]);
@@ -1072,6 +1076,10 @@ export function DashboardPage() {
                   companyId={Number(companyId)}
                   onSelect={setRegisterSessionModal}
                 />
+                <ProductionSessionsPanel
+                  companyId={Number(companyId)}
+                  onSelect={setProductionSessionModal}
+                />
                 <AuditJournalPanel companyId={Number(companyId)} />
               </>
             ) : null}
@@ -1897,6 +1905,10 @@ export function DashboardPage() {
       <RegisterSessionModal
         session={registerSessionModal}
         onClose={() => setRegisterSessionModal(null)}
+      />
+      <ProductionSessionModal
+        session={productionSessionModal}
+        onClose={() => setProductionSessionModal(null)}
       />
 
       <SaleDetailModal

@@ -193,6 +193,12 @@ export const ENTITY_FK_MAP: Partial<Record<SyncEntityName, SyncFkRef[]>> = {
     { uuidField: 'saleUuid', idField: 'saleId', parent: 'Sale', required: false },
     { uuidField: 'userUuid', idField: 'userId', parent: 'User', required: false },
     {
+      uuidField: 'registerSessionUuid',
+      idField: 'registerSessionId',
+      parent: 'RegisterSession',
+      required: false,
+    },
+    {
       uuidField: 'financeEntryUuid',
       idField: 'financeEntryId',
       parent: 'FinanceEntry',
@@ -237,6 +243,52 @@ export const ENTITY_FK_MAP: Partial<Record<SyncEntityName, SyncFkRef[]>> = {
       parent: 'InventorySession',
       required: false,
     },
+  ],
+  ProductionSession: [
+    { uuidField: 'departmentUuid', idField: 'departmentId', parent: 'Department', required: true },
+    { uuidField: 'openedByUuid', idField: 'openedById', parent: 'User', required: true },
+    { uuidField: 'closedByUuid', idField: 'closedById', parent: 'User', required: false },
+    {
+      uuidField: 'openingInventorySessionUuid',
+      idField: 'openingInventorySessionId',
+      parent: 'InventorySession',
+      required: true,
+    },
+    {
+      uuidField: 'closingInventorySessionUuid',
+      idField: 'closingInventorySessionId',
+      parent: 'InventorySession',
+      required: false,
+    },
+  ],
+  InternalTransfer: [
+    { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: true },
+    { uuidField: 'fromDepartmentUuid', idField: 'fromDepartmentId', parent: 'Department', required: true },
+    { uuidField: 'toDepartmentUuid', idField: 'toDepartmentId', parent: 'Department', required: true },
+    { uuidField: 'createdByUuid', idField: 'createdById', parent: 'User', required: false },
+    { uuidField: 'confirmedByUuid', idField: 'confirmedById', parent: 'User', required: false },
+  ],
+  InternalTransferItem: [
+    { uuidField: 'transferUuid', idField: 'transferId', parent: 'InternalTransfer', required: true },
+    { uuidField: 'productUuid', idField: 'productId', parent: 'Product', required: true },
+  ],
+  ProductionFlow: [
+    { uuidField: 'departmentUuid', idField: 'departmentId', parent: 'Department', required: true },
+    { uuidField: 'productUuid', idField: 'productId', parent: 'Product', required: true },
+    {
+      uuidField: 'productionSessionUuid',
+      idField: 'productionSessionId',
+      parent: 'ProductionSession',
+      required: false,
+    },
+    {
+      uuidField: 'internalTransferUuid',
+      idField: 'internalTransferId',
+      parent: 'InternalTransfer',
+      required: false,
+    },
+    { uuidField: 'deliveryUuid', idField: 'deliveryId', parent: 'Delivery', required: false },
+    { uuidField: 'createdByUuid', idField: 'createdById', parent: 'User', required: false },
   ],
   PurchaseOrder: [
     { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: true },
@@ -341,4 +393,10 @@ export const RELATION_OBJECT_KEYS = new Set([
   'bankAccount',
   'accounts',
   'transactions',
+  'fromDepartment',
+  'toDepartment',
+  'confirmedBy',
+  'productionSession',
+  'internalTransfer',
+  'flows',
 ]);

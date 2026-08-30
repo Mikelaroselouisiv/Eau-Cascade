@@ -20,6 +20,8 @@ import { ProductsModule } from './modules/products/products.module';
 import { ProductFamiliesModule } from './modules/product-families/product-families.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { RegisterSessionsModule } from './modules/register-sessions/register-sessions.module';
+import { ProductionSessionsModule } from './modules/production-sessions/production-sessions.module';
+import { InternalTransfersModule } from './modules/internal-transfers/internal-transfers.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { StoresModule } from './modules/stores/stores.module';
@@ -50,6 +52,8 @@ import { PrismaModule } from './prisma/prisma.module';
     PaymentsModule,
     ReportsModule,
     RegisterSessionsModule,
+    ProductionSessionsModule,
+    InternalTransfersModule,
     DepartmentsModule,
     StoresModule,
     FinanceModule,

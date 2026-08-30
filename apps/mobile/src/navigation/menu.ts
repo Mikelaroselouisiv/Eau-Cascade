@@ -31,7 +31,7 @@ export const MENU_ITEMS: MenuItem[] = [
     label: 'Accueil',
     href: '/(app)/home',
     icon: 'home-outline',
-    roles: ['ADMIN', 'MANAGER', 'CASHIER', 'STOCK_MANAGER', 'ACCOUNTANT', 'LIVREUR'],
+    roles: ['ADMIN', 'MANAGER', 'CASHIER', 'STOCK_MANAGER', 'ACCOUNTANT', 'LIVREUR', 'CHEF_PRODUCTION'],
   },
   {
     key: 'pos',
@@ -48,6 +48,14 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: 'bag-check-outline',
     roles: ['ADMIN', 'MANAGER', 'CASHIER', 'LIVREUR', 'ACCOUNTANT'],
     permission: 'deliveries.view',
+  },
+  {
+    key: 'production',
+    label: 'Production',
+    href: '/(app)/production',
+    icon: 'construct-outline',
+    roles: ['ADMIN', 'MANAGER', 'CHEF_PRODUCTION'],
+    permission: 'production.use',
   },
   {
     key: 'dashboard',
@@ -277,6 +285,7 @@ export const SECTION_TITLES: Record<string, string> = {
   home: 'Accueil',
   pos: 'Caisse',
   deliveries: 'Livraisons',
+  production: 'Production',
   dashboard: 'Tableau de bord',
   credit: 'Crédit',
   stock: 'Stocks',
@@ -290,6 +299,8 @@ export function defaultAppHref(role: UserRole | undefined): string {
       return '/(app)/pos';
     case 'LIVREUR':
       return '/(app)/deliveries';
+    case 'CHEF_PRODUCTION':
+      return '/(app)/production';
     case 'STOCK_MANAGER':
       return '/(app)/stock';
     case 'ACCOUNTANT':
@@ -304,10 +315,12 @@ export function defaultAppHref(role: UserRole | undefined): string {
 type AccessFns = {
   can: (roles: UserRole[]) => boolean;
   canPerm: (permission: string) => boolean;
+  role?: UserRole;
 };
 
 export function canAccessMenuItem(item: MenuItem, access: AccessFns): boolean {
   if (item.key === 'home') return true;
+  if (item.key === 'deliveries' && access.role === 'CHEF_PRODUCTION') return false;
   if (item.permission) return access.canPerm(item.permission);
   return access.can(item.roles);
 }

@@ -38,6 +38,24 @@ export class CreditService {
     return Math.round(n * 100) / 100;
   }
 
+  private async requireOpenRegisterSession(
+    tx: Prisma.TransactionClient,
+    userId: number | undefined,
+  ): Promise<{ id: number }> {
+    if (userId == null) {
+      throw new BadRequestException('Ouvrez la caisse avant d’encaisser un client crédit.');
+    }
+    const session = await tx.registerSession.findFirst({
+      where: { openedById: userId, status: 'OPEN', deletedAt: null },
+      select: { id: true },
+      orderBy: { openedAt: 'desc' },
+    });
+    if (!session) {
+      throw new BadRequestException('Ouvrez la caisse avant d’encaisser un client crédit.');
+    }
+    return session;
+  }
+
   async listCustomers(companyId: number, opts?: { q?: string; includeInactive?: boolean }) {
     const q = opts?.q?.trim();
     const rows = await this.prisma.creditCustomer.findMany({
@@ -292,15 +310,35 @@ export class CreditService {
           : null;
 
         if (product.isService && recipe?.components.length) {
-          for (const c of recipe.components) {
-            await this.inventoryService.ensureStockAvailabilityTx(
-              tx,
-              c.componentProductId,
-              Number(c.quantityPerParentBaseUnit) * baseQuantity,
-            );
+          const plant =
+            product.departmentId != null &&
+            (
+              await tx.department.findUnique({
+                where: { id: product.departmentId },
+                select: { kind: true },
+              })
+            )?.kind === 'PRODUCTION_DISTRIBUTION';
+          if (!plant) {
+            for (const c of recipe.components) {
+              await this.inventoryService.ensureStockAvailabilityTx(
+                tx,
+                c.componentProductId,
+                Number(c.quantityPerParentBaseUnit) * baseQuantity,
+              );
+            }
           }
         } else if (product.trackStock && !product.isService) {
-          await this.inventoryService.ensureStockAvailabilityTx(tx, product.id, baseQuantity);
+          const plant =
+            product.departmentId != null &&
+            (
+              await tx.department.findUnique({
+                where: { id: product.departmentId },
+                select: { kind: true },
+              })
+            )?.kind === 'PRODUCTION_DISTRIBUTION';
+          if (!plant) {
+            await this.inventoryService.ensureStockAvailabilityTx(tx, product.id, baseQuantity);
+          }
         }
 
         loaded.push({ item, psu, baseQuantity });
@@ -412,8 +450,9 @@ export class CreditService {
           ? dto.downPaymentMethod
           : PaymentMethod.CASH;
 
-      // Acompte → journal entreprise « Encaissements crédit » (hors caisse POS).
+      // Acompte espèces → session caisse de l’encaisseur (comptage de clôture).
       if (down > 0.009) {
+        const till = await this.requireOpenRegisterSession(tx, userId);
         const categoryId = await this.findOrCreateCreditCashCategoryId(tx, customer.companyId);
         const fe = await tx.financeEntry.create({
           data: {
@@ -432,6 +471,7 @@ export class CreditService {
             method: downMethod,
             note: 'Acompte à l’achat',
             userId: userId ?? null,
+            registerSessionId: till.id,
             financeEntryId: fe.id,
           },
         });
@@ -502,6 +542,7 @@ export class CreditService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      const till = await this.requireOpenRegisterSession(tx, userId);
       let remaining = amount;
       const allocations: Array<{ saleId: number; amount: number }> = [];
 
@@ -603,6 +644,7 @@ export class CreditService {
           bankAccountId: bankAccount?.id ?? null,
           note: dto.note?.trim() || null,
           userId: userId ?? null,
+          registerSessionId: till.id,
           financeEntryId: fe.id,
         },
       });

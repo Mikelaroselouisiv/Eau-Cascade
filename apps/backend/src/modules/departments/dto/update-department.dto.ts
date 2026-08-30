@@ -1,4 +1,5 @@
-import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { DepartmentKind } from '@prisma/client';
 
 export class UpdateDepartmentDto {
   @IsOptional()
@@ -15,4 +16,8 @@ export class UpdateDepartmentDto {
   @IsOptional()
   @IsBoolean()
   offersHomeDelivery?: boolean;
+
+  @IsOptional()
+  @IsEnum(DepartmentKind)
+  kind?: DepartmentKind;
 }

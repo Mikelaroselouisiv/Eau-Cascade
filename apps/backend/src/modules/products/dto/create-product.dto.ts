@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsEnum,
   IsInt,
   IsNumber,
   IsOptional,
@@ -12,6 +13,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { ProductNature } from '@prisma/client';
 import { VolumePriceDto } from './volume-price.dto';
 
 export class CreateProductSaleUnitDto {
@@ -84,6 +86,10 @@ export class CreateProductDto {
   @Type(() => Boolean)
   @IsBoolean()
   isService?: boolean;
+
+  @IsOptional()
+  @IsEnum(ProductNature)
+  nature?: ProductNature;
 
   @IsOptional()
   @Type(() => Boolean)

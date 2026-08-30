@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InventorySessionKind, InventorySessionStatus, MovementType, Prisma } from '@prisma/client';
+import { InventorySessionKind, InventorySessionStatus, MovementType, Prisma, ProductNature } from '@prisma/client';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
 import { ymdToDateEnd, ymdToDateStart } from '../../common/time/timezone';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -483,6 +483,7 @@ export class InventoryService {
     departmentId: number,
     asOfRaw?: string,
     onlyPositiveStock = false,
+    opts?: { nature?: ProductNature },
   ) {
     const department = await this.prisma.department.findUnique({
       where: { id: departmentId },
@@ -496,6 +497,7 @@ export class InventoryService {
         departmentId,
         trackStock: true,
         isService: false,
+        nature: opts?.nature ?? ProductNature.FINISHED_GOOD,
       },
       include: {
         saleUnits: {
@@ -737,16 +739,27 @@ export class InventoryService {
     kind: InventorySessionKind,
     lines: Array<{ productId: number; countedQty: number }>,
     userId?: number,
+    opts?: {
+      natures?: ProductNature[];
+      labelPrefix?: string;
+      allowEmpty?: boolean;
+      adjustStock?: boolean;
+    },
   ) {
     const dept = await this.prisma.department.findUnique({ where: { id: departmentId } });
     if (!dept) {
       throw new NotFoundException('Département introuvable');
     }
 
+    const natureFilter = opts?.natures?.length
+      ? { nature: { in: opts.natures } }
+      : { nature: ProductNature.FINISHED_GOOD };
+
     const products = await this.prisma.product.findMany({
-      where: { departmentId, trackStock: true, isService: false },
+      where: { departmentId, trackStock: true, isService: false, deletedAt: null, ...natureFilter },
     });
-    if (products.length === 0) {
+    const allowEmpty = opts?.allowEmpty === true || products.length === 0;
+    if (products.length === 0 && !allowEmpty) {
       throw new BadRequestException('Aucun produit avec stock suivi dans ce département.');
     }
 
@@ -760,8 +773,8 @@ export class InventoryService {
 
     const dateLabel = new Date().toLocaleDateString('fr-FR');
     const defaultLabels: Record<InventorySessionKind, string> = {
-      [InventorySessionKind.OPENING]: `Ouverture caisse — ${dateLabel}`,
-      [InventorySessionKind.CLOSING]: `Fermeture caisse — ${dateLabel}`,
+      [InventorySessionKind.OPENING]: `${opts?.labelPrefix ?? 'Ouverture caisse'} — ${dateLabel}`,
+      [InventorySessionKind.CLOSING]: `${opts?.labelPrefix ?? 'Fermeture caisse'} — ${dateLabel}`,
       [InventorySessionKind.AD_HOC]: `Contrôle — ${dateLabel}`,
     };
 
@@ -775,14 +788,39 @@ export class InventoryService {
         },
       });
 
-      await tx.inventoryLine.createMany({
-        data: products.map((p) => ({
-          sessionId: session.id,
-          productId: p.id,
-          systemQtyAtOpen: p.stock,
-          countedQty: lineMap.get(p.id)!,
-        })),
-      });
+      if (products.length) {
+        await tx.inventoryLine.createMany({
+          data: products.map((p) => ({
+            sessionId: session.id,
+            productId: p.id,
+            systemQtyAtOpen: p.stock,
+            countedQty: lineMap.get(p.id)!,
+          })),
+        });
+      }
+
+      if (opts?.adjustStock) {
+        for (const p of products) {
+          const counted = lineMap.get(p.id)!;
+          const current = Number(p.stock);
+          const delta = counted - current;
+          if (Math.abs(delta) <= 0.0001) continue;
+          await tx.product.update({
+            where: { id: p.id },
+            data: { stock: counted },
+          });
+          await tx.stockMovement.create({
+            data: {
+              productId: p.id,
+              quantity: Math.abs(delta),
+              type: delta > 0 ? MovementType.IN : MovementType.OUT,
+              reason: defaultLabels[kind],
+              createdById: userId ?? null,
+              inventorySessionId: session.id,
+            },
+          });
+        }
+      }
 
       await tx.inventorySession.update({
         where: { id: session.id },
@@ -801,7 +839,7 @@ export class InventoryService {
       action: 'INVENTORY_SESSION_COMPLETED',
       entity: 'InventorySession',
       entityId: String(sessionId),
-      metadata: { adjustStock: false, registerFlow: true, kind },
+      metadata: { adjustStock: opts?.adjustStock === true, registerFlow: !opts?.natures, kind },
     });
 
     return this.getInventorySession(sessionId);

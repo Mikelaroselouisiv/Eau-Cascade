@@ -46,6 +46,7 @@ import {
 import type {
   CompanyListItem,
   Department,
+  DepartmentKind,
   DepartmentPrinterSettings,
   PackagingUnit,
   Product,
@@ -1482,6 +1483,7 @@ function DepartmentEditModal({
   const [offersHomeDelivery, setOffersHomeDelivery] = useState(
     department.offersHomeDelivery === true,
   );
+  const [kind, setKind] = useState(department.kind ?? 'DISTRIBUTION');
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -1498,6 +1500,7 @@ function DepartmentEditModal({
         name: name.trim(),
         description: description.trim() || undefined,
         offersHomeDelivery,
+        kind,
       });
       await onSaved();
       onClose();
@@ -1526,6 +1529,13 @@ function DepartmentEditModal({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Mission, périmètre…"
             />
+          </label>
+          <label>
+            Type
+            <select value={kind} onChange={(e) => setKind(e.target.value as DepartmentKind)}>
+              <option value="DISTRIBUTION">Distribution</option>
+              <option value="PRODUCTION_DISTRIBUTION">Production et distribution</option>
+            </select>
           </label>
           <label className="checkbox-row">
             <input
@@ -1566,6 +1576,7 @@ function CompanyDepartmentsPanel({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [offersHomeDelivery, setOffersHomeDelivery] = useState(false);
+  const [kind, setKind] = useState<DepartmentKind>('DISTRIBUTION');
   const [deptErr, setDeptErr] = useState('');
   const [addingDept, setAddingDept] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -1621,10 +1632,12 @@ function CompanyDepartmentsPanel({
         description: description.trim() || undefined,
         companyId,
         offersHomeDelivery,
+        kind,
       });
       setName('');
       setDescription('');
       setOffersHomeDelivery(false);
+      setKind('DISTRIBUTION');
       await loadDepts();
       await onDepartmentsChanged();
     } catch (err) {
@@ -1730,6 +1743,17 @@ function CompanyDepartmentsPanel({
             />
             Livraisons à domicile
           </label>
+          <label>
+            Type
+            <select
+              value={kind}
+              disabled={!canEdit}
+              onChange={(e) => setKind(e.target.value as DepartmentKind)}
+            >
+              <option value="DISTRIBUTION">Distribution</option>
+              <option value="PRODUCTION_DISTRIBUTION">Production et distribution</option>
+            </select>
+          </label>
           <button
             type="button"
             className="btn btn-primary"
@@ -1761,6 +1785,9 @@ function CompanyDepartmentsPanel({
               <div className="dept-card-header">
                 <div className="dept-card-titles">
                   <span className="dept-card-name">{d.name}</span>
+                  {d.kind === 'PRODUCTION_DISTRIBUTION' ? (
+                    <span className="dept-card-meta">Production</span>
+                  ) : null}
                   {d.offersHomeDelivery ? (
                     <span className="dept-card-meta">Livraisons à domicile</span>
                   ) : null}

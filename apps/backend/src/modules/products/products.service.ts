@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { DepartmentKind, Prisma, ProductNature } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -27,6 +27,28 @@ export class ProductsService {
       throw new BadRequestException('Aucune entreprise configuree');
     }
     return c.id;
+  }
+
+  private async resolveNatureAndTrackStock(opts: {
+    departmentId?: number | null;
+    nature?: ProductNature;
+    isService?: boolean;
+    trackStock?: boolean;
+  }) {
+    const nature = opts.nature ?? ProductNature.FINISHED_GOOD;
+    let trackStock = opts.trackStock ?? !(opts.isService ?? false);
+    if (nature === ProductNature.RAW_MATERIAL) {
+      trackStock = true;
+    } else if (opts.departmentId) {
+      const dept = await this.prisma.department.findUnique({
+        where: { id: opts.departmentId },
+        select: { kind: true },
+      });
+      if (dept?.kind === DepartmentKind.PRODUCTION_DISTRIBUTION && !(opts.isService ?? false)) {
+        trackStock = false;
+      }
+    }
+    return { nature, trackStock };
   }
 
   private async assertDepartmentBelongsToCompany(
@@ -120,7 +142,12 @@ export class ProductsService {
       createProductDto.departmentId,
     );
     const isService = createProductDto.isService ?? false;
-    const trackStock = createProductDto.trackStock ?? !isService;
+    const { nature, trackStock } = await this.resolveNatureAndTrackStock({
+      departmentId: createProductDto.departmentId,
+      nature: createProductDto.nature,
+      isService,
+      trackStock: createProductDto.trackStock,
+    });
 
     return this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
@@ -137,6 +164,7 @@ export class ProductsService {
           barcode: createProductDto.barcode,
           description: createProductDto.description,
           isService,
+          nature,
           trackStock,
           cost: createProductDto.cost ?? 0,
           stock: 0,
@@ -228,6 +256,13 @@ export class ProductsService {
     const { salePrice, volumePrices, packagingUnitId, labelOverride, productFamilyId, ...productFields } =
       updateProductDto;
 
+    const flags = await this.resolveNatureAndTrackStock({
+      departmentId: nextDeptId,
+      nature: productFields.nature ?? (existingProduct as { nature?: ProductNature }).nature,
+      isService: productFields.isService ?? existingProduct.isService,
+      trackStock: productFields.trackStock ?? existingProduct.trackStock,
+    });
+
     const data: Prisma.ProductUpdateInput = {
       name: productFields.name,
       company:
@@ -252,7 +287,15 @@ export class ProductsService {
       cardColor: productFields.cardColor !== undefined ? productFields.cardColor : undefined,
       ...(userId != null ? { updatedBy: { connect: { id: userId } } } : {}),
       isService: productFields.isService,
-      trackStock: productFields.trackStock,
+      nature: productFields.nature !== undefined || productFields.departmentId !== undefined
+        ? flags.nature
+        : undefined,
+      trackStock:
+        productFields.trackStock !== undefined ||
+        productFields.nature !== undefined ||
+        productFields.departmentId !== undefined
+          ? flags.trackStock
+          : productFields.trackStock,
       cost: productFields.cost,
       stock: productFields.stock,
       stockMin: productFields.stockMin,

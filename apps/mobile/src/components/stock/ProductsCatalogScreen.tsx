@@ -33,6 +33,7 @@ import type {
   PackagingUnit,
   Product,
   ProductFamily,
+  ProductNature,
 } from '@/types/api';
 import { formatMoney } from '@/utils/datetime';
 import { defaultUnitPrice, stockPackagingLabel } from '@/utils/packaging';
@@ -76,6 +77,7 @@ export function ProductsCatalogScreen() {
   const [editColor, setEditColor] = useState(DEFAULT_CARD_COLOR);
   const [editFamilies, setEditFamilies] = useState<ProductFamily[]>([]);
   const [editFamilyId, setEditFamilyId] = useState<number | ''>('');
+  const [editNature, setEditNature] = useState<ProductNature>('FINISHED_GOOD');
 
   const [showCreate, setShowCreate] = useState(false);
   const [createCompanyId, setCreateCompanyId] = useState<number | ''>('');
@@ -88,6 +90,7 @@ export function ProductsCatalogScreen() {
   const [createColor, setCreateColor] = useState(DEFAULT_CARD_COLOR);
   const [createFamilies, setCreateFamilies] = useState<ProductFamily[]>([]);
   const [createFamilyId, setCreateFamilyId] = useState<number | ''>('');
+  const [createNature, setCreateNature] = useState<ProductNature>('FINISHED_GOOD');
 
   const load = useCallback(async () => {
     if (!allowed) return;
@@ -195,6 +198,7 @@ export function ProductsCatalogScreen() {
     setEditPrice(price != null ? String(price) : '');
     setEditColor(p.cardColor?.trim() || DEFAULT_CARD_COLOR);
     setEditFamilyId(p.productFamilyId ?? p.productFamily?.id ?? '');
+    setEditNature(p.nature === 'RAW_MATERIAL' ? 'RAW_MATERIAL' : 'FINISHED_GOOD');
     const productCompanyId = p.companyId ?? p.company?.id;
     if (productCompanyId != null) {
       void getProductFamilies(productCompanyId)
@@ -225,6 +229,7 @@ export function ProductsCatalogScreen() {
         salePrice: price,
         cardColor: editColor,
         productFamilyId: editFamilyId === '' ? null : editFamilyId,
+        nature: editNature,
       });
       setEdit(null);
       setStatus('Produit mis à jour');
@@ -255,6 +260,7 @@ export function ProductsCatalogScreen() {
         companyId: createCompanyId,
         departmentId: createDeptId,
         productFamilyId: createFamilyId === '' ? null : createFamilyId,
+        nature: createNature,
         trackStock: true,
         saleUnits: [{ packagingUnitId: packId, salePrice: price, isDefault: true }],
       });
@@ -388,6 +394,7 @@ export function ProductsCatalogScreen() {
                 <Text style={styles.cardTitle} numberOfLines={2}>
                   {p.name}
                   {p.isService ? ' (service)' : ''}
+                  {p.nature === 'RAW_MATERIAL' ? ' (matière première)' : ''}
                 </Text>
               </View>
               <Text style={styles.meta}>
@@ -456,6 +463,19 @@ export function ProductsCatalogScreen() {
                   onPress={() => setPackId(u.id)}
                 />
               ))}
+            </ScrollView>
+            <Text style={styles.fieldLabel}>Type</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+              <Chip
+                label="Produit fini"
+                active={createNature === 'FINISHED_GOOD'}
+                onPress={() => setCreateNature('FINISHED_GOOD')}
+              />
+              <Chip
+                label="Matière première"
+                active={createNature === 'RAW_MATERIAL'}
+                onPress={() => setCreateNature('RAW_MATERIAL')}
+              />
             </ScrollView>
             <Text style={styles.fieldLabel}>Famille de produits</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
@@ -546,6 +566,19 @@ export function ProductsCatalogScreen() {
               value={editPrice}
               onChangeText={setEditPrice}
             />
+            <Text style={styles.fieldLabel}>Type</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+              <Chip
+                label="Produit fini"
+                active={editNature === 'FINISHED_GOOD'}
+                onPress={() => setEditNature('FINISHED_GOOD')}
+              />
+              <Chip
+                label="Matière première"
+                active={editNature === 'RAW_MATERIAL'}
+                onPress={() => setEditNature('RAW_MATERIAL')}
+              />
+            </ScrollView>
             <Text style={styles.fieldLabel}>Famille de produits</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
               <Chip

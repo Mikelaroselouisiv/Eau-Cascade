@@ -21,6 +21,7 @@ import type {
   PackagingUnit,
   Product,
   ProductFamily,
+  ProductNature,
 } from '../types/api';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { useAuth } from '../context/AuthContext';
@@ -126,6 +127,7 @@ export function StockPage() {
   const [companyId, setCompanyId] = useState<number | ''>('');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [departmentId, setDepartmentId] = useState<number | ''>('');
+  const [nature, setNature] = useState<ProductNature>('FINISHED_GOOD');
   const [name, setName] = useState('');
   const [cardColor, setCardColor] = useState(DEFAULT_PRODUCT_CARD_COLOR);
   const [price, setPrice] = useState('');
@@ -379,6 +381,7 @@ export function StockPage() {
         companyId: cid,
         departmentId,
         productFamilyId: productFamilyId === '' ? null : productFamilyId,
+        nature,
         trackStock: true,
         isService: false,
         saleUnits: [
@@ -592,10 +595,21 @@ export function StockPage() {
                 >
                   <option value="">— Aucun</option>
                   {departments.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                    {d.kind === 'PRODUCTION_DISTRIBUTION' ? ' · production' : ''}
+                  </option>
+                ))}
+                </select>
+              </label>
+              <label>
+                Type
+                <select
+                  value={nature}
+                  onChange={(e) => setNature(e.target.value as ProductNature)}
+                >
+                  <option value="FINISHED_GOOD">Produit fini</option>
+                  <option value="RAW_MATERIAL">Matière première</option>
                 </select>
               </label>
               <label>
@@ -801,6 +815,7 @@ export function StockPage() {
                         <td>
                           <strong>{p.name}</strong>
                           {p.isService ? <small> (service)</small> : null}
+                          {p.nature === 'RAW_MATERIAL' ? <small> (matière première)</small> : null}
                           {p.productFamily?.name ? (
                             <small className="dept-hint" style={{ display: 'block' }}>
                               Famille : {p.productFamily.name}
@@ -1020,6 +1035,7 @@ function EditProductModal({
   const [stockMin, setStockMin] = useState(String(product.stockMin ?? 0));
   const [deptId, setDeptId] = useState<string>(product.department ? String(product.department.id) : '');
   const [isService, setIsService] = useState(product.isService);
+  const [nature, setNature] = useState<ProductNature>(product.nature ?? 'FINISHED_GOOD');
   const [trackStock, setTrackStock] = useState(product.trackStock);
   const su0 = defaultSaleUnit(product);
   const [salePrice, setSalePrice] = useState(String(su0 ? su0.salePrice : ''));
@@ -1046,13 +1062,20 @@ function EditProductModal({
 
   const mpChoices = useMemo(
     () =>
-      products.filter(
-        (p) =>
-          p.id !== product.id &&
-          (p.companyId ?? companyId) === companyId &&
-          p.trackStock &&
-          !p.isService,
-      ),
+      products
+        .filter(
+          (p) =>
+            p.id !== product.id &&
+            (p.companyId ?? companyId) === companyId &&
+            p.trackStock &&
+            !p.isService,
+        )
+        .sort((a, b) => {
+          const rank = (p: Product) => (p.nature === 'RAW_MATERIAL' ? 0 : 1);
+          const d = rank(a) - rank(b);
+          if (d !== 0) return d;
+          return a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' });
+        }),
     [products, product.id, companyId],
   );
 
@@ -1162,8 +1185,9 @@ function EditProductModal({
         stockMin: Number(stockMin),
         departmentId: deptId === '' ? null : Number(deptId),
         productFamilyId: familyId === '' ? null : familyId,
-        isService,
-        trackStock,
+        nature,
+        trackStock: nature === 'RAW_MATERIAL' ? true : trackStock,
+        isService: nature === 'RAW_MATERIAL' ? false : isService,
         salePrice: sp,
         volumePrices: parsedTiers,
         ...(deptId !== ''
@@ -1369,14 +1393,35 @@ function EditProductModal({
               onChange={(e) => setStockMin(e.target.value)}
             />
           </label>
+          <label>
+            Type
+            <select
+              value={nature}
+              onChange={(e) => {
+                const next = e.target.value as ProductNature;
+                setNature(next);
+                if (next === 'RAW_MATERIAL') {
+                  setIsService(false);
+                  setTrackStock(true);
+                }
+              }}
+            >
+              <option value="FINISHED_GOOD">Produit fini</option>
+              <option value="RAW_MATERIAL">Matière première</option>
+            </select>
+          </label>
+          {nature !== 'RAW_MATERIAL' ? (
           <label className="checkbox-row">
             <input type="checkbox" checked={isService} onChange={(e) => setIsService(e.target.checked)} />
             Service (sans stock)
           </label>
+          ) : null}
+          {nature !== 'RAW_MATERIAL' ? (
           <label className="checkbox-row">
             <input type="checkbox" checked={trackStock} onChange={(e) => setTrackStock(e.target.checked)} />
             Suivre le stock
           </label>
+          ) : null}
           {isService ? (
             <div className="volume-tiers-block" style={{ gridColumn: '1 / -1' }}>
               {recipeLines.map((row, idx) => (

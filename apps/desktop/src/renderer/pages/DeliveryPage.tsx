@@ -7,10 +7,13 @@ import {
   getPrinterSettings,
   getSaleById,
   listDeliveries,
+  listInternalTransfers,
+  confirmInternalTransfer,
+  rejectInternalTransfer,
   addDeliveryDrop,
   updateDelivery,
 } from '../services/api';
-import type { CompanyListItem, Delivery, Department } from '../types/api';
+import type { CompanyListItem, Delivery, Department, InternalTransferRow } from '../types/api';
 import { useAuth } from '../context/AuthContext';
 import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
@@ -61,7 +64,9 @@ export function DeliveryPage() {
   const canManageOnsite = canPerm('deliveries.manage_onsite');
   const canManageHome = canPerm('deliveries.manage_home');
   const canPrintFiche = canPerm('deliveries.print');
-  const lockedScope = user?.role === 'CASHIER' || user?.role === 'LIVREUR';
+  const canConfirmTransfer = canPerm('transfers.confirm');
+  const lockedScope =
+    user?.role === 'CASHIER' || user?.role === 'LIVREUR' || user?.role === 'CHEF_PRODUCTION';
   const canFilter = !lockedScope;
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
@@ -86,6 +91,7 @@ export function DeliveryPage() {
   const [printingId, setPrintingId] = useState<number | null>(null);
   const [message, setMessage] = useAutoClearMessage();
   const [scopeLabel, setScopeLabel] = useState('');
+  const [inbox, setInbox] = useState<InternalTransferRow[]>([]);
 
   useEffect(() => {
     if (!lockedScope) return;
@@ -108,6 +114,13 @@ export function DeliveryPage() {
       setScopeLabel(deptName ? `${companyName} · ${deptName}` : companyName);
     }
   }, [lockedScope, rows]);
+
+  useEffect(() => {
+    if (!canConfirmTransfer) return;
+    void listInternalTransfers({ inbox: true, status: 'PENDING' })
+      .then(setInbox)
+      .catch(() => setInbox([]));
+  }, [canConfirmTransfer]);
 
   useEffect(() => {
     if (lockedScope) return;
@@ -437,6 +450,43 @@ export function DeliveryPage() {
           </select>
         </div>
       </header>
+      {inbox.length > 0 ? (
+        <section className="card" style={{ margin: '12px 0' }}>
+          <h2>Livraisons internes</h2>
+          {inbox.map((t) => (
+            <div key={t.id} className="credit-cart-line">
+              <span>
+                {t.fromDepartment.name}
+                <small className="muted" style={{ display: 'block' }}>
+                  {t.items.map((i) => `${i.product.name} × ${i.quantity}`).join(', ')}
+                </small>
+              </span>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() =>
+                  void confirmInternalTransfer(t.id).then(() =>
+                    setInbox((prev) => prev.filter((x) => x.id !== t.id)),
+                  )
+                }
+              >
+                Confirmer
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() =>
+                  void rejectInternalTransfer(t.id).then(() =>
+                    setInbox((prev) => prev.filter((x) => x.id !== t.id)),
+                  )
+                }
+              >
+                Refuser
+              </button>
+            </div>
+          ))}
+        </section>
+      ) : null}
 
       {message ? <p className="delivery-toast">{message}</p> : null}
 

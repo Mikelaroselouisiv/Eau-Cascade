@@ -429,6 +429,14 @@ export function RegisterSessionBar({
                             {formatMoney(closingPreview.salesCash)}
                           </Text>
                         </View>
+                        {(closingPreview.creditCash ?? 0) > 0.009 ? (
+                          <View style={styles.breakdownRow}>
+                            <Text style={styles.breakdownLabel}>Encaissements crédit</Text>
+                            <Text style={styles.breakdownValue}>
+                              {formatMoney(closingPreview.creditCash ?? 0)}
+                            </Text>
+                          </View>
+                        ) : null}
                         {closingPreview.unsettledChange > 0.009 ? (
                           <View style={styles.breakdownRow}>
                             <Text style={styles.breakdownLabel}>Monnaie non rendue</Text>

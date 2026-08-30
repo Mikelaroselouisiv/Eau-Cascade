@@ -26,6 +26,9 @@ export const PERMISSIONS = [
   { code: 'deliveries.manage_onsite', label: 'Gérer seulement les livraisons sur place' },
   { code: 'deliveries.manage_home', label: 'Gérer seulement les livraisons à domicile' },
   { code: 'deliveries.print', label: 'Imprimer les fiches depuis Livraisons' },
+  { code: 'production.use', label: 'Ouvrir / fermer la production' },
+  { code: 'transfers.manage', label: 'Créer des livraisons internes' },
+  { code: 'transfers.confirm', label: 'Confirmer une livraison interne reçue' },
   { code: 'finance.view', label: 'Consulter la finance (journal, totaux)' },
   { code: 'finance.write', label: 'Saisir / modifier toute écriture financière' },
   { code: 'finance.expense', label: 'Enregistrer des dépenses uniquement (sans voir la finance)' },
@@ -110,6 +113,9 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ id: string; label: string; codes
       'deliveries.manage_onsite',
       'deliveries.manage_home',
       'deliveries.print',
+      'production.use',
+      'transfers.manage',
+      'transfers.confirm',
       'stores.manage',
     ],
   },
@@ -142,6 +148,7 @@ export const SYSTEM_ROLE_LABELS: Record<string, string> = {
   STOCK_MANAGER: 'Responsable stock',
   ACCOUNTANT: 'Comptable',
   LIVREUR: 'Livreur',
+  CHEF_PRODUCTION: 'Chef de production',
 };
 
 /**
@@ -186,6 +193,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'users.view',
     'credit.view',
     'credit.manage',
+    'production.use',
+    'transfers.manage',
+    'transfers.confirm',
   ],
   CASHIER: [
     'pos.use',
@@ -194,6 +204,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'sales.view',
     'deliveries.view',
     'deliveries.manage',
+    'transfers.confirm',
   ],
   STOCK_MANAGER: [
     'stock.view',
@@ -205,6 +216,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'recipes.manage',
     'packaging.manage',
     'config.view',
+    'transfers.confirm',
   ],
   ACCOUNTANT: [
     'dashboard.view',
@@ -224,6 +236,17 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'banks.view',
   ],
   LIVREUR: ['deliveries.view', 'deliveries.manage', 'products.view'],
+  CHEF_PRODUCTION: [
+    'production.use',
+    'transfers.manage',
+    'transfers.confirm',
+    'deliveries.view',
+    'deliveries.manage',
+    'deliveries.manage_onsite',
+    'deliveries.manage_home',
+    'products.view',
+    'stock.view',
+  ],
 };
 
 /** `deliveries.manage` couvre les deux modes ; `*` couvre tout. */

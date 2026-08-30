@@ -10,6 +10,7 @@ import { formatRoleLabel } from '../utils/roleLabels';
 const nav: Array<{ to: string; label: string; permission: string }> = [
   { to: '/app/pos', label: 'Caisse (POS)', permission: 'pos.use' },
   { to: '/app/livraisons', label: 'Livraisons', permission: 'deliveries.view' },
+  { to: '/app/production', label: 'Production', permission: 'production.use' },
   { to: '/app/dashboard', label: 'Tableau de bord', permission: 'dashboard.view' },
   { to: '/app/credit', label: 'Crédit', permission: 'credit.view' },
   { to: '/app/stock', label: 'Stocks', permission: 'stock.view' },
@@ -67,7 +68,11 @@ export function AppLayout() {
     };
   }, [syncPendingSales]);
 
-  const visible = nav.filter((item) => canPerm(item.permission));
+  const visible = nav.filter((item) => {
+    if (!canPerm(item.permission)) return false;
+    if (item.to === '/app/livraisons' && user?.role === 'CHEF_PRODUCTION') return false;
+    return true;
+  });
 
   return (
     <div className="app-shell">

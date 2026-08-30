@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { BankTransactionType, FinanceType, FulfillmentType, MovementType, PaymentMethod, Prisma } from '@prisma/client';
+import { BankTransactionType, FinanceType, FulfillmentType, MovementType, PaymentMethod, Prisma, ProductNature } from '@prisma/client';
 import { permissionsSatisfy } from '../../common/permissions';
 import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -160,6 +160,11 @@ export class SalesService {
         }
 
         const product = psu.product;
+        if (product.nature === ProductNature.RAW_MATERIAL) {
+          throw new BadRequestException(
+            `« ${product.name} » est une matière première et ne peut pas être vendu à la caisse.`,
+          );
+        }
         if (firstCompanyId === null) {
           firstCompanyId = product.companyId;
         }
@@ -178,22 +183,42 @@ export class SalesService {
 
         if (product.isService && recipe?.components.length) {
           if (fulfillmentType !== FulfillmentType.HOME) {
-            for (const c of recipe.components) {
-              const need = Number(c.quantityPerParentBaseUnit) * baseQuantity;
-              await this.inventoryService.ensureStockAvailabilityTx(
-                tx,
-                c.componentProductId,
-                need,
-              );
+            const plant =
+              product.departmentId != null &&
+              (
+                await tx.department.findUnique({
+                  where: { id: product.departmentId },
+                  select: { kind: true },
+                })
+              )?.kind === 'PRODUCTION_DISTRIBUTION';
+            if (!plant) {
+              for (const c of recipe.components) {
+                const need = Number(c.quantityPerParentBaseUnit) * baseQuantity;
+                await this.inventoryService.ensureStockAvailabilityTx(
+                  tx,
+                  c.componentProductId,
+                  need,
+                );
+              }
             }
           }
         } else if (product.trackStock && !product.isService) {
           if (fulfillmentType !== FulfillmentType.HOME) {
-            await this.inventoryService.ensureStockAvailabilityTx(
-              tx,
-              product.id,
-              baseQuantity,
-            );
+            const plant =
+              product.departmentId != null &&
+              (
+                await tx.department.findUnique({
+                  where: { id: product.departmentId },
+                  select: { kind: true },
+                })
+              )?.kind === 'PRODUCTION_DISTRIBUTION';
+            if (!plant) {
+              await this.inventoryService.ensureStockAvailabilityTx(
+                tx,
+                product.id,
+                baseQuantity,
+              );
+            }
           }
         }
 

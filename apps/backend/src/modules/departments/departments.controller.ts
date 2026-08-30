@@ -24,7 +24,7 @@ export class DepartmentsController {
   constructor(private readonly departmentsService: DepartmentsService) {}
 
   @Get()
-  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'deliveries.view', 'finance.view')
+  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'deliveries.view', 'finance.view', 'production.use', 'transfers.confirm')
   findAll(@Query('companyId') companyIdRaw?: string) {
     if (companyIdRaw === undefined || companyIdRaw === '') {
       return this.departmentsService.findAll();

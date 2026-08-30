@@ -4,7 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DeliveryStatus, FulfillmentType, MovementType, Prisma } from '@prisma/client';
+import { DeliveryStatus, FulfillmentType, MovementType, Prisma, ProductionFlowKind } from '@prisma/client';
+import { isProductionDepartment } from '../../common/department-kind';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   canAccessAssignedDepartment,
@@ -15,6 +16,7 @@ import { canManageDeliveryFulfillment } from '../../common/permissions';
 import { AuditService } from '../audit/audit.service';
 import { RolesService } from '../roles/roles.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { ProductionSessionsService } from '../production-sessions/production-sessions.service';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { CreateDeliveryDropDto } from './dto/create-delivery-drop.dto';
 
@@ -58,7 +60,7 @@ const deliveryInclude = {
           quantity: true,
           unitPrice: true,
           subtotal: true,
-          product: { select: { id: true, name: true } },
+          product: { select: { id: true, name: true, departmentId: true } },
         },
       },
     },
@@ -85,6 +87,7 @@ export class DeliveriesService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly inventoryService: InventoryService,
+    private readonly productionSessions: ProductionSessionsService,
     private readonly rolesService: RolesService,
   ) {}
 
@@ -223,7 +226,10 @@ export class DeliveriesService {
       deletedAt: null,
       sale: { status: 'COMPLETED', deletedAt: null },
       ...(scope.companyId != null ? { companyId: scope.companyId } : {}),
-      ...this.departmentListClause(scope),
+      // HOME : pool entreprise (n’importe quelle caisse enregistre, n’importe quelle usine exécute).
+      ...(fulfillmentType === FulfillmentType.HOME && filters.departmentId == null
+        ? {}
+        : this.departmentListClause(scope)),
       ...(status ? { status } : {}),
       ...(fulfillmentType ? { fulfillmentType } : {}),
     };
@@ -288,7 +294,12 @@ export class DeliveriesService {
       include: deliveryInclude,
     });
     if (!delivery) throw new NotFoundException('Livraison introuvable');
-    this.assertCanAccess(user, delivery.companyId, delivery.departmentId);
+    this.assertCanAccess(
+      user,
+      delivery.companyId,
+      delivery.departmentId,
+      delivery.fulfillmentType,
+    );
     return this.withSaleRef(delivery);
   }
 
@@ -375,7 +386,12 @@ export class DeliveriesService {
     if (delivery.sale.status !== 'COMPLETED') {
       throw new BadRequestException('Cette vente n’est plus livrable');
     }
-    this.assertCanAccess(user, delivery.companyId, delivery.departmentId);
+    this.assertCanAccess(
+      user,
+      delivery.companyId,
+      delivery.departmentId,
+      delivery.fulfillmentType,
+    );
     await this.assertCanManageFulfillment(user, delivery.fulfillmentType);
 
     const isHome = delivery.fulfillmentType === FulfillmentType.HOME;
@@ -494,7 +510,12 @@ export class DeliveriesService {
     if (delivery.sale.status !== 'COMPLETED') {
       throw new BadRequestException('Cette vente n’est plus livrable');
     }
-    this.assertCanAccess(user, delivery.companyId, delivery.departmentId);
+    this.assertCanAccess(
+      user,
+      delivery.companyId,
+      delivery.departmentId,
+      delivery.fulfillmentType,
+    );
     await this.assertCanManageFulfillment(user, delivery.fulfillmentType);
 
     const isHome = delivery.fulfillmentType === FulfillmentType.HOME;
@@ -698,6 +719,7 @@ export class DeliveriesService {
             departmentId: true,
             trackStock: true,
             isService: true,
+            nature: true,
           },
         },
       },
@@ -717,6 +739,37 @@ export class DeliveriesService {
       throw new BadRequestException(
         'Choisissez le département depuis lequel la livraison à domicile est faite.',
       );
+    }
+
+    const stockDeptId = remapDept ?? product.departmentId;
+    if (stockDeptId != null) {
+      const stockDept = await tx.department.findUnique({
+        where: { id: stockDeptId },
+        select: { kind: true },
+      });
+      if (isProductionDepartment(stockDept?.kind) && product.nature !== 'RAW_MATERIAL') {
+        const session = await this.productionSessions.requireOpenSessionTx(tx, stockDeptId);
+        const delivery = await tx.delivery.findUnique({
+          where: { saleId: opts.saleId },
+          select: { id: true },
+        });
+        const flowProductId =
+          remapDept != null
+            ? await this.resolveProductInDepartment(tx, product, remapDept)
+            : product.id;
+        if (baseDelta > 0) {
+          await this.productionSessions.recordFlowTx(tx, {
+            departmentId: stockDeptId,
+            productId: flowProductId,
+            kind: ProductionFlowKind.FLOW_CLIENT,
+            quantity: baseDelta,
+            userId: opts.userId,
+            productionSessionId: session.id,
+            deliveryId: delivery?.id ?? null,
+          });
+        }
+        return;
+      }
     }
 
     const stockProductId =
@@ -838,12 +891,12 @@ export class DeliveriesService {
   ): Promise<number> {
     const dept = await this.prisma.department.findFirst({
       where: { id: departmentId, companyId, deletedAt: null },
-      select: { id: true, name: true, offersHomeDelivery: true },
+      select: { id: true, name: true, kind: true, offersHomeDelivery: true },
     });
     if (!dept) {
       throw new BadRequestException('Département introuvable');
     }
-    if (!dept.offersHomeDelivery) {
+    if (!dept.offersHomeDelivery && !isProductionDepartment(dept.kind)) {
       throw new BadRequestException(
         `Le département « ${dept.name} » n’est pas configuré pour les livraisons à domicile.`,
       );
@@ -947,12 +1000,16 @@ export class DeliveriesService {
     user: ScopeUser,
     companyId: number,
     departmentId: number | null,
+    fulfillmentType?: FulfillmentType | string | null,
   ) {
     const role = user.role ?? '';
     if (role === 'ADMIN') return;
 
     if (user.companyId != null && user.companyId !== companyId) {
       throw new ForbiddenException('Accès refusé');
+    }
+    if (fulfillmentType === FulfillmentType.HOME || fulfillmentType === 'HOME') {
+      return;
     }
     if (!canAccessAssignedDepartment(user, departmentId)) {
       throw new ForbiddenException('Accès refusé');

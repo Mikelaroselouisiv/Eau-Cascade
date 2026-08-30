@@ -44,8 +44,8 @@ function AppMenuPanel() {
   const appVersion = getInstalledAppVersion();
 
   const items = useMemo(
-    () => filterMenuItems(MENU_ITEMS, { can, canPerm }),
-    [can, canPerm],
+    () => filterMenuItems(MENU_ITEMS, { can, canPerm, role: user?.role }),
+    [can, canPerm, user?.role],
   );
 
   function go(href: string) {
