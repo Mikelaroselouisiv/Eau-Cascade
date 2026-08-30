@@ -586,6 +586,7 @@ export async function listSales(params: {
   createdFrom?: string;
   createdTo?: string;
   departmentId?: number;
+  departmentIds?: number[];
 }) {
   const { data } = await api.get<{ items: Sale[]; total: number }>('/sales', {
     params: {
@@ -595,6 +596,7 @@ export async function listSales(params: {
       createdFrom: params.createdFrom,
       createdTo: params.createdTo,
       departmentId: params.departmentId,
+      departmentIds: params.departmentIds?.length ? params.departmentIds.join(',') : undefined,
     },
   });
   return data;
@@ -1633,6 +1635,7 @@ export async function getDashboardSalesByProduct(params: {
   dateFrom?: string;
   dateTo?: string;
   departmentId?: number;
+  departmentIds?: number[];
 }) {
   const companyParams = params.companyIds?.length
     ? { companyIds: params.companyIds.join(',') }
@@ -1650,6 +1653,7 @@ export async function getDashboardSalesByProduct(params: {
       ...(params.departmentId != null && params.departmentId > 0
         ? { departmentId: params.departmentId }
         : {}),
+      ...(params.departmentIds?.length ? { departmentIds: params.departmentIds.join(',') } : {}),
     },
   });
   return data;
@@ -1660,6 +1664,7 @@ export async function exportDashboardSalesByProductPdf(params: {
   dateFrom: string;
   dateTo: string;
   departmentId?: number;
+  departmentIds?: number[];
 }): Promise<Blob> {
   const { data } = await api.get<Blob>('/reports/dashboard-sales-by-product/export/pdf', {
     params: {
@@ -1667,6 +1672,7 @@ export async function exportDashboardSalesByProductPdf(params: {
       dateFrom: params.dateFrom,
       dateTo: params.dateTo,
       departmentId: params.departmentId,
+      departmentIds: params.departmentIds?.length ? params.departmentIds.join(',') : undefined,
     },
     responseType: 'blob',
   });

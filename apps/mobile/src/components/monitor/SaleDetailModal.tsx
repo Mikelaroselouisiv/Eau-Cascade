@@ -9,7 +9,7 @@ import type { Sale } from '@/types/api';
 import { formatDateTime } from '@/utils/datetime';
 import { paymentMethodLabel } from '@/utils/paymentLabels';
 import { formatQuantity } from '@/utils/quantity';
-import { saleDisplayRef } from '@/utils/saleRef';
+import { isSaleDeleted, saleDisplayRef } from '@/utils/saleRef';
 
 type Props = {
   sale: Sale | null;
@@ -42,7 +42,8 @@ export function SaleDetailModal({
   onDelete,
   onClose,
 }: Props) {
-  const completed = sale?.status === 'COMPLETED';
+  const deleted = sale != null && isSaleDeleted(sale);
+  const completed = sale?.status === 'COMPLETED' && !deleted;
 
   return (
     <ModalShell
@@ -57,7 +58,11 @@ export function SaleDetailModal({
                 label="Caissier"
                 value={sale.user?.fullName?.trim() || sale.cashier || sale.user?.phone || '—'}
               />
-              <InfoLine label="Statut" value={STATUS_LABEL[sale.status]} />
+              <InfoLine
+                label="Statut"
+                value={deleted ? 'Supprimée' : STATUS_LABEL[sale.status]}
+                danger={deleted}
+              />
             </View>
 
             <Text style={styles.sectionTitle}>Articles</Text>
@@ -114,7 +119,7 @@ export function SaleDetailModal({
                 </Pressable>
               </View>
             ) : null}
-            {canDelete ? (
+            {canDelete && !deleted ? (
               <Pressable
                 disabled={busy}
                 style={[styles.deleteButton, busy && styles.disabled]}
@@ -132,7 +137,7 @@ export function SaleDetailModal({
       <View style={styles.header}>
         <View style={styles.headerInfo}>
           <Text style={styles.eyebrow}>TRANSACTION DE VENTE</Text>
-          <Text style={styles.title}>
+          <Text style={[styles.title, deleted && styles.titleDeleted]}>
             Vente #{sale ? saleDisplayRef(sale) : ''}
           </Text>
           <Text style={styles.date}>{formatDateTime(sale?.createdAt)}</Text>
@@ -145,11 +150,19 @@ export function SaleDetailModal({
   );
 }
 
-function InfoLine({ label, value }: { label: string; value: string }) {
+function InfoLine({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: string;
+  danger?: boolean;
+}) {
   return (
     <View style={styles.infoLine}>
       <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue} numberOfLines={2}>
+      <Text style={[styles.infoValue, danger && styles.infoValueDeleted]} numberOfLines={2}>
         {value}
       </Text>
     </View>
@@ -168,6 +181,7 @@ const styles = StyleSheet.create({
   headerInfo: { flex: 1 },
   eyebrow: { color: BrandColors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 0.7 },
   title: { color: BrandColors.text, fontSize: 20, fontWeight: '800', marginTop: 2 },
+  titleDeleted: { color: BrandColors.danger, textDecorationLine: 'line-through' },
   date: { color: BrandColors.textMuted, fontSize: 11, marginTop: 2 },
   body: { padding: Spacing.three, gap: Spacing.two },
   identityCard: {
@@ -181,6 +195,7 @@ const styles = StyleSheet.create({
   infoLine: { flexDirection: 'row', gap: Spacing.three, justifyContent: 'space-between' },
   infoLabel: { color: BrandColors.textMuted, fontSize: 12 },
   infoValue: { flex: 1, color: BrandColors.text, fontSize: 12, fontWeight: '700', textAlign: 'right' },
+  infoValueDeleted: { color: BrandColors.danger, textDecorationLine: 'line-through' },
   sectionTitle: { color: BrandColors.text, fontSize: 15, fontWeight: '800', marginTop: Spacing.two },
   itemRow: {
     flexDirection: 'row',

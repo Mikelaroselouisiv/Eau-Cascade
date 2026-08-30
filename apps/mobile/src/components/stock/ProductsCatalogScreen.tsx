@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator,
@@ -432,7 +432,7 @@ export function ProductsCatalogScreen() {
         body={
           <ScrollView contentContainerStyle={styles.modalBody} keyboardShouldPersistTaps="handled">
             <Text style={styles.fieldLabel}>Entreprise</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+            <ChipRow>
               {companies.map((c) => (
                 <Chip
                   key={c.id}
@@ -441,9 +441,9 @@ export function ProductsCatalogScreen() {
                   onPress={() => setCreateCompanyId(c.id)}
                 />
               ))}
-            </ScrollView>
+            </ChipRow>
             <Text style={styles.fieldLabel}>Département</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+            <ChipRow>
               {createDepts.map((d) => (
                 <Chip
                   key={d.id}
@@ -452,9 +452,9 @@ export function ProductsCatalogScreen() {
                   onPress={() => setCreateDeptId(d.id)}
                 />
               ))}
-            </ScrollView>
+            </ChipRow>
             <Text style={styles.fieldLabel}>Conditionnement</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+            <ChipRow>
               {packaging.map((u) => (
                 <Chip
                   key={u.id}
@@ -463,9 +463,9 @@ export function ProductsCatalogScreen() {
                   onPress={() => setPackId(u.id)}
                 />
               ))}
-            </ScrollView>
+            </ChipRow>
             <Text style={styles.fieldLabel}>Type</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+            <ChipRow>
               <Chip
                 label="Produit fini"
                 active={createNature === 'FINISHED_GOOD'}
@@ -476,9 +476,9 @@ export function ProductsCatalogScreen() {
                 active={createNature === 'RAW_MATERIAL'}
                 onPress={() => setCreateNature('RAW_MATERIAL')}
               />
-            </ScrollView>
+            </ChipRow>
             <Text style={styles.fieldLabel}>Famille de produits</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+            <ChipRow>
               <Chip
                 label="Aucune"
                 active={createFamilyId === ''}
@@ -492,7 +492,7 @@ export function ProductsCatalogScreen() {
                   onPress={() => setCreateFamilyId(family.id)}
                 />
               ))}
-            </ScrollView>
+            </ChipRow>
             <TextInput
               style={styles.input}
               placeholder="Nom"
@@ -567,7 +567,7 @@ export function ProductsCatalogScreen() {
               onChangeText={setEditPrice}
             />
             <Text style={styles.fieldLabel}>Type</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+            <ChipRow>
               <Chip
                 label="Produit fini"
                 active={editNature === 'FINISHED_GOOD'}
@@ -578,9 +578,9 @@ export function ProductsCatalogScreen() {
                 active={editNature === 'RAW_MATERIAL'}
                 onPress={() => setEditNature('RAW_MATERIAL')}
               />
-            </ScrollView>
+            </ChipRow>
             <Text style={styles.fieldLabel}>Famille de produits</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+            <ChipRow>
               <Chip
                 label="Aucune"
                 active={editFamilyId === ''}
@@ -594,7 +594,7 @@ export function ProductsCatalogScreen() {
                   onPress={() => setEditFamilyId(family.id)}
                 />
               ))}
-            </ScrollView>
+            </ChipRow>
             <Text style={styles.fieldLabel}>Couleur caisse</Text>
             <View style={styles.colorRow}>
               {COLOR_PRESETS.map((c) => (
@@ -641,7 +641,15 @@ export function ProductsCatalogScreen() {
   );
 }
 
-function Chip({
+function ChipRow({ children }: { children: ReactNode }) {
+  return (
+    <View style={styles.chipRow}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRowInner}>
+        {children}
+      </ScrollView>
+    </View>
+  );
+}
   label,
   active,
   onPress,
@@ -736,9 +744,11 @@ const styles = StyleSheet.create({
   },
   modalTopTitle: { fontSize: 18, fontWeight: '700', color: BrandColors.text },
   modalClose: { color: BrandColors.primary, fontWeight: '600' },
-  modalBody: { paddingHorizontal: Spacing.three, paddingBottom: Spacing.four, gap: Spacing.two },
+  modalBody: { paddingHorizontal: Spacing.three, paddingBottom: Spacing.four, gap: Spacing.three },
   footer: { padding: Spacing.three, backgroundColor: BrandColors.bg },
-  fieldLabel: { fontWeight: '600', color: BrandColors.textMuted, fontSize: 13 },
+  fieldLabel: { fontWeight: '600', color: BrandColors.textMuted, fontSize: 13, marginTop: 4 },
+  chipRow: { minHeight: 44 },
+  chipRowInner: { alignItems: 'center', paddingVertical: 2, gap: 8 },
   colorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   colorDot: { width: 32, height: 32, borderRadius: 16 },
   colorDotActive: { borderWidth: 3, borderColor: BrandColors.text },

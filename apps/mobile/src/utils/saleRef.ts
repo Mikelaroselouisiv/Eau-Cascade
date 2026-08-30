@@ -5,3 +5,7 @@ export function saleDisplayRef(sale: {
 }): number {
   return sale.txnNumber ?? sale.id;
 }
+
+export function isSaleDeleted(sale: { deletedAt?: string | Date | null }): boolean {
+  return sale.deletedAt != null && String(sale.deletedAt).length > 0;
+}

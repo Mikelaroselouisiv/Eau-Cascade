@@ -10,6 +10,7 @@ import { useAuth } from '@/context/AuthContext';
 import { getDashboardSummary, getInventoryAlerts, listSales } from '@/services/api';
 import type { DashboardSummaryReport, Product, Sale } from '@/types/api';
 import { formatDateTime } from '@/utils/datetime';
+import { isSaleDeleted } from '@/utils/saleRef';
 
 function isForbidden(e: unknown): boolean {
   return (
@@ -98,11 +99,20 @@ export default function DashboardScreen() {
               ) : (
                 recentSales.map((sale) => (
                   <ThemedView key={sale.id} type="backgroundElement" style={styles.row}>
-                    <ThemedText>#{sale.id}</ThemedText>
-                    <ThemedText themeColor="textSecondary" type="small">
+                    <ThemedText style={isSaleDeleted(sale) ? styles.deletedText : undefined}>
+                      #{sale.id}
+                    </ThemedText>
+                    <ThemedText
+                      themeColor="textSecondary"
+                      type="small"
+                      style={isSaleDeleted(sale) ? styles.deletedText : undefined}>
                       {formatDateTime(sale.createdAt)}
                     </ThemedText>
-                    <ThemedText type="smallBold">{Number(sale.total).toFixed(2)}</ThemedText>
+                    <ThemedText
+                      type="smallBold"
+                      style={isSaleDeleted(sale) ? styles.deletedText : undefined}>
+                      {Number(sale.total).toFixed(2)}
+                    </ThemedText>
                   </ThemedView>
                 ))
               )}
@@ -149,5 +159,9 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
     borderRadius: Spacing.two,
     marginBottom: Spacing.one,
+  },
+  deletedText: {
+    color: '#DC2626',
+    textDecorationLine: 'line-through',
   },
 });

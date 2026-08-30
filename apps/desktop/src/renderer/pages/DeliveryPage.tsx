@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
 import {
   getCompanies,
   getCompanyById,
@@ -10,53 +9,22 @@ import {
   listInternalTransfers,
   confirmInternalTransfer,
   rejectInternalTransfer,
-  addDeliveryDrop,
-  updateDelivery,
 } from '../services/api';
 import type { CompanyListItem, Delivery, Department, InternalTransferRow } from '../types/api';
 import { useAuth } from '../context/AuthContext';
-import { formatMoney } from '../utils/currency';
-import { formatQuantity } from '../utils/formatQuantity';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { buildReceiptPayloadFromSale } from '../utils/receiptPayload';
 import { buildSaleDetailPrintHtml, openBrowserPrintWindow } from '../utils/saleReceiptBrowserHtml';
-import { formatDateTimeShort } from '../utils/datetime';
 import { saleTxnNumber } from '../utils/saleTxnNumber';
 import {
   departmentsForUser,
   isAdminRole,
 } from '../utils/user-scope';
+import { DeliveryFicheCard } from '../components/DeliveryFicheCard';
+import { DeliveryFicheModal } from '../components/DeliveryFicheModal';
+import { isHomeDelivery } from '../components/deliveryFiche';
 
 const PAGE_SIZE = 100;
-
-const STATUS_LABEL: Record<Delivery['status'], string> = {
-  PENDING: 'Non livré',
-  PARTIAL: 'Partiel',
-  DELIVERED: 'Livré',
-};
-
-function statusClass(status: Delivery['status']) {
-  if (status === 'DELIVERED') return 'delivery-card--done';
-  if (status === 'PARTIAL') return 'delivery-card--partial';
-  return 'delivery-card--pending';
-}
-
-function formatWhen(iso: string) {
-  return formatDateTimeShort(iso);
-}
-
-function isHomeDelivery(d: Delivery) {
-  return d.fulfillmentType === 'HOME' || d.sale?.fulfillmentType === 'HOME';
-}
-
-function apiErrorMessage(err: unknown, fallback: string) {
-  if (axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object') {
-    const m = (err.response.data as { message?: unknown }).message;
-    if (Array.isArray(m)) return m.join(', ');
-    if (typeof m === 'string' && m.trim()) return m;
-  }
-  return fallback;
-}
 
 export function DeliveryPage() {
   const { user, canPerm } = useAuth();
@@ -82,12 +50,6 @@ export function DeliveryPage() {
   const [rows, setRows] = useState<Delivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Delivery | null>(null);
-  const [dropSaleItemId, setDropSaleItemId] = useState<number | ''>('');
-  const [dropQty, setDropQty] = useState('');
-  const [dropDeptId, setDropDeptId] = useState<number | ''>('');
-  const [dropExecutor, setDropExecutor] = useState('');
-  const [dropStopId, setDropStopId] = useState<number | ''>('');
-  const [saving, setSaving] = useState(false);
   const [printingId, setPrintingId] = useState<number | null>(null);
   const [message, setMessage] = useAutoClearMessage();
   const [scopeLabel, setScopeLabel] = useState('');
@@ -213,117 +175,13 @@ export function DeliveryPage() {
     return { pending, partial, done };
   }, [rows]);
 
-  function applyDeliveryToForm(d: Delivery) {
-    const remainingItem = (d.items ?? []).find(
-      (it) => Number(it.quantityRemaining ?? Number(it.quantityOrdered) - Number(it.quantityDelivered)) > 0.0001,
-    );
-    setDropSaleItemId(remainingItem?.saleItemId ?? d.items?.[0]?.saleItemId ?? '');
-    setDropQty(
-      remainingItem
-        ? String(Number(remainingItem.quantityRemaining ?? Number(remainingItem.quantityOrdered) - Number(remainingItem.quantityDelivered)))
-        : '',
-    );
-    const depts = isHomeDelivery(d)
-      ? departments.filter((x) => x.offersHomeDelivery)
-      : departments;
-    setDropDeptId(d.departmentId ?? depts[0]?.id ?? '');
-    setDropExecutor(d.executorName?.trim() ?? '');
-    const stops = d.sale?.deliveryStops ?? [];
-    const remainingStop = stops.find((s) => Number(s.quantityRemaining ?? s.quantity) > 0.0001);
-    setDropStopId(remainingStop?.id ?? stops[0]?.id ?? '');
-  }
-
   function openCard(d: Delivery) {
     setSelected(d);
-    applyDeliveryToForm(d);
   }
 
   function canManageDelivery(d: Delivery) {
     if (canManageAll) return true;
     return isHomeDelivery(d) ? canManageHome : canManageOnsite;
-  }
-
-  const dropDepartments = useMemo(() => {
-    if (!selected) return departments;
-    return isHomeDelivery(selected)
-      ? departments.filter((d) => d.offersHomeDelivery)
-      : departments;
-  }, [selected, departments]);
-
-  async function addLine() {
-    if (!selected || !canManageDelivery(selected)) return;
-    if (dropSaleItemId === '') {
-      setMessage('Choisissez un article');
-      return;
-    }
-    const qty = Number(String(dropQty).replace(',', '.'));
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setMessage('Quantité invalide');
-      return;
-    }
-    if (dropDeptId === '') {
-      setMessage('Choisissez le département');
-      return;
-    }
-    if (isHomeDelivery(selected) && !dropExecutor.trim()) {
-      setMessage('Indiquez le livreur');
-      return;
-    }
-    setSaving(true);
-    try {
-      const updated = await addDeliveryDrop(selected.id, {
-        saleItemId: dropSaleItemId,
-        quantity: qty,
-        departmentId: dropDeptId,
-        ...(isHomeDelivery(selected)
-          ? {
-              executorName: dropExecutor.trim(),
-              stopId: dropStopId === '' ? null : dropStopId,
-            }
-          : { executorName: dropExecutor.trim() || null }),
-      });
-      setSelected(updated);
-      applyDeliveryToForm(updated);
-      setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
-      setMessage('Ligne enregistrée');
-    } catch (err) {
-      setMessage(apiErrorMessage(err, 'Échec de la mise à jour'));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function markAllDelivered() {
-    if (!selected || !canManageDelivery(selected)) return;
-    if (dropDeptId === '') {
-      setMessage('Choisissez le département');
-      return;
-    }
-    if (isHomeDelivery(selected) && !dropExecutor.trim()) {
-      setMessage('Indiquez le livreur');
-      return;
-    }
-    setSaving(true);
-    try {
-      const updated = await updateDelivery(selected.id, {
-        markDelivered: true,
-        stockDepartmentId: dropDeptId,
-        ...(isHomeDelivery(selected)
-          ? {
-              executorName: dropExecutor.trim(),
-              stopId: dropStopId === '' ? undefined : dropStopId,
-            }
-          : {}),
-      });
-      setSelected(updated);
-      applyDeliveryToForm(updated);
-      setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
-      setMessage('Livré');
-    } catch (err) {
-      setMessage(apiErrorMessage(err, 'Échec de la mise à jour'));
-    } finally {
-      setSaving(false);
-    }
   }
 
   async function reprintSaleSlip(delivery: Delivery) {
@@ -529,271 +387,33 @@ export function DeliveryPage() {
         <p className="delivery-empty">Aucune fiche</p>
       ) : (
         <div className="delivery-grid">
-          {rows.map((d) => {
-            const busyPrint = printingId === d.id;
-            return (
-              <article key={d.id} className={`delivery-card ${statusClass(d.status)}`}>
-                <button
-                  type="button"
-                  className="delivery-card-body"
-                  onClick={() => openCard(d)}
-                >
-                  <div className="delivery-card-top">
-                    <span className="delivery-card-ref">
-                      Vente #{d.saleRef ?? (d.sale ? saleTxnNumber(d.sale) : d.saleId)}
-                    </span>
-                    <span className="delivery-card-badge">{STATUS_LABEL[d.status]}</span>
-                  </div>
-                  <div className="delivery-card-client">
-                    {d.sale?.clientName?.trim() || 'Client'}
-                    {isHomeDelivery(d) ? (
-                      <span className="delivery-card-home"> · À domicile</span>
-                    ) : null}
-                  </div>
-                  {isHomeDelivery(d) && d.sale?.clientPhone?.trim() ? (
-                    <div className="delivery-card-meta">{d.sale.clientPhone.trim()}</div>
-                  ) : null}
-                  <div className="delivery-card-meta">
-                    {d.company?.name}
-                    {isHomeDelivery(d)
-                      ? d.department?.name
-                        ? ` · Livré depuis ${d.department.name}`
-                        : ''
-                      : d.department?.name
-                        ? ` · ${d.department.name}`
-                        : ''}
-                  </div>
-                  <div className="delivery-card-foot">
-                    <span>{formatWhen(d.sale?.createdAt ?? d.createdAt)}</span>
-                    <span className="delivery-card-total">{formatMoney(d.sale?.total)}</span>
-                  </div>
-                  {isHomeDelivery(d) && d.executorName?.trim() ? (
-                    <div className="delivery-card-executor">Par {d.executorName.trim()}</div>
-                  ) : null}
-                </button>
-                {canPrintFiche ? (
-                  <button
-                    type="button"
-                    className="btn btn-secondary delivery-card-print"
-                    disabled={busyPrint || printingId != null}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void reprintSaleSlip(d);
-                    }}
-                  >
-                    {busyPrint ? 'Impression…' : 'Imprimer'}
-                  </button>
-                ) : null}
-              </article>
-            );
-          })}
+          {rows.map((d) => (
+            <DeliveryFicheCard
+              key={d.id}
+              delivery={d}
+              canPrint={canPrintFiche}
+              printing={printingId === d.id}
+              printBusy={printingId != null}
+              onOpen={openCard}
+              onPrint={(row) => void reprintSaleSlip(row)}
+            />
+          ))}
         </div>
       )}
 
       {selected ? (
-        <div className="modal-backdrop" onClick={() => setSelected(null)}>
-          <div className="modal card delivery-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="delivery-modal-head">
-              <div>
-                <div className="delivery-modal-ref">
-                  Vente #
-                  {selected.saleRef ??
-                    (selected.sale ? saleTxnNumber(selected.sale) : selected.saleId)}
-                </div>
-                <div className="delivery-modal-client">
-                  {selected.sale?.clientName?.trim() || 'Client'}
-                  {isHomeDelivery(selected) ? ' · À domicile' : ' · Sur place'}
-                </div>
-              </div>
-              <span className={`delivery-card-badge ${statusClass(selected.status)}`}>
-                {STATUS_LABEL[selected.status]}
-              </span>
-            </div>
-
-            <div className="delivery-modal-meta">
-              <span>{selected.company?.name}</span>
-              {isHomeDelivery(selected)
-                ? selected.department?.name
-                  ? <span>Livré depuis {selected.department.name}</span>
-                  : null
-                : selected.department?.name
-                  ? <span>{selected.department.name}</span>
-                  : null}
-              <span>{formatMoney(selected.sale?.total)}</span>
-            </div>
-            {isHomeDelivery(selected) ? (
-              <div className="delivery-modal-contact">
-                {selected.sale?.clientPhone?.trim() ? (
-                  <div>Tél. {selected.sale.clientPhone.trim()}</div>
-                ) : null}
-                {(selected.sale?.deliveryStops?.length
-                  ? selected.sale.deliveryStops
-                  : selected.sale?.clientAddress?.trim()
-                    ? [{ id: 0, address: selected.sale.clientAddress.trim(), quantity: 0 }]
-                    : []
-                ).map((st) => (
-                  <div key={st.id || st.address}>
-                    {st.address}
-                    {Number(st.quantity) > 0
-                      ? ` · ${formatQuantity(Number(st.quantityDelivered ?? 0))} / ${formatQuantity(Number(st.quantity))}`
-                      : ''}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            <ul className="delivery-lines">
-              {(selected.items ?? []).map((it) => {
-                const ordered = Number(it.quantityOrdered);
-                const delivered = Number(it.quantityDelivered);
-                const remaining = Number(
-                  it.quantityRemaining ?? Math.max(0, ordered - delivered),
-                );
-                const label = it.saleItem?.lineLabel || it.saleItem?.product?.name || 'Article';
-                return (
-                  <li key={it.id} className="delivery-line">
-                    <div className="delivery-line-label">
-                      <span>{label}</span>
-                      <span className="delivery-muted">
-                        Livré {formatQuantity(delivered)} · Reste {formatQuantity(remaining)} · Commandé {formatQuantity(ordered)}
-                      </span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {(selected.drops ?? []).length ? (
-              <ul className="delivery-drops">
-                {(selected.drops ?? []).map((drop) => {
-                  const item = (selected.items ?? []).find((it) => it.saleItemId === drop.saleItemId);
-                  const label = item?.saleItem?.lineLabel || item?.saleItem?.product?.name || 'Article';
-                  return (
-                    <li key={drop.id} className="delivery-drop">
-                      {formatQuantity(Number(drop.quantity))} {label}
-                      {drop.department?.name ? ` · ${drop.department.name}` : ''}
-                      {drop.executorName?.trim() ? ` · ${drop.executorName.trim()}` : ''}
-                      {drop.stop?.address ? ` · ${drop.stop.address}` : ''}
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-
-            {canManageDelivery(selected) && selected.status !== 'DELIVERED' ? (
-              <div className="delivery-add-line">
-                <label>
-                  Article
-                  <select
-                    value={dropSaleItemId === '' ? '' : String(dropSaleItemId)}
-                    onChange={(e) => setDropSaleItemId(e.target.value ? Number(e.target.value) : '')}
-                    disabled={saving}
-                  >
-                    {(selected.items ?? []).map((it) => {
-                      const remaining = Number(
-                        it.quantityRemaining ??
-                          Math.max(0, Number(it.quantityOrdered) - Number(it.quantityDelivered)),
-                      );
-                      const label = it.saleItem?.lineLabel || it.saleItem?.product?.name || 'Article';
-                      return (
-                        <option key={it.id} value={it.saleItemId} disabled={remaining <= 0.0001}>
-                          {label} ({formatQuantity(remaining)})
-                        </option>
-                      );
-                    })}
-                  </select>
-                </label>
-                <label>
-                  Quantité livrée
-                  <input
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={dropQty}
-                    onChange={(e) => setDropQty(e.target.value)}
-                    disabled={saving}
-                  />
-                </label>
-                <label>
-                  Département
-                  <select
-                    value={dropDeptId === '' ? '' : String(dropDeptId)}
-                    onChange={(e) => setDropDeptId(e.target.value ? Number(e.target.value) : '')}
-                    disabled={saving}
-                  >
-                    <option value="">—</option>
-                    {dropDepartments.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Livreur
-                  <input
-                    type="text"
-                    value={dropExecutor}
-                    maxLength={120}
-                    onChange={(e) => setDropExecutor(e.target.value)}
-                    disabled={saving}
-                  />
-                </label>
-                {isHomeDelivery(selected) && (selected.sale?.deliveryStops?.length ?? 0) > 0 ? (
-                  <label>
-                    Adresse
-                    <select
-                      value={dropStopId === '' ? '' : String(dropStopId)}
-                      onChange={(e) => setDropStopId(e.target.value ? Number(e.target.value) : '')}
-                      disabled={saving}
-                    >
-                      {(selected.sale?.deliveryStops ?? []).map((st) => (
-                        <option key={st.id} value={st.id}>
-                          {st.address} ({formatQuantity(Number(st.quantityRemaining ?? st.quantity))})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-              </div>
-            ) : null}
-
-            <div className="modal-actions delivery-modal-actions">
-              <button type="button" className="btn btn-ghost" onClick={() => setSelected(null)}>
-                Fermer
-              </button>
-              {canPrintFiche ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={printingId != null || saving}
-                  onClick={() => void reprintSaleSlip(selected)}
-                >
-                  {printingId === selected.id ? 'Impression…' : 'Réimprimer fiche'}
-                </button>
-              ) : null}
-              {canManageDelivery(selected) && selected.status !== 'DELIVERED' ? (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    disabled={saving || printingId != null}
-                    onClick={() => void addLine()}
-                  >
-                    Ajouter
-                  </button>
-                  <button
-                    type="button"
-                    disabled={saving || printingId != null}
-                    onClick={() => void markAllDelivered()}
-                  >
-                    Tout livrer
-                  </button>
-                </>
-              ) : null}
-            </div>
-          </div>
-        </div>
+        <DeliveryFicheModal
+          delivery={selected}
+          departments={departments}
+          canManage={canManageDelivery(selected)}
+          canPrint={canPrintFiche}
+          onClose={() => setSelected(null)}
+          onUpdated={(d) => {
+            setSelected(d);
+            setRows((prev) => prev.map((r) => (r.id === d.id ? d : r)));
+          }}
+          onMessage={setMessage}
+        />
       ) : null}
     </div>
   );

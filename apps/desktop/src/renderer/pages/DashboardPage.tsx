@@ -39,9 +39,10 @@ import type {
   StockMovementRow,
 } from '../types/api';
 import { formatQuantity } from '../utils/formatQuantity';
-import { saleTxnNumber } from '../utils/saleTxnNumber';
+import { isSaleDeleted, saleTxnNumber } from '../utils/saleTxnNumber';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
 import { useAuth } from '../context/AuthContext';
+import { salesQueryDepartmentParams } from '../utils/user-scope';
 import { AuditJournalPanel } from '../components/AuditJournalPanel';
 import { DashboardBanksTab } from '../components/DashboardBanksTab';
 import { DashboardBeneficesTab } from '../components/DashboardBeneficesTab';
@@ -68,7 +69,8 @@ import { buildDisbursementOrderPayload } from '../utils/disbursementOrderPayload
 export function DashboardPage() {
   type TabId = 'synthese' | 'ventes' | 'achats' | 'stock' | 'banque' | 'benefices';
 
-  const { can, canPerm } = useAuth();
+  const { can, canPerm, user } = useAuth();
+  const salesDeptParams = useMemo(() => salesQueryDepartmentParams(user), [user]);
   const isAdmin = can(['ADMIN']);
   const canAccessDashboard = canPerm('dashboard.view');
   const canManageFinance = canPerm('finance.write');
@@ -472,13 +474,14 @@ export function DashboardPage() {
       companyId: Number(companyId),
       dateFrom: from,
       dateTo: to,
+      ...salesDeptParams,
     })
       .then(setSalesByProductRows)
       .catch(() =>
         setMsg('Impossible de charger le détail des ventes par produit.', { persist: true }),
       )
       .finally(() => setSalesByProductLoading(false));
-  }, [companyId, ventesDateFrom, ventesDateTo, tab, canAccessDashboard, canSeeSalesTotals, setMsg]);
+  }, [companyId, ventesDateFrom, ventesDateTo, tab, canAccessDashboard, canSeeSalesTotals, setMsg, salesDeptParams]);
 
   useEffect(() => {
     if (!canAccessDashboard || companyId === '' || tab !== 'ventes') return;
@@ -498,6 +501,7 @@ export function DashboardPage() {
       skip: 0,
       take: salesTake,
       ...salesListQuery,
+      ...salesDeptParams,
     })
       .then((sal) => {
         setSales(sal.items);
@@ -506,7 +510,7 @@ export function DashboardPage() {
       })
       .catch(() => setMsg('Impossible de charger les transactions de vente.', { persist: true }))
       .finally(() => setSalesLoading(false));
-  }, [companyId, salesListQuery, canAccessDashboard, setMsg, tab]);
+  }, [companyId, salesListQuery, canAccessDashboard, setMsg, tab, salesDeptParams]);
 
   useEffect(() => {
     if (!canViewFinance || companyId === '' || tab !== 'achats') return;
@@ -768,6 +772,7 @@ export function DashboardPage() {
         skip: nextSkip,
         take: salesTake,
         ...salesListQuery,
+        ...salesDeptParams,
       });
       setSales((prev) => [...prev, ...sal.items]);
       setSalesSkip(nextSkip);
@@ -792,6 +797,7 @@ export function DashboardPage() {
         companyId: Number(companyId),
         dateFrom: ventesDateFrom,
         dateTo: ventesDateTo,
+        ...salesDeptParams,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -808,24 +814,20 @@ export function DashboardPage() {
 
   async function confirmDeleteSale(sale: Sale) {
     if (companyId === '') return;
+    if (isSaleDeleted(sale)) return;
     const ok = window.confirm(
-      `Supprimer définitivement la vente n°${saleTxnNumber(sale)} ?\n\n` +
-        `Cette action est irréversible : la vente, les lignes, les paiements et l’écriture de caisse seront effacés de la base. ` +
-        `Si la vente était encore « complétée », le stock livré sera rétabli.`,
+      `Supprimer la vente n°${saleTxnNumber(sale)} ?\n\n` +
+        `Les stocks, paiements et écritures de caisse seront annulés. La ligne restera visible comme supprimée.`,
     );
     if (!ok) return;
     setSaleDeletingId(sale.id);
     setMsg('');
     try {
       await deleteSalePermanently(sale.id, Number(companyId));
-      setSales((prev) => prev.filter((x) => x.id !== sale.id));
-      setSalesTotal((t) => Math.max(0, t - 1));
-      setSaleModal((m) => (m?.id === sale.id ? null : m));
-      if (saleModal?.id === sale.id) {
-        setSaleReceiptCompany(null);
-        setSaleReceiptPrinter(null);
-      }
-      setMsg('Vente supprimée définitivement.');
+      const deletedAt = new Date().toISOString();
+      setSales((prev) => prev.map((x) => (x.id === sale.id ? { ...x, deletedAt } : x)));
+      setSaleModal((m) => (m?.id === sale.id ? { ...m, deletedAt } : m));
+      setMsg('Vente supprimée.');
     } catch {
       setMsg('Impossible de supprimer cette vente.', { persist: true });
     } finally {
@@ -1276,7 +1278,11 @@ export function DashboardPage() {
                         sales.map((s) => (
                           <tr
                             key={s.id}
-                            className="dashboard-sale-row"
+                            className={
+                              isSaleDeleted(s)
+                                ? 'dashboard-sale-row dashboard-sale-row--deleted'
+                                : 'dashboard-sale-row'
+                            }
                             onClick={() => void openSaleDetail(s.id)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' || e.key === ' ') {
@@ -1296,51 +1302,57 @@ export function DashboardPage() {
                               <small>{s.user?.fullName?.trim() || s.cashier || s.user?.phone || '—'}</small>
                             </td>
                             <td>
-                              {s.status === 'COMPLETED'
-                                ? s.creditCustomerId != null
-                                  ? 'Crédit'
-                                  : 'Complétée'
-                                : s.status === 'CANCELLED'
-                                  ? 'Annulée'
-                                  : s.status === 'REFUNDED'
-                                    ? 'Remboursée'
-                                    : s.status}
+                              {isSaleDeleted(s)
+                                ? 'Supprimée'
+                                : s.status === 'COMPLETED'
+                                  ? s.creditCustomerId != null
+                                    ? 'Crédit'
+                                    : 'Complétée'
+                                  : s.status === 'CANCELLED'
+                                    ? 'Annulée'
+                                    : s.status === 'REFUNDED'
+                                      ? 'Remboursée'
+                                      : s.status}
                             </td>
                             {canCancelOrRefund || canDeleteSale ? (
                               <td
                                 onClick={(e) => e.stopPropagation()}
                                 onKeyDown={(e) => e.stopPropagation()}
                               >
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                                  {canCancelOrRefund && s.status === 'COMPLETED' ? (
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      disabled={saleActionBusy}
-                                      aria-label={`Rembourser la vente n°${saleTxnNumber(s)}`}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        void confirmRefundSale(s);
-                                      }}
-                                    >
-                                      Rembourser
-                                    </button>
-                                  ) : null}
-                                  {canDeleteSale ? (
-                                    <button
-                                      type="button"
-                                      className="btn btn-danger btn-sm"
-                                      disabled={saleDeletingId === s.id}
-                                      aria-label={`Supprimer définitivement la vente n°${saleTxnNumber(s)}`}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        void confirmDeleteSale(s);
-                                      }}
-                                    >
-                                      {saleDeletingId === s.id ? '…' : 'Supprimer'}
-                                    </button>
-                                  ) : null}
-                                </div>
+                                {isSaleDeleted(s) ? (
+                                  '—'
+                                ) : (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                                    {canCancelOrRefund && s.status === 'COMPLETED' ? (
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        disabled={saleActionBusy}
+                                        aria-label={`Rembourser la vente n°${saleTxnNumber(s)}`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          void confirmRefundSale(s);
+                                        }}
+                                      >
+                                        Rembourser
+                                      </button>
+                                    ) : null}
+                                    {canDeleteSale ? (
+                                      <button
+                                        type="button"
+                                        className="btn btn-danger btn-sm"
+                                        disabled={saleDeletingId === s.id}
+                                        aria-label={`Supprimer la vente n°${saleTxnNumber(s)}`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          void confirmDeleteSale(s);
+                                        }}
+                                      >
+                                        {saleDeletingId === s.id ? '…' : 'Supprimer'}
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                )}
                               </td>
                             ) : null}
                           </tr>

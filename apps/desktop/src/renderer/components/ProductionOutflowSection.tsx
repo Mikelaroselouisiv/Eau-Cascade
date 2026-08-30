@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import {
-  addDeliveryDrop,
   confirmInternalTransfer,
   createInternalTransfer,
   getDeliveryById,
@@ -9,24 +8,13 @@ import {
   listInternalTransfers,
   rejectInternalTransfer,
 } from '../services/api';
-import type {
-  Delivery,
-  DeliveryItem,
-  Department,
-  InternalTransferRow,
-  Product,
-} from '../types/api';
+import type { Delivery, Department, InternalTransferRow, Product } from '../types/api';
 import { formatQuantity } from '../utils/formatQuantity';
 import { formatDateTimeShort } from '../utils/datetime';
-import { saleTxnNumber } from '../utils/saleTxnNumber';
+import { DeliveryFicheCard } from './DeliveryFicheCard';
+import { DeliveryFicheModal } from './DeliveryFicheModal';
 
 type Dest = 'ON_SITE' | 'HOME' | 'TRANSFER';
-
-const STATUS_LABEL: Record<Delivery['status'], string> = {
-  PENDING: 'Non livré',
-  PARTIAL: 'Partiel',
-  DELIVERED: 'Livré',
-};
 
 function errMsg(err: unknown, fallback: string) {
   if (axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object') {
@@ -37,26 +25,12 @@ function errMsg(err: unknown, fallback: string) {
   return fallback;
 }
 
-function remainingOf(it: DeliveryItem): number {
-  return Number(
-    it.quantityRemaining ?? Math.max(0, Number(it.quantityOrdered) - Number(it.quantityDelivered)),
-  );
-}
-
-function itemLabel(it: DeliveryItem): string {
-  return it.saleItem?.lineLabel || it.saleItem?.product?.name || 'Article';
-}
-
 function belongsToPlant(d: Delivery, plantId: number): boolean {
   if (d.departmentId === plantId) return true;
   const ids = (d.items ?? []).map((it) => it.saleItem?.product?.departmentId);
   if (ids.some((id) => id === plantId)) return true;
   if (d.departmentId == null && ids.every((id) => id == null)) return true;
   return false;
-}
-
-function isHomeDelivery(d: Delivery) {
-  return d.fulfillmentType === 'HOME' || d.sale?.fulfillmentType === 'HOME';
 }
 
 type Props = {
@@ -68,6 +42,7 @@ type Props = {
   canTransfer: boolean;
   canConfirm: boolean;
   canManageDeliveries: boolean;
+  canPrint?: boolean;
   executorDefault: string;
   onRefuseClosed: () => void;
   onMessage: (msg: string) => void;
@@ -82,6 +57,7 @@ export function ProductionOutflowSection({
   canTransfer,
   canConfirm,
   canManageDeliveries,
+  canPrint = false,
   executorDefault,
   onRefuseClosed,
   onMessage,
@@ -89,26 +65,11 @@ export function ProductionOutflowSection({
   const [dest, setDest] = useState<Dest>(canManageDeliveries ? 'ON_SITE' : 'TRANSFER');
   const [fiches, setFiches] = useState<Delivery[]>([]);
   const [selected, setSelected] = useState<Delivery | null>(null);
-  const [dropSaleItemId, setDropSaleItemId] = useState<number | ''>('');
-  const [dropQty, setDropQty] = useState('');
-  const [dropExecutor, setDropExecutor] = useState(executorDefault);
-  const [dropStopId, setDropStopId] = useState<number | ''>('');
   const [toDepartmentId, setToDepartmentId] = useState<number | ''>('');
   const [transferQty, setTransferQty] = useState<Record<number, string>>({});
   const [outgoing, setOutgoing] = useState<InternalTransferRow[]>([]);
   const [inbox, setInbox] = useState<InternalTransferRow[]>([]);
   const [busy, setBusy] = useState(false);
-
-  function applyFiche(d: Delivery) {
-    setSelected(d);
-    const remainingItem = (d.items ?? []).find((it) => remainingOf(it) > 0.0001);
-    setDropSaleItemId(remainingItem?.saleItemId ?? d.items?.[0]?.saleItemId ?? '');
-    setDropQty(remainingItem ? String(remainingOf(remainingItem)) : '');
-    setDropExecutor(d.executorName?.trim() || executorDefault);
-    const stops = d.sale?.deliveryStops ?? [];
-    const remainingStop = stops.find((s) => Number(s.quantityRemaining ?? s.quantity) > 0.0001);
-    setDropStopId(remainingStop?.id ?? stops[0]?.id ?? '');
-  }
 
   useEffect(() => {
     setSelected(null);
@@ -135,9 +96,7 @@ export function ProductionOutflowSection({
       .then((res) => {
         const rows = res.items.filter((d) => d.status !== 'DELIVERED');
         setFiches(
-          dest === 'HOME'
-            ? rows
-            : rows.filter((d) => belongsToPlant(d, departmentId)),
+          dest === 'HOME' ? rows : rows.filter((d) => belongsToPlant(d, departmentId)),
         );
       })
       .catch(() => setFiches([]));
@@ -153,51 +112,12 @@ export function ProductionOutflowSection({
       .catch(() => setInbox([]));
   }, [departmentId, canConfirm]);
 
-  async function addLine() {
-    if (!selected) return;
-    if (!productionEnabled) {
-      onRefuseClosed();
-      return;
-    }
-    if (dropSaleItemId === '') {
-      onMessage('Choisissez un article');
-      return;
-    }
-    const qty = Number(String(dropQty).replace(',', '.'));
-    if (!Number.isFinite(qty) || qty <= 0) {
-      onMessage('Quantité invalide');
-      return;
-    }
-    if (isHomeDelivery(selected) && !dropExecutor.trim()) {
-      onMessage('Indiquez le livreur');
-      return;
-    }
-    setBusy(true);
+  async function openFiche(d: Delivery) {
     try {
-      await addDeliveryDrop(selected.id, {
-        saleItemId: dropSaleItemId,
-        quantity: qty,
-        departmentId,
-        ...(isHomeDelivery(selected)
-          ? {
-              executorName: dropExecutor.trim(),
-              stopId: dropStopId === '' ? undefined : dropStopId,
-            }
-          : {}),
-      });
-      const next = await getDeliveryById(selected.id);
-      onMessage('Livraison enregistrée.');
-      if (next.status === 'DELIVERED') {
-        setSelected(null);
-        setFiches((prev) => prev.filter((d) => d.id !== next.id));
-      } else {
-        applyFiche(next);
-        setFiches((prev) => prev.map((d) => (d.id === next.id ? next : d)));
-      }
+      const full = await getDeliveryById(d.id);
+      setSelected(full);
     } catch (e) {
-      onMessage(errMsg(e, 'Livraison impossible.'));
-    } finally {
-      setBusy(false);
+      onMessage(errMsg(e, 'Impossible d’ouvrir la fiche'));
     }
   }
 
@@ -332,131 +252,19 @@ export function ProductionOutflowSection({
             </table>
           </>
         ) : null}
-
-        {dest !== 'TRANSFER' && canManageDeliveries ? (
-          <>
-            {fiches.length === 0 ? (
-              <p className="muted">Aucune fiche</p>
-            ) : (
-              <ul className="delivery-lines" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {fiches.map((d) => (
-                  <li key={d.id}>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        marginBottom: 4,
-                        fontWeight: selected?.id === d.id ? 700 : 500,
-                      }}
-                      onClick={() => applyFiche(d)}
-                    >
-                      Vente #{d.saleRef ?? (d.sale ? saleTxnNumber(d.sale) : d.saleId)}
-                      {' · '}
-                      {d.sale?.clientName?.trim() || 'Client'}
-                      {' · '}
-                      {STATUS_LABEL[d.status]}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {selected ? (
-              <div style={{ marginTop: 12 }}>
-                <ul className="delivery-line-list" style={{ paddingLeft: 0, listStyle: 'none' }}>
-                  {(selected.items ?? []).map((it) => (
-                    <li key={it.id} className="delivery-line">
-                      <div className="delivery-line-label">
-                        <span>{itemLabel(it)}</span>
-                        <span className="delivery-muted">
-                          Reste {formatQuantity(remainingOf(it))}
-                        </span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                {selected.status !== 'DELIVERED' ? (
-                  <div className="delivery-add-line">
-                    <label>
-                      Article
-                      <select
-                        value={dropSaleItemId === '' ? '' : String(dropSaleItemId)}
-                        onChange={(e) =>
-                          setDropSaleItemId(e.target.value ? Number(e.target.value) : '')
-                        }
-                        disabled={busy || !productionEnabled}
-                      >
-                        {(selected.items ?? []).map((it) => (
-                          <option
-                            key={it.id}
-                            value={it.saleItemId}
-                            disabled={remainingOf(it) <= 0.0001}
-                          >
-                            {itemLabel(it)} ({formatQuantity(remainingOf(it))})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Quantité
-                      <input
-                        type="number"
-                        min={0}
-                        step="any"
-                        value={dropQty}
-                        onChange={(e) => setDropQty(e.target.value)}
-                        disabled={busy || !productionEnabled}
-                      />
-                    </label>
-                    {isHomeDelivery(selected) ? (
-                      <label>
-                        Livreur
-                        <input
-                          type="text"
-                          value={dropExecutor}
-                          maxLength={120}
-                          onChange={(e) => setDropExecutor(e.target.value)}
-                          disabled={busy || !productionEnabled}
-                        />
-                      </label>
-                    ) : null}
-                    {isHomeDelivery(selected) &&
-                    (selected.sale?.deliveryStops?.length ?? 0) > 0 ? (
-                      <label>
-                        Adresse
-                        <select
-                          value={dropStopId === '' ? '' : String(dropStopId)}
-                          onChange={(e) =>
-                            setDropStopId(e.target.value ? Number(e.target.value) : '')
-                          }
-                          disabled={busy || !productionEnabled}
-                        >
-                          {(selected.sale?.deliveryStops ?? []).map((st) => (
-                            <option key={st.id} value={st.id}>
-                              {st.address} (
-                              {formatQuantity(Number(st.quantityRemaining ?? st.quantity))})
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      disabled={busy}
-                      onClick={() => void addLine()}
-                    >
-                      Livrer
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </>
-        ) : null}
       </section>
+
+      {dest !== 'TRANSFER' && canManageDeliveries ? (
+        fiches.length === 0 ? (
+          <p className="delivery-empty">Aucune fiche</p>
+        ) : (
+          <div className="delivery-grid">
+            {fiches.map((d) => (
+              <DeliveryFicheCard key={d.id} delivery={d} onOpen={(row) => void openFiche(row)} />
+            ))}
+          </div>
+        )
+      ) : null}
 
       {canConfirm && inbox.length > 0 ? (
         <section className="card">
@@ -494,6 +302,30 @@ export function ProductionOutflowSection({
             </div>
           ))}
         </section>
+      ) : null}
+
+      {selected ? (
+        <DeliveryFicheModal
+          delivery={selected}
+          departments={scopedDepts}
+          lockDepartmentId={departmentId}
+          canManage={canManageDeliveries}
+          canPrint={canPrint}
+          executeEnabled={productionEnabled}
+          executorDefault={executorDefault}
+          onDisabledAction={onRefuseClosed}
+          onClose={() => setSelected(null)}
+          onUpdated={(d) => {
+            if (d.status === 'DELIVERED') {
+              setFiches((prev) => prev.filter((row) => row.id !== d.id));
+              setSelected(null);
+            } else {
+              setFiches((prev) => prev.map((row) => (row.id === d.id ? d : row)));
+              setSelected(d);
+            }
+          }}
+          onMessage={onMessage}
+        />
       ) : null}
     </>
   );

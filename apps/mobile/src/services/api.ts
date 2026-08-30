@@ -653,6 +653,7 @@ export async function listSales(params: {
   createdFrom?: string;
   createdTo?: string;
   departmentId?: number;
+  departmentIds?: number[];
 }): Promise<PaginatedResult<Sale>> {
   const { data } = await api.get<PaginatedResult<Sale>>('/sales', {
     params: {
@@ -662,6 +663,7 @@ export async function listSales(params: {
       createdFrom: params.createdFrom,
       createdTo: params.createdTo,
       departmentId: params.departmentId,
+      departmentIds: params.departmentIds?.length ? params.departmentIds.join(',') : undefined,
     },
   });
   return data;
@@ -1050,6 +1052,7 @@ export async function getDashboardSalesByProduct(params: {
   dateFrom?: string;
   dateTo?: string;
   departmentId?: number;
+  departmentIds?: number[];
 }): Promise<DashboardSalesByProductRow[]> {
   const base =
     params.dateFrom && params.dateTo
@@ -1063,6 +1066,7 @@ export async function getDashboardSalesByProduct(params: {
         ...(params.departmentId != null && params.departmentId > 0
           ? { departmentId: params.departmentId }
           : {}),
+        ...(params.departmentIds?.length ? { departmentIds: params.departmentIds.join(',') } : {}),
       },
     },
   );

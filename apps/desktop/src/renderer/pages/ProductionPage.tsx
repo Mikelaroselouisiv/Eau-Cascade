@@ -56,6 +56,7 @@ export function ProductionPage() {
   const canTransfer = canPerm('transfers.manage');
   const canConfirm = canPerm('transfers.confirm');
   const canManageDeliveries = canPerm('deliveries.manage');
+  const canPrintFiche = canPerm('deliveries.print');
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -360,6 +361,7 @@ export function ProductionPage() {
           canTransfer={canTransfer}
           canConfirm={canConfirm}
           canManageDeliveries={canManageDeliveries}
+          canPrint={canPrintFiche}
           executorDefault={user?.fullName?.trim() || user?.phone || ''}
           onRefuseClosed={refuseClosedProduction}
           onMessage={setMessage}

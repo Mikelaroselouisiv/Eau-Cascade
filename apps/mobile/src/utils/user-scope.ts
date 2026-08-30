@@ -30,3 +30,15 @@ export function departmentsForUser<T extends { id: number }>(
   const allowed = new Set(ids);
   return depts.filter((d) => allowed.has(d.id));
 }
+
+export function salesQueryDepartmentParams(user: {
+  role?: string | null;
+  departmentId?: number | null;
+  departmentIds?: number[] | null;
+} | null): { departmentId?: number; departmentIds?: number[] } {
+  if (!user || isAdminRole(user.role)) return {};
+  const ids = resolvedDepartmentIds(user);
+  if (!ids.length) return {};
+  if (ids.length === 1) return { departmentId: ids[0] };
+  return { departmentIds: ids };
+}

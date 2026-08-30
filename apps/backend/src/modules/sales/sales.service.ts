@@ -578,6 +578,8 @@ export class SalesService {
     createdAtGte?: Date;
     createdAtLte?: Date;
     departmentId?: number;
+    departmentIds?: number[];
+    includeDeleted?: boolean;
   }) {
     const skip = Math.max(0, Math.floor(opts.skip ?? 0));
     const take = Math.min(100, Math.max(1, Math.floor(opts.take ?? 10)));
@@ -588,11 +590,13 @@ export class SalesService {
       createdAtGte: opts.createdAtGte,
       createdAtLte: opts.createdAtLte,
       departmentId: opts.departmentId,
+      departmentIds: opts.departmentIds,
+      includeDeleted: opts.includeDeleted === true,
     });
   }
 
-  async findOne(id: number) {
-    const sale = await this.salesRepository.findOne(id);
+  async findOne(id: number, opts?: { includeDeleted?: boolean }) {
+    const sale = await this.salesRepository.findOne(id, opts);
     if (!sale) {
       throw new NotFoundException('Vente introuvable');
     }
@@ -1012,7 +1016,7 @@ export class SalesService {
         entityId: String(saleId),
         metadata: { previousStatus: sale.status, soft: true },
       });
-      return { ok: true, id: saleId };
+      return { ok: true, id: saleId, deletedAt: now.toISOString() };
     });
   }
 
@@ -1127,7 +1131,7 @@ export class SalesService {
 
   /** PDF côté serveur (pdfkit), même principe que l’export inventaires. */
   async buildSalePdf(id: number): Promise<Buffer> {
-    const sale = await this.salesRepository.findOne(id);
+    const sale = await this.salesRepository.findOne(id, { includeDeleted: true });
     if (!sale) {
       throw new NotFoundException('Vente introuvable');
     }

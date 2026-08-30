@@ -40,8 +40,9 @@ import {
   periodDateRange,
   type PeriodKey,
 } from '@/utils/datetime';
-import { saleDisplayRef } from '@/utils/saleRef';
+import { isSaleDeleted, saleDisplayRef } from '@/utils/saleRef';
 import { formatQuantity } from '@/utils/quantity';
+import { salesQueryDepartmentParams } from '@/utils/user-scope';
 
 type DepartmentGroup = {
   key: string;
@@ -51,7 +52,8 @@ type DepartmentGroup = {
 };
 
 export default function VentesScreen() {
-  const { can, canPerm } = useAuth();
+  const { can, canPerm, user } = useAuth();
+  const salesDeptParams = useMemo(() => salesQueryDepartmentParams(user), [user]);
   const { companyId, companies, setCompanyId, ready, lockedToSession } = useCompanyScope();
   const [period, setPeriod] = useState<PeriodKey>('week');
   const [view, setView] = useState<'departments' | 'transactions'>('departments');
@@ -86,13 +88,14 @@ export default function VentesScreen() {
     try {
       setError(null);
       const [products, salesRes] = await Promise.all([
-        getDashboardSalesByProduct({ companyId, dateFrom, dateTo }),
+        getDashboardSalesByProduct({ companyId, dateFrom, dateTo, ...salesDeptParams }),
         listSales({
           companyId,
           skip: offset,
           take: 20,
           createdFrom: businessDayStartIso(dateFrom),
           createdTo: businessDayEndIso(dateTo),
+          ...salesDeptParams,
         }),
       ]);
       setByProduct(products);
@@ -106,7 +109,7 @@ export default function VentesScreen() {
         setSalesTotal(0);
       }
     }
-  }, [companyId, period, salesRecentMinYmd]);
+  }, [companyId, period, salesRecentMinYmd, salesDeptParams]);
 
   useFocusEffect(
     useCallback(() => {
@@ -187,8 +190,8 @@ export default function VentesScreen() {
               button: 'Rembourser',
             }
           : {
-              title: 'Suppression définitive',
-              message: `Supprimer définitivement la vente #${saleDisplayRef(sale)} ? Cette action est irréversible.`,
+              title: 'Supprimer la vente',
+              message: `Supprimer la vente #${saleDisplayRef(sale)} ? Les stocks, paiements et écritures de caisse seront annulés. La ligne restera visible comme supprimée.`,
               button: 'Supprimer',
             };
     Alert.alert(copy.title, copy.message, [
@@ -353,14 +356,17 @@ export default function VentesScreen() {
               <Text style={styles.empty}>Aucune transaction sur cette période.</Text>
             ) : (
               sales.map((sale) => {
-                const statusTone =
-                  sale.status === 'COMPLETED'
+                const deleted = isSaleDeleted(sale);
+                const statusTone = deleted
+                  ? styles.statusDeleted
+                  : sale.status === 'COMPLETED'
                     ? styles.statusCompleted
                     : sale.status === 'REFUNDED'
                       ? styles.statusRefunded
                       : styles.statusCancelled;
-                const statusLabel =
-                  sale.status === 'COMPLETED'
+                const statusLabel = deleted
+                  ? 'Supprimée'
+                  : sale.status === 'COMPLETED'
                     ? 'Complétée'
                     : sale.status === 'REFUNDED'
                       ? 'Remboursée'
@@ -368,23 +374,40 @@ export default function VentesScreen() {
                 return (
                   <Pressable
                     key={sale.id}
-                    style={({ pressed }) => [styles.saleCard, pressed && styles.cardPressed]}
+                    style={({ pressed }) => [
+                      styles.saleCard,
+                      deleted && styles.saleCardDeleted,
+                      pressed && styles.cardPressed,
+                    ]}
                     onPress={() => void openSale(sale.id)}>
                     <View style={styles.saleTop}>
                       <View style={styles.saleRefWrap}>
-                        <Text style={styles.saleRef}>#{saleDisplayRef(sale)}</Text>
+                        <Text style={[styles.saleRef, deleted && styles.saleDeletedText]}>
+                          #{saleDisplayRef(sale)}
+                        </Text>
                         <View style={[styles.statusBadge, statusTone]}>
-                          <Text style={styles.statusText}>{statusLabel}</Text>
+                          <Text style={[styles.statusText, deleted && styles.statusDeletedText]}>
+                            {statusLabel}
+                          </Text>
                         </View>
                       </View>
-                      <MoneyText value={sale.total} style={styles.saleTotal} />
+                      <MoneyText
+                        value={sale.total}
+                        style={[styles.saleTotal, deleted && styles.saleDeletedText]}
+                      />
                     </View>
-                    <Text style={styles.saleClient} numberOfLines={1}>
+                    <Text
+                      style={[styles.saleClient, deleted && styles.saleDeletedText]}
+                      numberOfLines={1}>
                       {sale.clientName?.trim() || 'Client inconnu'}
                     </Text>
                     <View style={styles.saleBottom}>
-                      <Text style={styles.saleMeta}>{formatDateTime(sale.createdAt)}</Text>
-                      <Text style={styles.saleMeta} numberOfLines={1}>
+                      <Text style={[styles.saleMeta, deleted && styles.saleDeletedText]}>
+                        {formatDateTime(sale.createdAt)}
+                      </Text>
+                      <Text
+                        style={[styles.saleMeta, deleted && styles.saleDeletedText]}
+                        numberOfLines={1}>
                         {sale.user?.fullName?.trim() || sale.cashier || sale.user?.phone || '—'}
                       </Text>
                     </View>
@@ -417,8 +440,10 @@ export default function VentesScreen() {
       <SaleDetailModal
         sale={selectedSale}
         busy={actionBusy}
-        canManage={canManageSales}
-        canDelete={canDeleteSales}
+        canManage={
+          canManageSales && selectedSale != null && !isSaleDeleted(selectedSale)
+        }
+        canDelete={canDeleteSales && selectedSale != null && !isSaleDeleted(selectedSale)}
         onCancel={(sale) => confirmAction('cancel', sale)}
         onRefund={(sale) => confirmAction('refund', sale)}
         onDelete={(sale) => confirmAction('delete', sale)}
@@ -503,6 +528,16 @@ const styles = StyleSheet.create({
   departmentName: { color: BrandColors.text, fontSize: 14, fontWeight: '800', minHeight: 34 },
   departmentMeta: { color: BrandColors.textMuted, fontSize: 10, flex: 1 },
   departmentTotal: { color: BrandColors.text, fontSize: 16, fontWeight: '900' },
+  saleCardDeleted: {
+    borderColor: BrandColors.danger,
+    backgroundColor: '#FEF2F2',
+  },
+  saleDeletedText: {
+    color: BrandColors.danger,
+    textDecorationLine: 'line-through',
+  },
+  statusDeleted: { backgroundColor: '#FEE2E2' },
+  statusDeletedText: { color: BrandColors.danger },
   saleCard: {
     backgroundColor: BrandColors.surface,
     borderRadius: 14,

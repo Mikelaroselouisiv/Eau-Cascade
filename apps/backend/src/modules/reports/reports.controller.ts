@@ -9,6 +9,7 @@ import {
   SALES_RECENT_TOTALS_DAYS,
   permissionsSatisfy,
 } from '../../common/permissions';
+import { departmentScopeForUser, parseIdList } from '../../common/user-scope';
 import {
   nowBusinessYmd,
   shiftBusinessYmd,
@@ -57,6 +58,22 @@ export class ReportsController {
     const period: 'day' | 'week' | 'month' =
       periodRaw === 'day' || periodRaw === 'week' || periodRaw === 'month' ? periodRaw : 'month';
     return { period };
+  }
+
+  private resolveDepartmentScope(
+    user:
+      | { role?: string; departmentId?: number | null; departmentIds?: number[] | null }
+      | undefined,
+    departmentIdRaw?: string,
+    departmentIdsRaw?: string,
+  ) {
+    const departmentIdN = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : NaN;
+    const departmentId =
+      Number.isFinite(departmentIdN) && departmentIdN > 0 ? departmentIdN : undefined;
+    return departmentScopeForUser(user, {
+      departmentId,
+      departmentIds: parseIdList(departmentIdsRaw),
+    });
   }
 
   @Get('revenue')
@@ -144,24 +161,22 @@ export class ReportsController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('departmentId') departmentIdRaw?: string,
-    @GetUser() user?: { role?: string },
+    @Query('departmentIds') departmentIdsRaw?: string,
+    @GetUser()
+    user?: { role?: string; departmentId?: number | null; departmentIds?: number[] | null },
   ) {
     const companyId = companyIdRaw ? Number.parseInt(companyIdRaw, 10) : NaN;
     if (!Number.isFinite(companyId) || companyId <= 0) {
       throw new BadRequestException('companyId requis et valide');
     }
-    const departmentIdN = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : NaN;
-    const departmentId =
-      Number.isFinite(departmentIdN) && (departmentIdN as number) > 0 ? (departmentIdN as number) : undefined;
+    const deptScope = this.resolveDepartmentScope(user, departmentIdRaw, departmentIdsRaw);
+    const departmentIds = deptScope.type === 'empty' ? [] : deptScope.type === 'ids' ? deptScope.ids : undefined;
     const range = await this.resolveSalesByProductRange(user?.role, dateFrom, dateTo, periodRaw);
+    const deptOpts = departmentIds != null ? { departmentIds } : {};
     const opts =
       'dateFrom' in range
-        ? {
-            dateFrom: range.dateFrom,
-            dateTo: range.dateTo,
-            ...(departmentId != null ? { departmentId } : {}),
-          }
-        : { period: range.period, ...(departmentId != null ? { departmentId } : {}) };
+        ? { dateFrom: range.dateFrom, dateTo: range.dateTo, ...deptOpts }
+        : { period: range.period, ...deptOpts };
     const buffer = await this.reportsService.buildSalesByProductPdf(companyId, opts);
     const filenameDate = formatFilenameDate();
     res.setHeader('Content-Type', 'application/pdf');
@@ -214,23 +229,26 @@ export class ReportsController {
     @Query('companyId') companyIdRaw?: string,
     @Query('companyIds') companyIdsRaw?: string,
     @Query('departmentId') departmentIdRaw?: string,
-    @GetUser() user?: { role?: string },
+    @Query('departmentIds') departmentIdsRaw?: string,
+    @GetUser()
+    user?: { role?: string; departmentId?: number | null; departmentIds?: number[] | null },
   ) {
     const companyIds = this.reportsService.parseCompanyIdsQuery(companyIdsRaw, companyIdRaw);
-    const departmentIdN = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : NaN;
-    const departmentId =
-      Number.isFinite(departmentIdN) && (departmentIdN as number) > 0 ? (departmentIdN as number) : undefined;
+    const deptScope = this.resolveDepartmentScope(user, departmentIdRaw, departmentIdsRaw);
+    if (deptScope.type === 'empty') return [];
+    const departmentIds = deptScope.type === 'ids' ? deptScope.ids : undefined;
     const range = await this.resolveSalesByProductRange(user?.role, dateFrom, dateTo, periodRaw);
+    const deptOpts = departmentIds?.length ? { departmentIds } : {};
     if ('dateFrom' in range) {
       return this.reportsService.dashboardSalesByProduct(companyIds, {
         dateFrom: range.dateFrom,
         dateTo: range.dateTo,
-        ...(departmentId != null ? { departmentId } : {}),
+        ...deptOpts,
       });
     }
     return this.reportsService.dashboardSalesByProduct(companyIds, {
       period: range.period,
-      ...(departmentId != null ? { departmentId } : {}),
+      ...deptOpts,
     });
   }
 }

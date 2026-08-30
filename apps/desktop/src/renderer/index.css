@@ -715,6 +715,16 @@ select {
   background: rgba(15, 23, 42, 0.06);
 }
 
+.data-table .dashboard-sale-row--deleted td {
+  color: #dc2626;
+  text-decoration: line-through;
+  text-decoration-color: #dc2626;
+}
+
+.data-table .dashboard-sale-row--deleted:hover {
+  background: rgba(220, 38, 38, 0.08);
+}
+
 /* Configuration — départements (unités autonomes, liste produits) */
 .dept-embedded {
   margin-top: 1.25rem;
@@ -1320,10 +1330,10 @@ select {
 .product-card-color-swatch {
   width: 1.9rem;
   height: 1.9rem;
+  padding: 0;
   border-radius: 999px;
   border: 2px solid rgba(15, 23, 42, 0.12);
   cursor: pointer;
-  padding: 0;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
 }
 
@@ -1822,13 +1832,20 @@ button.password-field__toggle:focus-visible {
 
 .catalog-add-form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.85rem 1rem;
   align-items: start;
 }
 
-.catalog-volume-tiers {
+.catalog-add-form .product-card-color-picker,
+.catalog-add-family,
+.catalog-volume-tiers,
+.catalog-add-submit {
   grid-column: 1 / -1;
+}
+
+.catalog-add-family {
+  max-width: 28rem;
 }
 
 .catalog-add-submit {

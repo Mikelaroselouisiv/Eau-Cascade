@@ -638,7 +638,7 @@ export function StockPage() {
                 onChange={(e) => setPrice(e.target.value)}
                 required
               />
-              <label>
+              <label className="catalog-add-family">
                 Famille de produits
                 <select
                   value={productFamilyId === '' ? '' : String(productFamilyId)}

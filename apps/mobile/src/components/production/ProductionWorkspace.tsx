@@ -13,17 +13,17 @@ import {
 
 import { ModalShell } from '@/components/ModalShell';
 import { Screen } from '@/components/Screen';
+import { DeliveryExecuteModal } from '@/components/deliveries/DeliveryExecuteModal';
+import { DeliveryFicheCard } from '@/components/deliveries/DeliveryFicheCard';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import {
-  addDeliveryDrop,
   claimProductionSession,
   closeProductionSession,
   confirmInternalTransfer,
   createInternalTransfer,
   getCompanies,
-  getDeliveryById,
   getDepartments,
   getProductionCountSheet,
   getProductionSessionContext,
@@ -37,7 +37,6 @@ import { formatApiError } from '@/services/api-errors';
 import { getPosDeviceId, getPosDeviceName } from '@/services/pos-device';
 import type {
   Delivery,
-  DeliveryItem,
   Department,
   InternalTransferRow,
   InventoryCountSheetRow,
@@ -45,28 +44,11 @@ import type {
   ProductionSessionContext,
   ProductionSessionDetail,
 } from '@/types/api';
-import { departmentsForUser } from '@/utils/user-scope';
+import { canEditDeliveryExecutor, departmentsForUser } from '@/utils/user-scope';
 import { formatQuantity } from '@/utils/quantity';
-import { saleDisplayRef } from '@/utils/saleRef';
 
 type PanelMode = 'open' | 'close' | null;
 type Dest = 'ON_SITE' | 'HOME' | 'TRANSFER';
-
-const STATUS_LABEL: Record<Delivery['status'], string> = {
-  PENDING: 'Non livré',
-  PARTIAL: 'Partiel',
-  DELIVERED: 'Livré',
-};
-
-function remainingOf(it: DeliveryItem): number {
-  return Number(
-    it.quantityRemaining ?? Math.max(0, Number(it.quantityOrdered) - Number(it.quantityDelivered)),
-  );
-}
-
-function itemLabel(it: DeliveryItem): string {
-  return it.saleItem?.lineLabel || it.saleItem?.product?.name || 'Article';
-}
 
 function belongsToPlant(d: Delivery, plantId: number): boolean {
   if (d.departmentId === plantId) return true;
@@ -74,10 +56,6 @@ function belongsToPlant(d: Delivery, plantId: number): boolean {
   if (ids.some((id) => id === plantId)) return true;
   if (d.departmentId == null && ids.every((id) => id == null)) return true;
   return false;
-}
-
-function isHomeDelivery(d: Delivery) {
-  return d.fulfillmentType === 'HOME' || d.sale?.fulfillmentType === 'HOME';
 }
 
 function sessionHolder(s: ProductionSessionDetail) {
@@ -100,6 +78,8 @@ export function ProductionWorkspace() {
   const canTransfer = canPerm('transfers.manage');
   const canConfirm = canPerm('transfers.confirm');
   const canManageDeliveries = canPerm('deliveries.manage');
+  const canPrintFiche = canPerm('deliveries.print');
+  const canChangeExecutor = canEditDeliveryExecutor(user?.role);
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [departmentId, setDepartmentId] = useState<number | ''>('');
@@ -121,11 +101,7 @@ export function ProductionWorkspace() {
   const [inbox, setInbox] = useState<InternalTransferRow[]>([]);
   const [dest, setDest] = useState<Dest>('ON_SITE');
   const [fiches, setFiches] = useState<Delivery[]>([]);
-  const [selected, setSelected] = useState<Delivery | null>(null);
-  const [dropSaleItemId, setDropSaleItemId] = useState<number | ''>('');
-  const [dropQty, setDropQty] = useState('');
-  const [dropExecutor, setDropExecutor] = useState('');
-  const [dropStopId, setDropStopId] = useState<number | ''>('');
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const session = ctx.local;
   const mineElsewhere = ctx.mineElsewhere;
@@ -184,7 +160,7 @@ export function ProductionWorkspace() {
   }, [departmentId, canConfirm, refresh]);
 
   useEffect(() => {
-    setSelected(null);
+    setSelectedId(null);
     if (departmentId === '' || dest === 'TRANSFER') {
       setFiches([]);
       return;
@@ -308,65 +284,6 @@ export function ProductionWorkspace() {
       setOutgoing(await listInternalTransfers({ fromDepartmentId: departmentId }));
     } catch (e) {
       setStatus(formatApiError(e, 'Envoi impossible'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function applyFiche(d: Delivery) {
-    setSelected(d);
-    const remainingItem = (d.items ?? []).find((it) => remainingOf(it) > 0.0001);
-    setDropSaleItemId(remainingItem?.saleItemId ?? d.items?.[0]?.saleItemId ?? '');
-    setDropQty(remainingItem ? String(remainingOf(remainingItem)) : '');
-    setDropExecutor(d.executorName?.trim() || user?.fullName?.trim() || user?.phone || '');
-    const stops = d.sale?.deliveryStops ?? [];
-    const remainingStop = stops.find((s) => Number(s.quantityRemaining ?? s.quantity) > 0.0001);
-    setDropStopId(remainingStop?.id ?? stops[0]?.id ?? '');
-  }
-
-  async function addLine() {
-    if (!selected || departmentId === '') return;
-    if (!productionEnabled) {
-      Alert.alert('Production fermée', 'Ouvrez la production d’abord.');
-      return;
-    }
-    if (dropSaleItemId === '') {
-      setStatus('Choisissez un article');
-      return;
-    }
-    const qty = Number(String(dropQty).replace(',', '.'));
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setStatus('Quantité invalide');
-      return;
-    }
-    if (isHomeDelivery(selected) && !dropExecutor.trim()) {
-      setStatus('Indiquez le livreur');
-      return;
-    }
-    setBusy(true);
-    try {
-      await addDeliveryDrop(selected.id, {
-        saleItemId: dropSaleItemId,
-        quantity: qty,
-        departmentId,
-        ...(isHomeDelivery(selected)
-          ? {
-              executorName: dropExecutor.trim(),
-              stopId: dropStopId === '' ? undefined : dropStopId,
-            }
-          : {}),
-      });
-      const next = await getDeliveryById(selected.id);
-      setStatus('Livraison enregistrée.');
-      if (next.status === 'DELIVERED') {
-        setSelected(null);
-        setFiches((prev) => prev.filter((d) => d.id !== next.id));
-      } else {
-        applyFiche(next);
-        setFiches((prev) => prev.map((d) => (d.id === next.id ? next : d)));
-      }
-    } catch (e) {
-      setStatus(formatApiError(e, 'Livraison impossible'));
     } finally {
       setBusy(false);
     }
@@ -505,71 +422,23 @@ export function ProductionWorkspace() {
                 ))}
               </>
             ) : null}
-
-            {dest !== 'TRANSFER' && canManageDeliveries ? (
-              <>
-                {fiches.length === 0 ? <Text style={styles.meta}>Aucune fiche</Text> : null}
-                {fiches.map((d) => (
-                  <Pressable
-                    key={d.id}
-                    onPress={() => applyFiche(d)}
-                    style={styles.ficheRow}>
-                    <Text style={styles.qtyName}>
-                      Vente #{d.saleRef ?? (d.sale ? saleDisplayRef(d.sale) : d.saleId)} ·{' '}
-                      {d.sale?.clientName?.trim() || 'Client'}
-                    </Text>
-                    <Text style={styles.meta}>{STATUS_LABEL[d.status]}</Text>
-                  </Pressable>
-                ))}
-                {selected ? (
-                  <>
-                    {(selected.items ?? []).map((it) => (
-                      <Pressable
-                        key={it.id}
-                        onPress={() => {
-                          if (remainingOf(it) <= 0.0001) return;
-                          setDropSaleItemId(it.saleItemId);
-                          setDropQty(String(remainingOf(it)));
-                        }}
-                        style={styles.ficheRow}>
-                        <Text
-                          style={[
-                            styles.qtyName,
-                            dropSaleItemId === it.saleItemId && { fontWeight: '700' },
-                          ]}>
-                          {itemLabel(it)} · reste {formatQuantity(remainingOf(it))}
-                        </Text>
-                      </Pressable>
-                    ))}
-                    <View style={styles.qtyRow}>
-                      <Text style={styles.qtyName}>Quantité</Text>
-                      <TextInput
-                        style={styles.qtyInput}
-                        keyboardType="decimal-pad"
-                        editable={productionEnabled}
-                        value={dropQty}
-                        onChangeText={setDropQty}
-                      />
-                    </View>
-                    {isHomeDelivery(selected) ? (
-                      <View style={styles.qtyRow}>
-                        <Text style={styles.qtyName}>Livreur</Text>
-                        <TextInput
-                          style={[styles.qtyInput, { width: 160 }]}
-                          editable={productionEnabled}
-                          value={dropExecutor}
-                          onChangeText={setDropExecutor}
-                        />
-                      </View>
-                    ) : null}
-                    <Pressable style={styles.submit} onPress={() => void addLine()} disabled={busy}>
-                      <Text style={styles.submitText}>Livrer</Text>
-                    </Pressable>
-                  </>
-                ) : null}
-              </>
-            ) : null}
           </View>
+        ) : null}
+
+        {departmentId !== '' && dest !== 'TRANSFER' && canManageDeliveries ? (
+          fiches.length === 0 ? (
+            <Text style={styles.meta}>Aucune fiche</Text>
+          ) : (
+            <View style={styles.ficheGrid}>
+              {fiches.map((d) => (
+                <DeliveryFicheCard
+                  key={d.id}
+                  delivery={d}
+                  onOpen={(row) => setSelectedId(row.id)}
+                />
+              ))}
+            </View>
+          )
         ) : null}
 
         {canConfirm && inbox.length > 0 ? (
@@ -605,6 +474,28 @@ export function ProductionWorkspace() {
           </View>
         ) : null}
       </ScrollView>
+
+      <DeliveryExecuteModal
+        deliveryId={selectedId}
+        canManage={() => canManageDeliveries}
+        canPrint={canPrintFiche}
+        canChangeExecutor={canChangeExecutor}
+        lockDepartmentId={departmentId === '' ? undefined : departmentId}
+        executeEnabled={productionEnabled}
+        executorDefault={user?.fullName?.trim() || user?.phone || ''}
+        onDisabledAction={() =>
+          Alert.alert('Production fermée', 'Ouvrez la production d’abord.')
+        }
+        onClose={() => setSelectedId(null)}
+        onUpdated={(d) => {
+          if (d.status === 'DELIVERED') {
+            setFiches((prev) => prev.filter((row) => row.id !== d.id));
+            setSelectedId(null);
+          } else {
+            setFiches((prev) => prev.map((row) => (row.id === d.id ? d : row)));
+          }
+        }}
+      />
 
       <ModalShell
         visible={panel != null}
@@ -735,7 +626,12 @@ const styles = StyleSheet.create({
   submitText: { color: '#fff', fontWeight: '700' },
   meta: { color: BrandColors.textMuted, fontSize: 13 },
   inboxRow: { gap: 8, paddingVertical: 8 },
-  ficheRow: { gap: 2, paddingVertical: 8 },
+  ficheGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
   countList: { padding: Spacing.three, gap: Spacing.two },
   panelTitle: { fontSize: 18, fontWeight: '700', color: BrandColors.text, marginBottom: 12 },
   countRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, marginBottom: 10 },

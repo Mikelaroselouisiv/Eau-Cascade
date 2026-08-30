@@ -7,7 +7,7 @@ import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { buildSaleDetailPrintHtml, openBrowserPrintWindow } from '../utils/saleReceiptBrowserHtml';
 import { buildReceiptPayloadFromSale } from '../utils/receiptPayload';
-import { saleTxnNumber } from '../utils/saleTxnNumber';
+import { isSaleDeleted, saleTxnNumber } from '../utils/saleTxnNumber';
 
 function formatApiError(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -46,8 +46,9 @@ function paymentMethodLabel(method: string): string {
   }
 }
 
-function saleStatusLabel(status: Sale['status']): string {
-  switch (status) {
+function saleStatusLabel(sale: Sale): string {
+  if (isSaleDeleted(sale)) return 'Supprimée';
+  switch (sale.status) {
     case 'COMPLETED':
       return 'Complétée';
     case 'CANCELLED':
@@ -55,7 +56,7 @@ function saleStatusLabel(status: Sale['status']): string {
     case 'REFUNDED':
       return 'Remboursée';
     default:
-      return status;
+      return sale.status;
   }
 }
 
@@ -88,7 +89,10 @@ export function SaleDetailModal({
   const hasElectronPrint = typeof window.desktopApp?.printReceipt === 'function';
   const busy = receiptBusy || actionBusy;
   const showFinanceActions =
-    canCancelOrRefund && sale.status === 'COMPLETED' && (onCancelSale || onRefundSale);
+    canCancelOrRefund &&
+    sale.status === 'COMPLETED' &&
+    !isSaleDeleted(sale) &&
+    (onCancelSale || onRefundSale);
 
   async function printThermalReceipt() {
     if (!sale) return;
@@ -147,7 +151,16 @@ export function SaleDetailModal({
         style={{ maxWidth: 560, width: '100%' }}
       >
         <div className="modal-heading">
-          <h2 id="sale-detail-title">Vente #{saleTxnNumber(sale)}</h2>
+          <h2
+            id="sale-detail-title"
+            style={
+              isSaleDeleted(sale)
+                ? { color: '#dc2626', textDecoration: 'line-through' }
+                : undefined
+            }
+          >
+            Vente #{saleTxnNumber(sale)}
+          </h2>
           <p className="dept-hint" style={{ margin: 0 }}>
             {formatDateTime(sale.createdAt)}
             {companyName ? ` · ${companyName}` : ''}
@@ -162,8 +175,13 @@ export function SaleDetailModal({
             <strong>Caissier</strong> :{' '}
             {sale.user?.fullName?.trim() || sale.cashier || sale.user?.phone || '—'}
           </p>
-          <p style={{ margin: 0 }}>
-            <strong>Statut</strong> : {saleStatusLabel(sale.status)}
+          <p
+            style={{
+              margin: 0,
+              ...(isSaleDeleted(sale) ? { color: '#dc2626' } : {}),
+            }}
+          >
+            <strong>Statut</strong> : {saleStatusLabel(sale)}
           </p>
         </div>
 

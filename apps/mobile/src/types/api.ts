@@ -351,6 +351,7 @@ export interface Sale {
   tax?: number | string;
   status: 'COMPLETED' | 'CANCELLED' | 'REFUNDED';
   createdAt: string;
+  deletedAt?: string | null;
   clientName?: string | null;
   clientPhone?: string | null;
   clientAddress?: string | null;

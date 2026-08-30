@@ -711,22 +711,36 @@ export class ReportsService {
       dateFrom?: string;
       dateTo?: string;
       departmentId?: number;
+      departmentIds?: number[];
     },
   ) {
     const { from, to } = this.resolveSalesByProductRange(opts);
-    return this.querySalesByProduct(from, to, companyIds, opts.departmentId);
+    const deptIds = this.normalizeDepartmentIds(opts.departmentId, opts.departmentIds);
+    if (deptIds && deptIds.length === 0) return [];
+    return this.querySalesByProduct(from, to, companyIds, deptIds);
+  }
+
+  private normalizeDepartmentIds(
+    departmentId?: number,
+    departmentIds?: number[],
+  ): number[] | undefined {
+    if (departmentIds) {
+      return departmentIds.filter((id) => Number.isFinite(id) && id > 0);
+    }
+    if (departmentId != null && departmentId > 0) return [departmentId];
+    return undefined;
   }
 
   private async querySalesByProduct(
     from: Date,
     to: Date,
     companyIds?: number[],
-    departmentId?: number,
+    departmentIds?: number[],
   ) {
     const ids = this.normalizeCompanyIds(companyIds);
     const deptFilter =
-      departmentId != null && departmentId > 0
-        ? Prisma.sql`AND p."departmentId" = ${departmentId}`
+      departmentIds != null && departmentIds.length > 0
+        ? Prisma.sql`AND p."departmentId" IN (${Prisma.join(departmentIds)})`
         : Prisma.empty;
 
     type Row = {
@@ -839,15 +853,19 @@ export class ReportsService {
       dateFrom?: string;
       dateTo?: string;
       departmentId?: number;
+      departmentIds?: number[];
     },
   ): Promise<Buffer> {
     const { from, to } = this.resolveSalesByProductRange(opts);
+    const deptIds = this.normalizeDepartmentIds(opts.departmentId, opts.departmentIds);
     const [company, rows] = await Promise.all([
       this.prisma.company.findUnique({
         where: { id: companyId },
         select: { name: true, logoUrl: true },
       }),
-      this.querySalesByProduct(from, to, [companyId], opts.departmentId),
+      deptIds && deptIds.length === 0
+        ? Promise.resolve([])
+        : this.querySalesByProduct(from, to, [companyId], deptIds),
     ]);
     if (!company) {
       throw new BadRequestException('Entreprise introuvable');
@@ -963,7 +981,12 @@ export class ReportsService {
             orderBy: { name: 'asc' },
           }),
       this.dashboardSummaryRange(dateFrom.trim(), dateTo.trim(), companyIds, departmentId),
-      this.querySalesByProduct(from, to, companyIds, departmentId),
+      this.querySalesByProduct(
+        from,
+        to,
+        companyIds,
+        departmentId != null && departmentId > 0 ? [departmentId] : undefined,
+      ),
       departmentId != null && departmentId > 0
         ? this.prisma.department.findUnique({
             where: { id: departmentId },

@@ -39,6 +39,9 @@ export class SalesRepository {
     createdAtGte?: Date;
     createdAtLte?: Date;
     departmentId?: number;
+    departmentIds?: number[];
+    /** ADMIN : tombstones (deletedAt) inclus, toujours status COMPLETED. */
+    includeDeleted?: boolean;
   }) {
     const createdAt: Prisma.DateTimeFilter | undefined =
       opts.createdAtGte != null || opts.createdAtLte != null
@@ -48,17 +51,28 @@ export class SalesRepository {
           }
         : undefined;
 
+    const scopedDeptIds =
+      opts.departmentIds?.filter((id) => Number.isFinite(id) && id > 0) ??
+      (opts.departmentId != null && opts.departmentId > 0 ? [opts.departmentId] : []);
+
     const productWhere: Prisma.ProductWhereInput = {
       companyId: opts.companyId,
-      ...(opts.departmentId != null && opts.departmentId > 0
-        ? { departmentId: opts.departmentId }
-        : {}),
+      ...(scopedDeptIds.length === 1
+        ? { departmentId: scopedDeptIds[0] }
+        : scopedDeptIds.length > 1
+          ? { departmentId: { in: scopedDeptIds } }
+          : {}),
     };
 
     const where: Prisma.SaleWhereInput = {
-      deletedAt: null,
       status: 'COMPLETED',
-      items: { some: { product: productWhere, deletedAt: null } },
+      items: {
+        some: {
+          product: productWhere,
+          ...(opts.includeDeleted ? {} : { deletedAt: null }),
+        },
+      },
+      ...(opts.includeDeleted ? {} : { deletedAt: null }),
       ...(createdAt ? { createdAt } : {}),
     };
 
@@ -74,9 +88,9 @@ export class SalesRepository {
     ]).then(([items, total]) => ({ items, total }));
   }
 
-  findOne(id: number) {
+  findOne(id: number, opts?: { includeDeleted?: boolean }) {
     return this.prisma.sale.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, ...(opts?.includeDeleted ? {} : { deletedAt: null }) },
       include: saleInclude,
     });
   }

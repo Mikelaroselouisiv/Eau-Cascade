@@ -17,6 +17,7 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { departmentScopeForUser, isAdminRole, parseIdList } from '../../common/user-scope';
 import { CollectSaleBalanceDto } from './dto/cash-gap.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SalesService } from './sales.service';
@@ -84,6 +85,13 @@ export class SalesController {
     @Query('createdFrom') createdFrom?: string,
     @Query('createdTo') createdTo?: string,
     @Query('departmentId') departmentIdRaw?: string,
+    @Query('departmentIds') departmentIdsRaw?: string,
+    @GetUser()
+    user?: {
+      role?: string;
+      departmentId?: number | null;
+      departmentIds?: number[] | null;
+    },
   ) {
     const companyId = companyIdRaw ? Number.parseInt(companyIdRaw, 10) : undefined;
     if (companyId !== undefined && Number.isFinite(companyId) && companyId > 0) {
@@ -99,14 +107,24 @@ export class SalesController {
       const lteOk = createdAtLte != null && Number.isFinite(createdAtLte.getTime());
       const departmentIdN = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : NaN;
       const departmentId =
-        Number.isFinite(departmentIdN) && (departmentIdN as number) > 0 ? (departmentIdN as number) : undefined;
+        Number.isFinite(departmentIdN) && (departmentIdN as number) > 0
+          ? (departmentIdN as number)
+          : undefined;
+      const scope = departmentScopeForUser(user, {
+        departmentId,
+        departmentIds: parseIdList(departmentIdsRaw),
+      });
+      if (scope.type === 'empty') {
+        return { items: [], total: 0 };
+      }
       return this.salesService.findManyPaginated({
         companyId,
         skip,
         take,
         createdAtGte: gteOk ? createdAtGte : undefined,
         createdAtLte: lteOk ? createdAtLte : undefined,
-        departmentId,
+        departmentIds: scope.type === 'ids' ? scope.ids : undefined,
+        includeDeleted: isAdminRole(user?.role),
       });
     }
     return this.salesService.findAll();
@@ -123,8 +141,11 @@ export class SalesController {
 
   @Get(':id')
   @PermissionsAny('sales.view', 'deliveries.view')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.salesService.findOne(id);
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user?: { role?: string },
+  ) {
+    return this.salesService.findOne(id, { includeDeleted: isAdminRole(user?.role) });
   }
 
   @Patch(':id/cancel')
