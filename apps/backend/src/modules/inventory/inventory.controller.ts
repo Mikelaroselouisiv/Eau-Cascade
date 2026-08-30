@@ -151,9 +151,24 @@ export class InventoryController {
   }
 
   @Post('entries')
-  @PermissionsAny('stock.manage', 'stock.adjust')
-  stockIn(@Body() dto: StockMovementDto, @GetUser() user?: { id?: number }) {
-    return this.inventoryService.increaseStock(dto.productId, dto.quantity, dto.reason, user?.id);
+  @PermissionsAny('stock.manage', 'stock.adjust', 'stock.raw_in')
+  stockIn(
+    @Body() dto: StockMovementDto,
+    @GetUser()
+    user?: {
+      id?: number;
+      role?: string;
+      departmentId?: number | null;
+      departmentIds?: number[] | null;
+    },
+  ) {
+    return this.inventoryService.increaseStock(
+      dto.productId,
+      dto.quantity,
+      dto.reason,
+      user?.id,
+      user,
+    );
   }
 
   @Post('adjustments')

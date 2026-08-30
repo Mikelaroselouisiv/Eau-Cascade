@@ -78,8 +78,7 @@ export const MENU_ITEMS: MenuItem[] = [
     label: 'Stocks',
     href: '/(app)/stock',
     icon: 'cube-outline',
-    roles: ['ADMIN', 'MANAGER', 'STOCK_MANAGER'],
-    permission: 'stock.view',
+    roles: ['ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER'],
   },
   {
     key: 'accounting',
@@ -108,6 +107,12 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
       icon: 'sparkles-outline',
       permission: 'sales.special_price',
       roles: ['ADMIN', 'MANAGER'],
+    },
+    {
+      name: 'receptions',
+      title: 'Réceptions',
+      icon: 'download-outline',
+      permission: 'transfers.confirm',
     },
   ],
   deliveries: [
@@ -209,7 +214,7 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
       title: 'Harmonisation',
       icon: 'swap-vertical-outline',
       permission: 'stock.adjust',
-      roles: ['ADMIN', 'MANAGER', 'STOCK_MANAGER'],
+      roles: ['ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER'],
     },
   ],
   config: [
@@ -316,10 +321,23 @@ type AccessFns = {
   can: (roles: UserRole[]) => boolean;
   canPerm: (permission: string) => boolean;
   role?: UserRole;
+  productionDepartmentIds?: number[];
 };
 
 export function canAccessMenuItem(item: MenuItem, access: AccessFns): boolean {
   if (item.key === 'home') return true;
+  if (item.key === 'stock') {
+    if (access.role === 'CHEF_PRODUCTION') return false;
+    if (
+      access.canPerm('stock.view') ||
+      access.canPerm('stock.manage') ||
+      access.canPerm('purchasing.manage') ||
+      access.canPerm('inventory.physical')
+    ) {
+      return true;
+    }
+    return access.canPerm('stock.raw_in') && (access.productionDepartmentIds?.length ?? 0) > 0;
+  }
   if (item.key === 'deliveries' && access.role === 'CHEF_PRODUCTION') return false;
   if (item.permission) return access.canPerm(item.permission);
   return access.can(item.roles);
@@ -344,7 +362,16 @@ export function canAccessTab(tab: SectionTab, access: AccessFns): boolean {
     );
   }
   if (tab.name === 'harmonisation') {
-    return access.canPerm('stock.adjust') || access.canPerm('stock.manage');
+    if (access.role === 'CHEF_PRODUCTION') return false;
+    if (access.canPerm('stock.adjust') || access.canPerm('stock.manage')) return true;
+    return access.canPerm('stock.raw_in') && (access.productionDepartmentIds?.length ?? 0) > 0;
+  }
+  if (tab.name === 'produits' || tab.name === 'familles') {
+    if (access.role === 'CHEF_PRODUCTION' || access.role === 'CASHIER') return false;
+    return (
+      access.canPerm('products.manage') ||
+      (access.canPerm('products.view') && access.canPerm('stock.view'))
+    );
   }
   if (tab.name === 'utilisateurs') {
     return access.canPerm('users.view') || access.canPerm('users.manage');

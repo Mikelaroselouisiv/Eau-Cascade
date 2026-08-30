@@ -26,7 +26,12 @@ export default function HomeScreen() {
   const displayName = user?.fullName?.trim() || user?.phone || '';
   const roleLabel = user?.role ? formatRoleLabel(user.role, user.roleLabel) : '';
 
-  const shortcuts = filterMenuItems(MENU_ITEMS, { can, canPerm, role: user?.role })
+  const shortcuts = filterMenuItems(MENU_ITEMS, {
+    can,
+    canPerm,
+    role: user?.role,
+    productionDepartmentIds: user?.productionDepartmentIds,
+  })
     .filter((item) => item.key !== 'home')
     .slice(0, 3);
 

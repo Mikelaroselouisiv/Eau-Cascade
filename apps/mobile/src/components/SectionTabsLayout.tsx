@@ -13,8 +13,13 @@ type SectionTabsLayoutProps = {
 
 /** Onglets bas de page pour une section (parité desktop). */
 export function SectionTabsLayout({ tabs, hiddenScreens = [] }: SectionTabsLayoutProps) {
-  const { can, canPerm } = useAuth();
-  const visible = filterTabsForAccess(tabs, { can, canPerm });
+  const { can, canPerm, user } = useAuth();
+  const visible = filterTabsForAccess(tabs, {
+    can,
+    canPerm,
+    role: user?.role,
+    productionDepartmentIds: user?.productionDepartmentIds,
+  });
 
   return (
     <Tabs

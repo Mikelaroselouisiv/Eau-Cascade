@@ -69,6 +69,18 @@ export function AppLayout() {
   }, [syncPendingSales]);
 
   const visible = nav.filter((item) => {
+    if (item.to === '/app/stock') {
+      if (user?.role === 'CHEF_PRODUCTION') return false;
+      if (
+        canPerm('stock.view') ||
+        canPerm('stock.manage') ||
+        canPerm('purchasing.manage') ||
+        canPerm('inventory.physical')
+      ) {
+        return true;
+      }
+      return canPerm('stock.raw_in') && (user?.productionDepartmentIds?.length ?? 0) > 0;
+    }
     if (!canPerm(item.permission)) return false;
     if (item.to === '/app/livraisons' && user?.role === 'CHEF_PRODUCTION') return false;
     return true;

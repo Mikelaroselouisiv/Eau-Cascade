@@ -7,6 +7,10 @@ export const PERMISSIONS = [
   { code: 'stock.view', label: 'Consulter le stock et les mouvements' },
   { code: 'stock.manage', label: 'Gérer le stock (entrées, opérations)' },
   { code: 'stock.adjust', label: 'Ajuster / sortir du stock manuellement' },
+  {
+    code: 'stock.raw_in',
+    label: 'Entrer des matières premières (usine) — caissier central / gérant',
+  },
   { code: 'stock.global', label: 'Voir le stock vendu / inventaire global entreprise' },
   { code: 'products.view', label: 'Consulter le catalogue produits' },
   { code: 'products.manage', label: 'Créer / modifier / supprimer des produits' },
@@ -78,6 +82,7 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ id: string; label: string; codes
       'stock.view',
       'stock.manage',
       'stock.adjust',
+      'stock.raw_in',
       'stock.global',
       'products.view',
       'products.manage',
@@ -205,6 +210,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'deliveries.view',
     'deliveries.manage',
     'transfers.confirm',
+    'stock.raw_in',
   ],
   STOCK_MANAGER: [
     'stock.view',
@@ -245,7 +251,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'deliveries.manage_onsite',
     'deliveries.manage_home',
     'products.view',
-    'stock.view',
   ],
 };
 

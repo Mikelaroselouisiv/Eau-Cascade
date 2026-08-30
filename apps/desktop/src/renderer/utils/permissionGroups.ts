@@ -24,6 +24,7 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ id: string; label: string; codes
       'stock.view',
       'stock.manage',
       'stock.adjust',
+      'stock.raw_in',
       'stock.global',
       'products.view',
       'products.manage',

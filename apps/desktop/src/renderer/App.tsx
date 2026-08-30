@@ -48,7 +48,7 @@ export default function App() {
             <Route
               path="stock"
               element={
-                <RequirePermission anyOf={['stock.view', 'stock.manage', 'inventory.physical']}>
+                <RequirePermission anyOf={['stock.view', 'stock.manage', 'inventory.physical', 'purchasing.manage', 'stock.raw_in']}>
                   <StockPage />
                 </RequirePermission>
               }

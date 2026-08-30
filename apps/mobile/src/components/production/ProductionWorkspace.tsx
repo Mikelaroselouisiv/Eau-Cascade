@@ -15,13 +15,13 @@ import { ModalShell } from '@/components/ModalShell';
 import { Screen } from '@/components/Screen';
 import { DeliveryExecuteModal } from '@/components/deliveries/DeliveryExecuteModal';
 import { DeliveryFicheCard } from '@/components/deliveries/DeliveryFicheCard';
+import { TransferInboxPanel } from '@/components/transfers/TransferInboxPanel';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import {
   claimProductionSession,
   closeProductionSession,
-  confirmInternalTransfer,
   createInternalTransfer,
   getCompanies,
   getDepartments,
@@ -31,7 +31,6 @@ import {
   listDeliveries,
   listInternalTransfers,
   openProductionSession,
-  rejectInternalTransfer,
 } from '@/services/api';
 import { formatApiError } from '@/services/api-errors';
 import { getPosDeviceId, getPosDeviceName } from '@/services/pos-device';
@@ -48,7 +47,7 @@ import { canEditDeliveryExecutor, departmentsForUser } from '@/utils/user-scope'
 import { formatQuantity } from '@/utils/quantity';
 
 type PanelMode = 'open' | 'close' | null;
-type Dest = 'ON_SITE' | 'HOME' | 'TRANSFER';
+type Dest = 'ON_SITE' | 'HOME' | 'TRANSFER' | 'RECEIVE';
 
 function belongsToPlant(d: Delivery, plantId: number): boolean {
   if (d.departmentId === plantId) return true;
@@ -82,6 +81,7 @@ export function ProductionWorkspace() {
   const canChangeExecutor = canEditDeliveryExecutor(user?.role);
 
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [allDepartments, setAllDepartments] = useState<Department[]>([]);
   const [departmentId, setDepartmentId] = useState<number | ''>('');
   const [ctx, setCtx] = useState<ProductionSessionContext>({
     local: null,
@@ -99,7 +99,9 @@ export function ProductionWorkspace() {
   const [transferQty, setTransferQty] = useState<Record<number, string>>({});
   const [outgoing, setOutgoing] = useState<InternalTransferRow[]>([]);
   const [inbox, setInbox] = useState<InternalTransferRow[]>([]);
-  const [dest, setDest] = useState<Dest>('ON_SITE');
+  const [dest, setDest] = useState<Dest>(
+    canManageDeliveries ? 'ON_SITE' : canConfirm ? 'RECEIVE' : 'TRANSFER',
+  );
   const [fiches, setFiches] = useState<Delivery[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
@@ -111,7 +113,7 @@ export function ProductionWorkspace() {
     () => departments.filter((d) => d.kind === 'PRODUCTION_DISTRIBUTION'),
     [departments],
   );
-  const scopedDepts = useMemo(() => departmentsForUser(departments, user), [departments, user]);
+  const scopedDepts = useMemo(() => allDepartments, [allDepartments]);
   const linesReady = useMemo(
     () => countProducts.every((p) => parseQty(counts[p.id] ?? '') !== null),
     [countProducts, counts],
@@ -135,13 +137,16 @@ export function ProductionWorkspace() {
         const companies = await getCompanies();
         const cid = companyId ?? companies[0]?.id;
         if (cid == null) return;
-        const depts = departmentsForUser(await getDepartments(cid), user);
-        setDepartments(depts);
-        const firstPlant = depts.find((d) => d.kind === 'PRODUCTION_DISTRIBUTION');
+        const depts = await getDepartments(cid);
+        setAllDepartments(depts);
+        const scoped = departmentsForUser(depts, user);
+        setDepartments(scoped);
+        const firstPlant = scoped.find((d) => d.kind === 'PRODUCTION_DISTRIBUTION');
         setDepartmentId((prev) =>
-          prev !== '' && depts.some((d) => d.id === prev) ? prev : (firstPlant?.id ?? ''),
+          prev !== '' && scoped.some((d) => d.id === prev) ? prev : (firstPlant?.id ?? ''),
         );
       } catch {
+        setAllDepartments([]);
         setDepartments([]);
       }
     })();
@@ -161,7 +166,7 @@ export function ProductionWorkspace() {
 
   useEffect(() => {
     setSelectedId(null);
-    if (departmentId === '' || dest === 'TRANSFER') {
+    if (departmentId === '' || dest === 'TRANSFER' || dest === 'RECEIVE') {
       setFiches([]);
       return;
     }
@@ -346,7 +351,7 @@ export function ProductionWorkspace() {
           ) : null}
         </View>
 
-        {departmentId !== '' && (canTransfer || canManageDeliveries) ? (
+        {departmentId !== '' && (canTransfer || canManageDeliveries || canConfirm) ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Écoulement</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
@@ -377,7 +382,20 @@ export function ProductionWorkspace() {
                   </Text>
                 </Pressable>
               ) : null}
+              {canConfirm ? (
+                <Pressable
+                  onPress={() => setDest('RECEIVE')}
+                  style={[styles.chip, dest === 'RECEIVE' && styles.chipActive]}>
+                  <Text style={[styles.chipText, dest === 'RECEIVE' && styles.chipTextActive]}>
+                    Réceptions{inbox.length ? ` (${inbox.length})` : ''}
+                  </Text>
+                </Pressable>
+              ) : null}
             </ScrollView>
+
+            {dest === 'RECEIVE' && canConfirm ? (
+              <TransferInboxPanel inbox={inbox} onChange={setInbox} />
+            ) : null}
 
             {dest === 'TRANSFER' && canTransfer ? (
               <>
@@ -387,7 +405,7 @@ export function ProductionWorkspace() {
                     .map((d) => (
                       <Pressable
                         key={d.id}
-                        onPress={() => productionEnabled && setToDepartmentId(d.id)}
+                        onPress={() => setToDepartmentId(d.id)}
                         style={[styles.chip, toDepartmentId === d.id && styles.chipActive]}>
                         <Text style={[styles.chipText, toDepartmentId === d.id && styles.chipTextActive]}>
                           {d.name}
@@ -401,7 +419,7 @@ export function ProductionWorkspace() {
                     <TextInput
                       style={styles.qtyInput}
                       keyboardType="decimal-pad"
-                      editable={productionEnabled}
+                      editable
                       value={transferQty[p.id] ?? ''}
                       onChangeText={(v) => setTransferQty((prev) => ({ ...prev, [p.id]: v }))}
                     />
@@ -425,7 +443,7 @@ export function ProductionWorkspace() {
           </View>
         ) : null}
 
-        {departmentId !== '' && dest !== 'TRANSFER' && canManageDeliveries ? (
+        {departmentId !== '' && dest !== 'TRANSFER' && dest !== 'RECEIVE' && canManageDeliveries ? (
           fiches.length === 0 ? (
             <Text style={styles.meta}>Aucune fiche</Text>
           ) : (
@@ -439,39 +457,6 @@ export function ProductionWorkspace() {
               ))}
             </View>
           )
-        ) : null}
-
-        {canConfirm && inbox.length > 0 ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>À confirmer</Text>
-            {inbox.map((t) => (
-              <View key={t.id} style={styles.inboxRow}>
-                <Text style={styles.qtyName}>
-                  {t.fromDepartment.name} → {t.toDepartment.name}
-                </Text>
-                <View style={styles.barActions}>
-                  <Pressable
-                    style={styles.barBtn}
-                    onPress={() =>
-                      void confirmInternalTransfer(t.id).then(() =>
-                        setInbox((prev) => prev.filter((x) => x.id !== t.id)),
-                      )
-                    }>
-                    <Text style={styles.barBtnText}>Confirmer</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.barBtnDanger}
-                    onPress={() =>
-                      void rejectInternalTransfer(t.id).then(() =>
-                        setInbox((prev) => prev.filter((x) => x.id !== t.id)),
-                      )
-                    }>
-                    <Text style={styles.barBtnTextDanger}>Refuser</Text>
-                  </Pressable>
-                </View>
-              </View>
-            ))}
-          </View>
         ) : null}
       </ScrollView>
 
@@ -625,7 +610,6 @@ const styles = StyleSheet.create({
   submitDisabled: { opacity: 0.5 },
   submitText: { color: '#fff', fontWeight: '700' },
   meta: { color: BrandColors.textMuted, fontSize: 13 },
-  inboxRow: { gap: 8, paddingVertical: 8 },
   ficheGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

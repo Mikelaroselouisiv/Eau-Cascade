@@ -1,9 +1,12 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InventorySessionKind, InventorySessionStatus, MovementType, Prisma, ProductNature } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { DepartmentKind, InventorySessionKind, InventorySessionStatus, MovementType, Prisma, ProductNature } from '@prisma/client';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
+import { canAccessAssignedDepartment } from '../../common/user-scope';
 import { ymdToDateEnd, ymdToDateStart } from '../../common/time/timezone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { RolesService } from '../roles/roles.service';
+import { permissionGranted } from '../../common/permissions';
 import type { UpdateInventoryLineDto } from './dto/physical-inventory.dto';
 
 @Injectable()
@@ -11,6 +14,7 @@ export class InventoryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly rolesService: RolesService,
   ) {}
 
   /**
@@ -133,8 +137,42 @@ export class InventoryService {
     });
   }
 
-  async increaseStock(productId: number, quantity: number, reason?: string, createdById?: number) {
-    await this.ensureProductExists(productId);
+  async increaseStock(
+    productId: number,
+    quantity: number,
+    reason?: string,
+    createdById?: number,
+    actor?: {
+      role?: string | null;
+      departmentId?: number | null;
+      departmentIds?: number[] | null;
+    },
+  ) {
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, deletedAt: null },
+      include: { department: { select: { id: true, kind: true } } },
+    });
+    if (!product) {
+      throw new NotFoundException('Produit introuvable');
+    }
+    if (actor?.role) {
+      const perms = await this.rolesService.getPermissionsForUserRole(actor.role);
+      const fullStock =
+        permissionGranted(perms, 'stock.manage') || permissionGranted(perms, 'stock.adjust');
+      if (!fullStock) {
+        if (product.nature !== ProductNature.RAW_MATERIAL) {
+          throw new ForbiddenException('Uniquement les matières premières.');
+        }
+        if (product.department?.kind !== DepartmentKind.PRODUCTION_DISTRIBUTION) {
+          throw new BadRequestException(
+            'Les matières premières s’enregistrent sur une unité de production.',
+          );
+        }
+        if (!canAccessAssignedDepartment(actor, product.departmentId)) {
+          throw new ForbiddenException('Vous n’êtes pas affecté à cette usine.');
+        }
+      }
+    }
     await this.prisma.product.update({
       where: { id: productId },
       data: { stock: { increment: quantity } },

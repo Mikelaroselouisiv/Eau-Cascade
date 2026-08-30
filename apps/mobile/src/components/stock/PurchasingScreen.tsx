@@ -39,6 +39,7 @@ import type {
   ReceptionStatus,
 } from '@/types/api';
 import { formatDateTime, formatMoney } from '@/utils/datetime';
+import { departmentsForUser } from '@/utils/user-scope';
 import { stockPackagingLabel } from '@/utils/packaging';
 import { formatQuantity } from '@/utils/quantity';
 
@@ -71,7 +72,7 @@ function poStatusLabel(s: PurchaseOrderListItem['status']): string {
 }
 
 export function PurchasingScreen() {
-  const { can, canPerm } = useAuth();
+  const { can, canPerm, user } = useAuth();
   const { companyId, ready } = useCompanyScope();
   const isAdmin = can(['ADMIN']) || canPerm('*');
   const allowed = canPerm('purchasing.manage');
@@ -109,10 +110,13 @@ export function PurchasingScreen() {
         getProducts(),
         listPurchaseOrders(companyId),
       ]);
-      setDepartments(depts);
+      const scoped = departmentsForUser(depts, user);
+      setDepartments(scoped);
       setProducts(prods);
       setOrders(list);
-      setPoDeptId((prev) => (prev !== '' && depts.some((d) => d.id === prev) ? prev : (depts[0]?.id ?? '')));
+      setPoDeptId((prev) =>
+        prev !== '' && scoped.some((d) => d.id === prev) ? prev : (scoped[0]?.id ?? ''),
+      );
       if (isAdmin) {
         try {
           setAmountSummary(await getPurchaseOrdersAmountSummary(companyId));
@@ -125,7 +129,7 @@ export function PurchasingScreen() {
     } catch {
       setError('Impossible de charger les achats');
     }
-  }, [allowed, companyId, isAdmin]);
+  }, [allowed, companyId, isAdmin, user]);
 
   useFocusEffect(
     useCallback(() => {

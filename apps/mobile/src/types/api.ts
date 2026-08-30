@@ -11,6 +11,7 @@ export interface SessionUser {
   companyId?: number | null;
   departmentId?: number | null;
   departmentIds?: number[];
+  productionDepartmentIds?: number[];
   createdAt?: string;
   permissions?: string[];
 }

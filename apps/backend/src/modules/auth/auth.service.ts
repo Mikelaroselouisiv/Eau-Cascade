@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { DepartmentKind } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { normalizePhone } from '../../common/utils/phone';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -178,6 +179,18 @@ export class AuthService {
     if (user.departmentId != null && !departmentIds.includes(user.departmentId)) {
       departmentIds = [user.departmentId, ...departmentIds];
     }
+    let productionDepartmentIds: number[] = [];
+    if (departmentIds.length) {
+      const plants = await this.prisma.department.findMany({
+        where: {
+          id: { in: departmentIds },
+          kind: DepartmentKind.PRODUCTION_DISTRIBUTION,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      productionDepartmentIds = plants.map((p) => p.id);
+    }
     return {
       id: user.id,
       phone: user.phone,
@@ -190,6 +203,7 @@ export class AuthService {
       companyId: user.companyId ?? null,
       departmentId: user.departmentId ?? null,
       departmentIds,
+      productionDepartmentIds,
       createdAt: user.createdAt,
     };
   }

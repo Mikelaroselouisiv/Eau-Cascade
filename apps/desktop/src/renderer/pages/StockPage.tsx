@@ -31,6 +31,7 @@ import { PurchasingSection } from '../components/PurchasingSection';
 import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { formatYmd } from '../utils/datetime';
+import { departmentsForUser, assignedProductionDepartmentIds } from '../utils/user-scope';
 import {
   stockPackagingLabel,
 } from '../utils/packagingDisplay';
@@ -120,7 +121,7 @@ function ProductCardColorPicker({
 }
 
 export function StockPage() {
-  const { canPerm } = useAuth();
+  const { canPerm, user } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [packaging, setPackaging] = useState<PackagingUnit[]>([]);
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
@@ -156,9 +157,27 @@ export function StockPage() {
   const [catalogAsOfLoading, setCatalogAsOfLoading] = useState(false);
   const [addProductOpen, setAddProductOpen] = useState(false);
 
-  const canStockIn = canPerm('stock.manage') || canPerm('stock.adjust');
+  const canStockIn = canPerm('stock.manage') || canPerm('stock.adjust') || canPerm('stock.raw_in');
   const canStockOut = canPerm('stock.adjust');
-  const canHarmonise = canStockIn || canStockOut;
+  const rawInOnly = canPerm('stock.raw_in') && !canPerm('stock.manage') && !canPerm('stock.adjust');
+  const plantIds = useMemo(
+    () =>
+      assignedProductionDepartmentIds(
+        opFilterDepartments.length ? opFilterDepartments : departments,
+        user,
+      ),
+    [opFilterDepartments, departments, user],
+  );
+  const canHarmonise =
+    canPerm('stock.manage') ||
+    canPerm('stock.adjust') ||
+    (canPerm('stock.raw_in') && plantIds.length > 0);
+  const isChefProduction = user?.role === 'CHEF_PRODUCTION';
+  const canSeePurchases = canPerm('purchasing.manage');
+  const canSeeCatalog =
+    !isChefProduction &&
+    (canPerm('products.manage') || (canPerm('products.view') && canPerm('stock.view')));
+  const canSeeFamilies = canSeeCatalog;
 
   const stockableProducts = useMemo(
     () =>
@@ -168,11 +187,17 @@ export function StockPage() {
     [products],
   );
 
+  const opVisibleDepartments = useMemo(
+    () => opFilterDepartments.filter((d) => plantIds.includes(d.id)),
+    [opFilterDepartments, plantIds],
+  );
+
   const opFilteredProducts = useMemo(() => {
     if (opFilterCompanyId === '' || opFilterDeptId === '') return [];
     return stockableProducts
       .filter((p) => (p.companyId ?? p.company?.id) === opFilterCompanyId)
       .filter((p) => p.department?.id === opFilterDeptId)
+      .filter((p) => p.nature === 'RAW_MATERIAL')
       .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
   }, [stockableProducts, opFilterCompanyId, opFilterDeptId]);
 
@@ -240,10 +265,11 @@ export function StockPage() {
       return;
     }
     void getDepartments(companyId).then((d) => {
-      setDepartments(d);
+      const scoped = departmentsForUser(d, user);
+      setDepartments(scoped);
       setDepartmentId((prev) => {
         if (prev === '') return '';
-        const ok = d.some((x) => x.id === prev);
+        const ok = scoped.some((x) => x.id === prev);
         return ok ? prev : '';
       });
     });
@@ -258,7 +284,7 @@ export function StockPage() {
         setProductFamilies([]);
         setProductFamilyId('');
       });
-  }, [companyId]);
+  }, [companyId, user]);
 
   useEffect(() => {
     if (catalogFilterCompanyId === '') {
@@ -284,12 +310,13 @@ export function StockPage() {
     }
     void getDepartments(opFilterCompanyId).then((d) => {
       setOpFilterDepartments(d);
+      const plants = assignedProductionDepartmentIds(d, user);
       setOpFilterDeptId((prev) => {
-        if (prev === '') return '';
-        return d.some((x) => x.id === prev) ? prev : '';
+        if (prev !== '' && plants.includes(prev)) return prev;
+        return plants.length === 1 ? plants[0] : '';
       });
     });
-  }, [opFilterCompanyId]);
+  }, [opFilterCompanyId, user]);
 
   useEffect(() => {
     if (opProductId === '') return;
@@ -303,13 +330,24 @@ export function StockPage() {
   }, []);
 
   useEffect(() => {
-    if (tab === 'operations' && !canHarmonise) setTab('purchases');
-  }, [tab, canHarmonise]);
+    const allowed: Record<StockTab, boolean> = {
+      purchases: canSeePurchases,
+      operations: canHarmonise,
+      catalog: canSeeCatalog,
+      families: canSeeFamilies,
+    };
+    if (allowed[tab]) return;
+    if (canSeePurchases) setTab('purchases');
+    else if (canHarmonise) setTab('operations');
+    else if (canSeeCatalog) setTab('catalog');
+    else if (canSeeFamilies) setTab('families');
+  }, [tab, canHarmonise, canSeeCatalog, canSeeFamilies, canSeePurchases]);
 
   useEffect(() => {
+    if (rawInOnly) setOpKind('in');
     if (opKind === 'in' && !canStockIn && canStockOut) setOpKind('out');
     if (opKind === 'out' && !canStockOut && canStockIn) setOpKind('in');
-  }, [opKind, canStockIn, canStockOut]);
+  }, [opKind, canStockIn, canStockOut, rawInOnly]);
 
   useEffect(() => {
     if (departmentId === '') {
@@ -439,7 +477,7 @@ export function StockPage() {
         await stockIn({
           productId: Number(opProductId),
           quantity: qty,
-          reason: reason ?? 'Réception / entrée stock',
+          reason: reason ?? 'Matière première confiée à la production',
         });
       } else {
         if (!canStockOut) {
@@ -477,50 +515,53 @@ export function StockPage() {
       </header>
 
       <div className="config-tabs" role="tablist" aria-label="Sections stock">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'purchases'}
-          className={`tab ${tab === 'purchases' ? 'active' : ''}`}
-          onClick={() => setTab('purchases')}
-        >
-          Achats et réceptions
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'operations'}
-          className={`tab ${tab === 'operations' ? 'active' : ''}`}
-          disabled={!canHarmonise}
-          aria-disabled={!canHarmonise}
-          onClick={() => {
-            if (!canHarmonise) return;
-            setTab('operations');
-          }}
-        >
-          Harmonisation manuelle
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'catalog'}
-          className={`tab ${tab === 'catalog' ? 'active' : ''}`}
-          onClick={() => setTab('catalog')}
-        >
-          Produits
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'families'}
-          className={`tab ${tab === 'families' ? 'active' : ''}`}
-          onClick={() => setTab('families')}
-        >
-          Familles de produits
-        </button>
+        {canSeePurchases ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'purchases'}
+            className={`tab ${tab === 'purchases' ? 'active' : ''}`}
+            onClick={() => setTab('purchases')}
+          >
+            Achats et réceptions
+          </button>
+        ) : null}
+        {canHarmonise ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'operations'}
+            className={`tab ${tab === 'operations' ? 'active' : ''}`}
+            onClick={() => setTab('operations')}
+          >
+            Harmonisation manuelle
+          </button>
+        ) : null}
+        {canSeeCatalog ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'catalog'}
+            className={`tab ${tab === 'catalog' ? 'active' : ''}`}
+            onClick={() => setTab('catalog')}
+          >
+            Produits
+          </button>
+        ) : null}
+        {canSeeFamilies ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'families'}
+            className={`tab ${tab === 'families' ? 'active' : ''}`}
+            onClick={() => setTab('families')}
+          >
+            Familles de produits
+          </button>
+        ) : null}
       </div>
 
-      {tab === 'families' ? (
+      {tab === 'families' && canSeeFamilies ? (
         <ProductFamiliesSection
           companyId={companyId !== '' ? companyId : catalogFilterCompanyId}
           companies={companies}
@@ -548,7 +589,7 @@ export function StockPage() {
         />
       ) : null}
 
-      {tab === 'catalog' ? (
+      {tab === 'catalog' && canSeeCatalog ? (
         <>
       <section className="catalog-layout">
         <div className="catalog-add-head">
@@ -853,7 +894,7 @@ export function StockPage() {
         </>
       ) : null}
 
-      {tab === 'purchases' ? (
+      {tab === 'purchases' && canSeePurchases ? (
         <PurchasingSection
           visible={tab === 'purchases'}
           companyId={companyId}
@@ -873,8 +914,10 @@ export function StockPage() {
             <label>
               Type d’opération
               <select value={opKind} onChange={(e) => setOpKind(e.target.value === 'out' ? 'out' : 'in')}>
-                {canStockIn ? <option value="in">Entrée (augmenter le stock)</option> : null}
-                {canStockOut ? <option value="out">Sortie (diminuer le stock)</option> : null}
+                {canStockIn ? <option value="in">Entrée (matière première confiée)</option> : null}
+                {canStockOut && !rawInOnly ? (
+                  <option value="out">Sortie (diminuer le stock)</option>
+                ) : null}
               </select>
             </label>
             <label>
@@ -912,7 +955,7 @@ export function StockPage() {
                 <option value="">
                   {opFilterCompanyId === '' ? '— Choisir une entreprise d’abord —' : '— Choisir —'}
                 </option>
-                {opFilterDepartments.map((d) => (
+                {opVisibleDepartments.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
                   </option>

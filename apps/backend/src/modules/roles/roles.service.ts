@@ -210,9 +210,33 @@ export class RolesService implements OnModuleInit {
             isSystem: true,
           },
         });
+        continue;
       }
-      // Ne pas réécrire les permissions existantes : la matrice est gérée
-      // dans Config → Rôles et synchronisée local ↔ online (AppRole).
+      // Ajustements ciblés sans réécrire toute la matrice (Config → Rôles).
+      if (code === 'CHEF_PRODUCTION') {
+        const stripped = existing.permissions.filter(
+          (p) =>
+            p !== 'purchasing.manage' &&
+            p !== 'stock.view' &&
+            p !== 'stock.manage' &&
+            p !== 'stock.adjust' &&
+            p !== 'stock.raw_in',
+        );
+        if (stripped.length !== existing.permissions.length) {
+          await this.prisma.appRole.update({
+            where: { id: existing.id },
+            data: { permissions: stripped },
+          });
+          this.cache.delete(code);
+        }
+      }
+      if (code === 'CASHIER' && !existing.permissions.includes('stock.raw_in')) {
+        await this.prisma.appRole.update({
+          where: { id: existing.id },
+          data: { permissions: [...existing.permissions, 'stock.raw_in'] },
+        });
+        this.cache.delete(code);
+      }
     }
   }
 }

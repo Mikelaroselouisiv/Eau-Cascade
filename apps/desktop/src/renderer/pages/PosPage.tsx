@@ -15,6 +15,7 @@ import {
   listBanks,
   listRegisters,
   listSaleCashGaps,
+  listInternalTransfers,
   openRegisterSession,
   settleSaleChange,
 } from '../services/api';
@@ -36,8 +37,10 @@ import type {
   RegisterListItem,
   RegisterSessionDetail,
   SaleCashGapRow,
+  InternalTransferRow,
 } from '../types/api';
 import { RegisterStockCountForm } from '../components/RegisterStockCountForm';
+import { TransferInboxPanel } from '../components/TransferInboxPanel';
 import { MoneyField } from '../components/MoneyField';
 import { useAuth } from '../context/AuthContext';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
@@ -149,6 +152,9 @@ export function PosPage() {
   const assignedDeptIds = resolvedDepartmentIds(user);
   const posScopeLocked = !isAdminRole(user?.role) && assignedDeptIds.length === 1;
   const canSpecialSale = canPerm('sales.special_price');
+  const canConfirmTransfers = canPerm('transfers.confirm');
+  const [posPane, setPosPane] = useState<'sale' | 'receive'>('sale');
+  const [transferInbox, setTransferInbox] = useState<InternalTransferRow[]>([]);
   const [saleMode, setSaleMode] = useState<'classic' | 'special'>('classic');
   const [products, setProducts] = useState<Product[]>([]);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
@@ -229,6 +235,16 @@ export function PosPage() {
       setSaleMode('classic');
     }
   }, [canSpecialSale, saleMode]);
+
+  useEffect(() => {
+    if (!canConfirmTransfers) {
+      setTransferInbox([]);
+      return;
+    }
+    void listInternalTransfers({ inbox: true, status: 'PENDING' })
+      .then(setTransferInbox)
+      .catch(() => setTransferInbox([]));
+  }, [canConfirmTransfers]);
 
   const effectiveDepartmentId = useMemo(() => {
     if (posScopeLocked) {
@@ -1134,9 +1150,12 @@ export function PosPage() {
           <button
             type="button"
             role="tab"
-            className={`pos-sale-mode-btn${saleMode === 'classic' ? ' active' : ''}`}
-            aria-selected={saleMode === 'classic'}
-            onClick={() => switchSaleMode('classic')}
+            className={`pos-sale-mode-btn${posPane === 'sale' && saleMode === 'classic' ? ' active' : ''}`}
+            aria-selected={posPane === 'sale' && saleMode === 'classic'}
+            onClick={() => {
+              setPosPane('sale');
+              switchSaleMode('classic');
+            }}
           >
             Vente classique
           </button>
@@ -1144,11 +1163,25 @@ export function PosPage() {
             <button
               type="button"
               role="tab"
-              className={`pos-sale-mode-btn${saleMode === 'special' ? ' active' : ''}`}
-              aria-selected={saleMode === 'special'}
-              onClick={() => switchSaleMode('special')}
+              className={`pos-sale-mode-btn${posPane === 'sale' && saleMode === 'special' ? ' active' : ''}`}
+              aria-selected={posPane === 'sale' && saleMode === 'special'}
+              onClick={() => {
+                setPosPane('sale');
+                switchSaleMode('special');
+              }}
             >
               Vente spéciale
+            </button>
+          ) : null}
+          {canConfirmTransfers ? (
+            <button
+              type="button"
+              role="tab"
+              className={`pos-sale-mode-btn${posPane === 'receive' ? ' active' : ''}`}
+              aria-selected={posPane === 'receive'}
+              onClick={() => setPosPane('receive')}
+            >
+              Réceptions{transferInbox.length ? ` (${transferInbox.length})` : ''}
             </button>
           ) : null}
         </div>
@@ -1338,6 +1371,12 @@ export function PosPage() {
         </section>
       ) : null}
 
+      {posPane === 'receive' && canConfirmTransfers ? (
+        <section className="card">
+          <h2 style={{ marginTop: 0 }}>Réceptions</h2>
+          <TransferInboxPanel inbox={transferInbox} onChange={setTransferInbox} />
+        </section>
+      ) : (
       <div className="pos-grid">
         <section className="card pos-products">
           <div
@@ -1892,6 +1931,7 @@ export function PosPage() {
           </div>
         </aside>
       </div>
+      )}
 
       {showClosedCaisseAlert ? (
         <div

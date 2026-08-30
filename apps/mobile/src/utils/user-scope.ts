@@ -42,3 +42,24 @@ export function salesQueryDepartmentParams(user: {
   if (ids.length === 1) return { departmentId: ids[0] };
   return { departmentIds: ids };
 }
+
+export function isProductionKind(kind?: string | null): boolean {
+  return kind === 'PRODUCTION_DISTRIBUTION';
+}
+
+export function assignedProductionDepartmentIds<
+  T extends { id: number; kind?: string | null },
+>(
+  depts: T[],
+  user: {
+    role?: string | null;
+    departmentId?: number | null;
+    departmentIds?: number[] | null;
+  } | null,
+): number[] {
+  const plants = depts.filter((d) => isProductionKind(d.kind));
+  if (!user || isAdminRole(user.role)) return plants.map((d) => d.id);
+  const ids = new Set(resolvedDepartmentIds(user));
+  if (!ids.size) return plants.map((d) => d.id);
+  return plants.filter((d) => ids.has(d.id)).map((d) => d.id);
+}

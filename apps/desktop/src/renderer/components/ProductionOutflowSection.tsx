@@ -1,20 +1,18 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import {
-  confirmInternalTransfer,
   createInternalTransfer,
   getDeliveryById,
   listDeliveries,
   listInternalTransfers,
-  rejectInternalTransfer,
 } from '../services/api';
 import type { Delivery, Department, InternalTransferRow, Product } from '../types/api';
-import { formatQuantity } from '../utils/formatQuantity';
 import { formatDateTimeShort } from '../utils/datetime';
 import { DeliveryFicheCard } from './DeliveryFicheCard';
 import { DeliveryFicheModal } from './DeliveryFicheModal';
+import { TransferInboxPanel } from './TransferInboxPanel';
 
-type Dest = 'ON_SITE' | 'HOME' | 'TRANSFER';
+type Dest = 'ON_SITE' | 'HOME' | 'TRANSFER' | 'RECEIVE';
 
 function errMsg(err: unknown, fallback: string) {
   if (axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object') {
@@ -62,7 +60,9 @@ export function ProductionOutflowSection({
   onRefuseClosed,
   onMessage,
 }: Props) {
-  const [dest, setDest] = useState<Dest>(canManageDeliveries ? 'ON_SITE' : 'TRANSFER');
+  const [dest, setDest] = useState<Dest>(
+    canManageDeliveries ? 'ON_SITE' : canConfirm ? 'RECEIVE' : 'TRANSFER',
+  );
   const [fiches, setFiches] = useState<Delivery[]>([]);
   const [selected, setSelected] = useState<Delivery | null>(null);
   const [toDepartmentId, setToDepartmentId] = useState<number | ''>('');
@@ -78,6 +78,10 @@ export function ProductionOutflowSection({
       void listInternalTransfers({ fromDepartmentId: departmentId })
         .then(setOutgoing)
         .catch(() => setOutgoing([]));
+      return;
+    }
+    if (dest === 'RECEIVE') {
+      setFiches([]);
       return;
     }
     void (dest === 'HOME'
@@ -183,7 +187,18 @@ export function ProductionOutflowSection({
               Autre département
             </button>
           ) : null}
+          {canConfirm ? (
+            <button
+              type="button"
+              className={`pos-sale-mode-btn${dest === 'RECEIVE' ? ' active' : ''}`}
+              onClick={() => setDest('RECEIVE')}
+            >
+              Réceptions{inbox.length ? ` (${inbox.length})` : ''}
+            </button>
+          ) : null}
         </div>
+
+        {dest === 'RECEIVE' && canConfirm ? <TransferInboxPanel inbox={inbox} onChange={setInbox} /> : null}
 
         {dest === 'TRANSFER' && canTransfer ? (
           <>
@@ -191,7 +206,6 @@ export function ProductionOutflowSection({
               Destinataire
               <select
                 value={toDepartmentId}
-                disabled={!productionEnabled}
                 onChange={(e) => setToDepartmentId(e.target.value ? Number(e.target.value) : '')}
               >
                 <option value="">—</option>
@@ -212,7 +226,6 @@ export function ProductionOutflowSection({
                   type="number"
                   min={0}
                   step="any"
-                  disabled={!productionEnabled}
                   value={transferQty[p.id] ?? ''}
                   onChange={(e) => setTransferQty((prev) => ({ ...prev, [p.id]: e.target.value }))}
                 />
@@ -221,7 +234,7 @@ export function ProductionOutflowSection({
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy}
+              disabled={busy || toDepartmentId === ''}
               onClick={() => void sendTransfer()}
             >
               Envoyer
@@ -254,7 +267,7 @@ export function ProductionOutflowSection({
         ) : null}
       </section>
 
-      {dest !== 'TRANSFER' && canManageDeliveries ? (
+      {dest !== 'TRANSFER' && dest !== 'RECEIVE' && canManageDeliveries ? (
         fiches.length === 0 ? (
           <p className="delivery-empty">Aucune fiche</p>
         ) : (
@@ -264,44 +277,6 @@ export function ProductionOutflowSection({
             ))}
           </div>
         )
-      ) : null}
-
-      {canConfirm && inbox.length > 0 ? (
-        <section className="card">
-          <h2>À confirmer</h2>
-          {inbox.map((t) => (
-            <div key={t.id} className="credit-cart-line">
-              <span>
-                {t.fromDepartment.name} → {t.toDepartment.name}
-                <small className="muted" style={{ display: 'block' }}>
-                  {t.items.map((i) => `${i.product.name} ${formatQuantity(i.quantity)}`).join(', ')}
-                </small>
-              </span>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() =>
-                  void confirmInternalTransfer(t.id).then(() =>
-                    setInbox((prev) => prev.filter((x) => x.id !== t.id)),
-                  )
-                }
-              >
-                Confirmer
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() =>
-                  void rejectInternalTransfer(t.id).then(() =>
-                    setInbox((prev) => prev.filter((x) => x.id !== t.id)),
-                  )
-                }
-              >
-                Refuser
-              </button>
-            </div>
-          ))}
-        </section>
       ) : null}
 
       {selected ? (

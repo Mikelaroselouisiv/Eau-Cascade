@@ -60,6 +60,7 @@ export function ProductionPage() {
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [allDepartments, setAllDepartments] = useState<Department[]>([]);
   const [companyId, setCompanyId] = useState<number | ''>('');
   const [departmentId, setDepartmentId] = useState<number | ''>('');
   const [session, setSession] = useState<ProductionSessionDetail | null>(null);
@@ -78,7 +79,6 @@ export function ProductionPage() {
     () => departments.filter((d) => d.kind === 'PRODUCTION_DISTRIBUTION'),
     [departments],
   );
-  const scopedDepts = useMemo(() => departmentsForUser(departments, user), [user, departments]);
   const currentPlant = plants.find((d) => d.id === departmentId);
 
   useEffect(() => {
@@ -92,11 +92,13 @@ export function ProductionPage() {
 
   useEffect(() => {
     if (companyId === '') {
+      setAllDepartments([]);
       setDepartments([]);
       return;
     }
     void getDepartments(companyId)
       .then((rows) => {
+        setAllDepartments(rows);
         const scoped = departmentsForUser(rows, user);
         setDepartments(scoped);
         const firstPlant = scoped.find((d) => d.kind === 'PRODUCTION_DISTRIBUTION');
@@ -104,7 +106,10 @@ export function ProductionPage() {
           prev !== '' && scoped.some((d) => d.id === prev) ? prev : (firstPlant?.id ?? ''),
         );
       })
-      .catch(() => setDepartments([]));
+      .catch(() => {
+        setAllDepartments([]);
+        setDepartments([]);
+      });
   }, [companyId, user]);
 
   async function loadSession(deptId: number) {
@@ -357,7 +362,7 @@ export function ProductionPage() {
           companyId={companyId === '' ? undefined : companyId}
           productionEnabled={productionEnabled}
           products={products}
-          scopedDepts={scopedDepts}
+          scopedDepts={allDepartments}
           canTransfer={canTransfer}
           canConfirm={canConfirm}
           canManageDeliveries={canManageDeliveries}

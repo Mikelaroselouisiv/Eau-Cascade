@@ -4,8 +4,13 @@ import { useAuth } from '@/context/AuthContext';
 import { filterTabsForAccess, SECTION_TABS } from '@/navigation/menu';
 
 export default function Index() {
-  const { can, canPerm } = useAuth();
+  const { can, canPerm, user } = useAuth();
   const first =
-    filterTabsForAccess(SECTION_TABS.pos, { can, canPerm })[0]?.name ?? 'classic';
+    filterTabsForAccess(SECTION_TABS.pos, {
+      can,
+      canPerm,
+      role: user?.role,
+      productionDepartmentIds: user?.productionDepartmentIds,
+    })[0]?.name ?? 'classic';
   return <Redirect href={`/(app)/pos/${first}` as never} />;
 }

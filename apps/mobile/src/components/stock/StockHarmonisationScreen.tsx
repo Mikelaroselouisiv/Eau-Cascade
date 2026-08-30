@@ -24,12 +24,14 @@ import {
 } from '@/services/api';
 import type { CompanyListItem, Department, Product } from '@/types/api';
 import { stockPackagingLabel } from '@/utils/packaging';
+import { assignedProductionDepartmentIds } from '@/utils/user-scope';
 import { formatQuantity } from '@/utils/quantity';
 
 export function StockHarmonisationScreen() {
-  const { canPerm } = useAuth();
-  const canStockIn = canPerm('stock.manage') || canPerm('stock.adjust');
+  const { user, canPerm } = useAuth();
+  const canStockIn = canPerm('stock.manage') || canPerm('stock.adjust') || canPerm('stock.raw_in');
   const canStockOut = canPerm('stock.adjust');
+  const rawInOnly = canPerm('stock.raw_in') && !canPerm('stock.manage') && !canPerm('stock.adjust');
   const allowed = canStockIn || canStockOut;
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
@@ -73,15 +75,26 @@ export function StockHarmonisationScreen() {
     }
     void getDepartments(companyId).then((d) => {
       setDepartments(d);
-      setDeptId((prev) => (prev !== '' && d.some((x) => x.id === prev) ? prev : ''));
+      const plants = assignedProductionDepartmentIds(d, user);
+      setDeptId((prev) => (prev !== '' && plants.includes(prev) ? prev : (plants[0] ?? '')));
       setProductId('');
     });
-  }, [companyId]);
+  }, [companyId, user]);
+
+  const plantIds = useMemo(
+    () => assignedProductionDepartmentIds(departments, user),
+    [departments, user],
+  );
+  const visibleDepartments = useMemo(
+    () => departments.filter((d) => plantIds.includes(d.id)),
+    [departments, plantIds],
+  );
 
   const filteredProducts = useMemo(() => {
     if (companyId === '' || deptId === '') return [];
     return products
       .filter((p) => p.trackStock && !p.isService)
+      .filter((p) => p.nature === 'RAW_MATERIAL')
       .filter((p) => (p.companyId ?? p.company?.id) === companyId)
       .filter((p) => p.department?.id === deptId)
       .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
@@ -94,9 +107,10 @@ export function StockHarmonisationScreen() {
   }, [filteredProducts, productId]);
 
   useEffect(() => {
+    if (rawInOnly) setKind('in');
     if (kind === 'in' && !canStockIn && canStockOut) setKind('out');
     if (kind === 'out' && !canStockOut && canStockIn) setKind('in');
-  }, [kind, canStockIn, canStockOut]);
+  }, [kind, canStockIn, canStockOut, rawInOnly]);
 
   const selected = useMemo(
     () => (productId === '' ? null : products.find((p) => p.id === productId) ?? null),
@@ -132,7 +146,7 @@ export function StockHarmonisationScreen() {
         await stockIn({
           productId,
           quantity,
-          reason: note ?? 'Réception / entrée stock',
+          reason: note ?? 'Matière première confiée à la production',
         });
       } else {
         if (!canStockOut) {
@@ -187,10 +201,12 @@ export function StockHarmonisationScreen() {
               <Pressable
                 style={[styles.kindChip, kind === 'in' && styles.kindChipActive]}
                 onPress={() => setKind('in')}>
-                <Text style={[styles.kindText, kind === 'in' && styles.kindTextActive]}>Entrée</Text>
+                <Text style={[styles.kindText, kind === 'in' && styles.kindTextActive]}>
+                  Entrée (matière première)
+                </Text>
               </Pressable>
             ) : null}
-            {canStockOut ? (
+            {canStockOut && !rawInOnly ? (
               <Pressable
                 style={[styles.kindChip, kind === 'out' && styles.kindChipActive]}
                 onPress={() => setKind('out')}>
@@ -213,7 +229,7 @@ export function StockHarmonisationScreen() {
 
           <Text style={styles.fieldLabel}>Département</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
-            {departments.map((d) => (
+            {visibleDepartments.map((d) => (
               <Chip
                 key={d.id}
                 label={d.name}
