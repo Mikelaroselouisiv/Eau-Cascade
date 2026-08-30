@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { BankTransactionType, FinanceType, FulfillmentType, MovementType, PaymentMethod, Prisma, ProductNature } from '@prisma/client';
+import { isProductionDepartment } from '../../common/department-kind';
 import { permissionsSatisfy } from '../../common/permissions';
 import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -223,6 +224,31 @@ export class SalesService {
         }
 
         loadedLines.push({ item, psu, baseQuantity });
+      }
+
+      if (fulfillmentType === FulfillmentType.HOME) {
+        const deptIds = Array.from(
+          new Set(
+            loadedLines
+              .map((l) => l.psu.product.departmentId)
+              .filter((id): id is number => id != null && id > 0),
+          ),
+        );
+        if (!deptIds.length) {
+          throw new BadRequestException(
+            'Livraison à domicile uniquement depuis une unité de production.',
+          );
+        }
+        const depts = await tx.department.findMany({
+          where: { id: { in: deptIds }, deletedAt: null },
+          select: { id: true, name: true, kind: true },
+        });
+        const shop = depts.find((d) => !isProductionDepartment(d.kind));
+        if (shop) {
+          throw new BadRequestException(
+            `« ${shop.name} » est un magasin de distribution : pas de livraison à domicile.`,
+          );
+        }
       }
 
       const familyQty = new Map<number, number>();

@@ -1,6 +1,6 @@
 {
   "name": "pos-backend",
-  "version": "1.0.0",
+  "version": "7.0.0",
   "description": "Professional POS backend with NestJS, Prisma and PostgreSQL",
   "private": true,
   "license": "UNLICENSED",

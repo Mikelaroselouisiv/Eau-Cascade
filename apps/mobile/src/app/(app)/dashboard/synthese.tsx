@@ -7,7 +7,7 @@ import { ChipScroll } from '@/components/ChipScroll';
 
 import { AuditJournalPanel } from '@/components/monitor/AuditJournalPanel';
 import { KpiCard } from '@/components/monitor/KpiCard';
-import { PeriodChips } from '@/components/monitor/PeriodChips';
+import { DashboardDateFilter } from '@/components/monitor/DashboardDateFilter';
 import { RegisterSessionsPanel } from '@/components/monitor/RegisterSessionsPanel';
 import { ProductionSessionsPanel } from '@/components/monitor/ProductionSessionsPanel';
 import { TopProductsDonut } from '@/components/monitor/TopProductsDonut';
@@ -19,14 +19,14 @@ import { useAuth } from '@/context/AuthContext';
 import { useCompanyScope } from '@/hooks/useCompanyScope';
 import { getDashboardSalesByProduct, getDashboardSummaryRange } from '@/services/api';
 import type { DashboardBalanceSnapshot, DashboardSalesByProductRow } from '@/types/api';
-import { periodDateRange, type PeriodKey } from '@/utils/datetime';
+import { dashboardPresetRange } from '@/utils/datetime';
 
 export default function SyntheseScreen() {
   const { can, canPerm } = useAuth();
   const canSeeSynthesis =
     can(['ADMIN']) || canPerm('dashboard.synthesis') || canPerm('reports.view');
   const { companyId, companies, setCompanyId, ready, lockedToSession } = useCompanyScope();
-  const [period, setPeriod] = useState<PeriodKey>('week');
+  const [range, setRange] = useState(() => dashboardPresetRange('week'));
   const [snapshot, setSnapshot] = useState<DashboardBalanceSnapshot | null>(null);
   const [topProducts, setTopProducts] = useState<DashboardSalesByProductRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -36,7 +36,7 @@ export default function SyntheseScreen() {
 
   const load = useCallback(async () => {
     if (!canSeeSynthesis || companyId == null) return;
-    const { dateFrom, dateTo } = periodDateRange(period);
+    const { dateFrom, dateTo } = range;
     try {
       setError(null);
       const [snap, products] = await Promise.all([
@@ -54,7 +54,7 @@ export default function SyntheseScreen() {
       setSnapshot(null);
       setTopProducts([]);
     }
-  }, [canSeeSynthesis, companyId, period]);
+  }, [canSeeSynthesis, companyId, range]);
 
   useFocusEffect(
     useCallback(() => {
@@ -105,7 +105,11 @@ export default function SyntheseScreen() {
           </ChipScroll>
         ) : null}
 
-        <PeriodChips value={period} onChange={setPeriod} />
+        <DashboardDateFilter
+          dateFrom={range.dateFrom}
+          dateTo={range.dateTo}
+          onChange={(dateFrom, dateTo) => setRange({ dateFrom, dateTo })}
+        />
         <View style={styles.viewSwitch}>
           <ViewSwitchButton
             icon="pie-chart-outline"
@@ -159,12 +163,14 @@ export default function SyntheseScreen() {
           <>
             <RegisterSessionsPanel
               companyId={companyId}
-              {...periodDateRange(period)}
+              dateFrom={range.dateFrom}
+              dateTo={range.dateTo}
               refreshKey={refreshKey}
             />
             <ProductionSessionsPanel
               companyId={companyId}
-              {...periodDateRange(period)}
+              dateFrom={range.dateFrom}
+              dateTo={range.dateTo}
               refreshKey={refreshKey}
             />
           </>
@@ -173,7 +179,8 @@ export default function SyntheseScreen() {
         {companyId != null && view === 'audit' ? (
           <AuditJournalPanel
             companyId={companyId}
-            {...periodDateRange(period)}
+            dateFrom={range.dateFrom}
+            dateTo={range.dateTo}
             refreshKey={refreshKey}
           />
         ) : null}

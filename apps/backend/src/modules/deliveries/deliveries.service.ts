@@ -103,6 +103,11 @@ export class DeliveriesService {
     },
   ) {
     const fulfillmentType = opts.fulfillmentType ?? FulfillmentType.ON_SITE;
+    const autoDelivered = await this.shouldAutoCompleteShopOnSite(
+      tx,
+      fulfillmentType,
+      opts.departmentId,
+    );
     const delivery = await tx.delivery.create({
       data: {
         saleId: opts.saleId,
@@ -111,12 +116,13 @@ export class DeliveriesService {
         // À domicile : le dépt source n’est connu qu’à la validation.
         departmentId:
           fulfillmentType === FulfillmentType.HOME ? null : (opts.departmentId ?? null),
-        status: DeliveryStatus.PENDING,
+        status: autoDelivered ? DeliveryStatus.DELIVERED : DeliveryStatus.PENDING,
+        deliveredAt: autoDelivered ? new Date() : null,
         items: {
           create: opts.items.map((it) => ({
             saleItemId: it.saleItemId,
             quantityOrdered: it.quantityOrdered,
-            quantityDelivered: 0,
+            quantityDelivered: autoDelivered ? it.quantityOrdered : 0,
           })),
         },
       },
@@ -180,6 +186,19 @@ export class DeliveriesService {
         },
       });
     }
+
+    const autoDelivered = await this.shouldAutoCompleteShopOnSite(
+      this.prisma,
+      fulfillmentType,
+      departmentId ?? sale.delivery.departmentId,
+    );
+    if (autoDelivered && sale.delivery.status !== DeliveryStatus.DELIVERED) {
+      const fresh = await this.prisma.delivery.findFirst({
+        where: { id: sale.delivery.id },
+        include: { items: true },
+      });
+      if (fresh) await this.markShopOnSiteDelivered(this.prisma, fresh);
+    }
     return sale.delivery;
   }
 
@@ -221,15 +240,20 @@ export class DeliveriesService {
     const take = Math.min(Math.max(filters.take ?? 100, 1), 100);
     const skip = Math.max(filters.skip ?? 0, 0);
     const q = filters.q?.trim() ?? '';
+    const seesHomePool = this.seesHomeDeliveryPool(user);
+
+    if (fulfillmentType === FulfillmentType.HOME && !seesHomePool) {
+      return { items: [], total: 0, skip, take };
+    }
 
     const where: Prisma.DeliveryWhereInput = {
       deletedAt: null,
       sale: { status: 'COMPLETED', deletedAt: null },
       ...(scope.companyId != null ? { companyId: scope.companyId } : {}),
-      // HOME : pool entreprise (n’importe quelle caisse enregistre, n’importe quelle usine exécute).
+      // HOME : pool entreprise pour usine / livreur / gérant — pas les caissiers magasin.
       ...(fulfillmentType === FulfillmentType.HOME && filters.departmentId == null
         ? {}
-        : this.departmentListClause(scope)),
+        : this.departmentListClause(scope, seesHomePool)),
       ...(status ? { status } : {}),
       ...(fulfillmentType ? { fulfillmentType } : {}),
     };
@@ -254,6 +278,8 @@ export class DeliveriesService {
       { createdAt: 'desc' },
     ];
 
+    await this.autoCompletePendingShopOnSite(200);
+
     let [total, rows] = await Promise.all([
       this.prisma.delivery.count({ where }),
       this.prisma.delivery.findMany({
@@ -265,7 +291,6 @@ export class DeliveriesService {
       }),
     ]);
 
-    // Ventes arrivées via sync sans fiche : réparer puis recharger une fois.
     if (total === 0 && !q) {
       await this.ensureMissingForCompletedSales(500);
       [total, rows] = await Promise.all([
@@ -865,23 +890,97 @@ export class DeliveriesService {
     }
   }
 
-  private departmentListClause(scope: {
-    departmentId?: number;
-    departmentIds?: number[];
-  }): Prisma.DeliveryWhereInput {
-    const homePending: Prisma.DeliveryWhereInput = {
-      fulfillmentType: FulfillmentType.HOME,
-      departmentId: null,
-    };
+  private seesHomeDeliveryPool(user: ScopeUser): boolean {
+    return user.role !== 'CASHIER';
+  }
+
+  private departmentListClause(
+    scope: {
+      departmentId?: number;
+      departmentIds?: number[];
+    },
+    includeHomePool: boolean,
+  ): Prisma.DeliveryWhereInput {
+    const homePending: Prisma.DeliveryWhereInput | null = includeHomePool
+      ? {
+          fulfillmentType: FulfillmentType.HOME,
+          departmentId: null,
+        }
+      : null;
     if (scope.departmentId != null) {
-      return { OR: [{ departmentId: scope.departmentId }, homePending] };
+      return homePending
+        ? { OR: [{ departmentId: scope.departmentId }, homePending] }
+        : { departmentId: scope.departmentId };
     }
     if (scope.departmentIds?.length) {
-      return {
-        OR: [{ departmentId: { in: scope.departmentIds } }, homePending],
-      };
+      return homePending
+        ? { OR: [{ departmentId: { in: scope.departmentIds } }, homePending] }
+        : { departmentId: { in: scope.departmentIds } };
     }
     return {};
+  }
+
+  /** Magasin DISTRIBUTION : la vente clôture la fiche (stock déjà sorti à l’encaissement). */
+  private async shouldAutoCompleteShopOnSite(
+    tx: Prisma.TransactionClient | PrismaService,
+    fulfillmentType: FulfillmentType,
+    departmentId?: number | null,
+  ): Promise<boolean> {
+    if (fulfillmentType === FulfillmentType.HOME) return false;
+    if (departmentId == null) return false;
+    const dept = await tx.department.findFirst({
+      where: { id: departmentId, deletedAt: null },
+      select: { kind: true },
+    });
+    return dept != null && !isProductionDepartment(dept.kind);
+  }
+
+  private async markShopOnSiteDelivered(
+    tx: Prisma.TransactionClient | PrismaService,
+    delivery: {
+      id: number;
+      status: DeliveryStatus;
+      deliveredAt?: Date | null;
+      items: Array<{
+        id: number;
+        quantityOrdered: Prisma.Decimal | number;
+        quantityDelivered: Prisma.Decimal | number;
+      }>;
+    },
+  ) {
+    if (delivery.status === DeliveryStatus.DELIVERED) return;
+    for (const item of delivery.items) {
+      const ordered = Number(item.quantityOrdered);
+      if (Number(item.quantityDelivered) + 0.0001 < ordered) {
+        await tx.deliveryItem.update({
+          where: { id: item.id },
+          data: { quantityDelivered: ordered },
+        });
+      }
+    }
+    await tx.delivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: DeliveryStatus.DELIVERED,
+        deliveredAt: delivery.deliveredAt ?? new Date(),
+      },
+    });
+  }
+
+  private async autoCompletePendingShopOnSite(limit: number) {
+    const rows = await this.prisma.delivery.findMany({
+      where: {
+        deletedAt: null,
+        status: { not: DeliveryStatus.DELIVERED },
+        fulfillmentType: FulfillmentType.ON_SITE,
+        department: { kind: { not: 'PRODUCTION_DISTRIBUTION' } },
+      },
+      include: { items: true },
+      take: Math.min(Math.max(limit, 1), 500),
+    });
+    for (const row of rows) {
+      await this.markShopOnSiteDelivered(this.prisma, row);
+    }
   }
 
   private async assertHomeStockDepartment(
@@ -896,9 +995,9 @@ export class DeliveriesService {
     if (!dept) {
       throw new BadRequestException('Département introuvable');
     }
-    if (!dept.offersHomeDelivery && !isProductionDepartment(dept.kind)) {
+    if (!isProductionDepartment(dept.kind)) {
       throw new BadRequestException(
-        `Le département « ${dept.name} » n’est pas configuré pour les livraisons à domicile.`,
+        `« ${dept.name} » est un magasin de distribution : pas de livraison à domicile.`,
       );
     }
     if (!canAccessAssignedDepartment(user, dept.id)) {
@@ -1009,6 +1108,9 @@ export class DeliveriesService {
       throw new ForbiddenException('Accès refusé');
     }
     if (fulfillmentType === FulfillmentType.HOME || fulfillmentType === 'HOME') {
+      if (user.role === 'CASHIER') {
+        throw new ForbiddenException('Accès refusé');
+      }
       return;
     }
     if (!canAccessAssignedDepartment(user, departmentId)) {

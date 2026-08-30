@@ -321,18 +321,22 @@ export function CompaniesConfigScreen() {
                       <>
                         <Text style={styles.flex}>
                           {d.name}
-                          {d.offersHomeDelivery ? ' · domicile' : ''}
+                          {d.kind === 'PRODUCTION_DISTRIBUTION' && d.offersHomeDelivery
+                            ? ' · domicile'
+                            : ''}
                         </Text>
-                        <Pressable
-                          onPress={() =>
-                            void updateDepartment(d.id, {
-                              offersHomeDelivery: !d.offersHomeDelivery,
-                            }).then(async () => setDepts(await getDepartments(editId)))
-                          }>
-                          <Text style={styles.link}>
-                            {d.offersHomeDelivery ? 'Sans domicile' : 'À domicile'}
-                          </Text>
-                        </Pressable>
+                        {d.kind === 'PRODUCTION_DISTRIBUTION' ? (
+                          <Pressable
+                            onPress={() =>
+                              void updateDepartment(d.id, {
+                                offersHomeDelivery: !d.offersHomeDelivery,
+                              }).then(async () => setDepts(await getDepartments(editId)))
+                            }>
+                            <Text style={styles.link}>
+                              {d.offersHomeDelivery ? 'Sans domicile' : 'À domicile'}
+                            </Text>
+                          </Pressable>
+                        ) : null}
                         <Pressable onPress={() => startRename(d)}>
                           <Text style={styles.link}>Renommer</Text>
                         </Pressable>

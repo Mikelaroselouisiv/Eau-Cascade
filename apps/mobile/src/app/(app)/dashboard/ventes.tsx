@@ -13,7 +13,7 @@ import {
 import { MoneyText } from '@/components/MoneyText';
 import { ChipScroll } from '@/components/ChipScroll';
 import { KpiCard } from '@/components/monitor/KpiCard';
-import { PeriodChips } from '@/components/monitor/PeriodChips';
+import { DashboardDateFilter } from '@/components/monitor/DashboardDateFilter';
 import { SaleDetailModal } from '@/components/monitor/SaleDetailModal';
 import { VentesDepartmentModal } from '@/components/monitor/VentesDepartmentModal';
 import { RefreshableScroll } from '@/components/RefreshableScroll';
@@ -36,9 +36,9 @@ import {
   businessDayEndIso,
   businessDayStartIso,
   businessTodayYmd,
+  dashboardPresetRange,
   formatDateTime,
-  periodDateRange,
-  type PeriodKey,
+  formatYmdDisplay,
 } from '@/utils/datetime';
 import { isSaleDeleted, saleDisplayRef } from '@/utils/saleRef';
 import { formatQuantity } from '@/utils/quantity';
@@ -55,7 +55,7 @@ export default function VentesScreen() {
   const { can, canPerm, user } = useAuth();
   const salesDeptParams = useMemo(() => salesQueryDepartmentParams(user), [user]);
   const { companyId, companies, setCompanyId, ready, lockedToSession } = useCompanyScope();
-  const [period, setPeriod] = useState<PeriodKey>('week');
+  const [range, setRange] = useState(() => dashboardPresetRange('week'));
   const [view, setView] = useState<'departments' | 'transactions'>('departments');
   const [byProduct, setByProduct] = useState<DashboardSalesByProductRow[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -78,7 +78,7 @@ export default function VentesScreen() {
   const load = useCallback(async (offset = 0) => {
     if (companyId == null) return;
     const append = offset > 0;
-    const rawRange = periodDateRange(period);
+    const rawRange = range;
     const today = businessTodayYmd();
     const dateFrom =
       salesRecentMinYmd && rawRange.dateFrom < salesRecentMinYmd
@@ -109,7 +109,7 @@ export default function VentesScreen() {
         setSalesTotal(0);
       }
     }
-  }, [companyId, period, salesRecentMinYmd, salesDeptParams]);
+  }, [companyId, range, salesRecentMinYmd, salesDeptParams]);
 
   useFocusEffect(
     useCallback(() => {
@@ -147,7 +147,7 @@ export default function VentesScreen() {
   }, [byProduct]);
 
   const grandTotal = byProduct.reduce((s, r) => s + Number(r.totalSubtotal || 0), 0);
-  const rawDisplayRange = periodDateRange(period);
+  const rawDisplayRange = range;
   const todayYmd = businessTodayYmd();
   const dateFrom =
     salesRecentMinYmd && rawDisplayRange.dateFrom < salesRecentMinYmd
@@ -243,10 +243,15 @@ export default function VentesScreen() {
           </ChipScroll>
         ) : null}
 
-        <PeriodChips value={period} onChange={setPeriod} />
+        <DashboardDateFilter
+          dateFrom={range.dateFrom}
+          dateTo={range.dateTo}
+          onChange={(dateFrom, dateTo) => setRange({ dateFrom, dateTo })}
+          minYmd={salesRecentMinYmd}
+        />
         {salesRecentMinYmd ? (
           <Text style={styles.sectionHint}>
-            Totaux limités aux 2 derniers jours (depuis {salesRecentMinYmd}, fuseau Port-au-Prince).
+            Totaux limités aux 2 derniers jours (depuis {formatYmdDisplay(salesRecentMinYmd)}).
           </Text>
         ) : null}
         <View style={styles.viewSwitch}>
@@ -301,7 +306,7 @@ export default function VentesScreen() {
                 <Text style={styles.sectionHint}>Touchez une carte pour voir les articles</Text>
               </View>
               <Text style={styles.periodLabel}>
-                {dateFrom} → {dateTo}
+                {formatYmdDisplay(dateFrom)} → {formatYmdDisplay(dateTo)}
               </Text>
             </View>
             {departmentGroups.length === 0 ? (

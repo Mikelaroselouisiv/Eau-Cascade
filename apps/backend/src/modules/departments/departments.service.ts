@@ -3,6 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { DepartmentKind } from '@prisma/client';
+import { departmentAllowsHomeDelivery } from '../../common/department-kind';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
@@ -37,13 +39,15 @@ export class DepartmentsService {
 
   async create(dto: CreateDepartmentDto) {
     const companyId = await this.resolveCompanyId(dto.companyId);
+    const kind = dto.kind ?? DepartmentKind.DISTRIBUTION;
     return this.prisma.department.create({
       data: {
         companyId,
         name: dto.name.trim(),
         description: dto.description?.trim(),
-        offersHomeDelivery: dto.offersHomeDelivery === true,
-        kind: dto.kind ?? undefined,
+        kind,
+        offersHomeDelivery:
+          departmentAllowsHomeDelivery(kind) && dto.offersHomeDelivery === true,
       },
       include: { company: { select: { id: true, name: true } } },
     });
@@ -56,6 +60,11 @@ export class DepartmentsService {
     if (!existing) {
       throw new NotFoundException('Rayon introuvable');
     }
+    const nextKind = dto.kind ?? existing.kind;
+    const requestedHome =
+      dto.offersHomeDelivery !== undefined
+        ? dto.offersHomeDelivery
+        : existing.offersHomeDelivery;
     return this.prisma.department.update({
       where: { id },
       data: {
@@ -63,10 +72,9 @@ export class DepartmentsService {
         ...(dto.description !== undefined && {
           description: dto.description?.trim() ?? null,
         }),
-        ...(dto.offersHomeDelivery !== undefined && {
-          offersHomeDelivery: dto.offersHomeDelivery,
-        }),
         ...(dto.kind !== undefined && { kind: dto.kind }),
+        offersHomeDelivery:
+          departmentAllowsHomeDelivery(nextKind) && requestedHome === true,
       },
       include: { company: { select: { id: true, name: true } } },
     });

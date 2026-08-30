@@ -433,7 +433,7 @@ export class CreditService {
         data: { txnNumber },
       });
 
-      // Fiche livraison PENDING — stock sort à la livraison (même flux que le POS).
+      // Fiche livraison : magasin DISTRIBUTION → déjà livrée ; usine → PENDING.
       const delivery = await this.deliveriesService.createFromSaleTx(tx, {
         saleId: sale.id,
         companyId: customer.companyId,

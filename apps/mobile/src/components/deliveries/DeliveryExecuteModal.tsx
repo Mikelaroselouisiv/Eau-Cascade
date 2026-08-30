@@ -117,7 +117,7 @@ export function DeliveryExecuteModal({
             const list = await getDepartments(cid);
             const scoped = departmentsForUser(list, user);
             choices = isHomeDelivery(full)
-              ? scoped.filter((d) => d.offersHomeDelivery)
+              ? scoped.filter((d) => d.kind === 'PRODUCTION_DISTRIBUTION')
               : scoped;
           } catch {
             choices = [];

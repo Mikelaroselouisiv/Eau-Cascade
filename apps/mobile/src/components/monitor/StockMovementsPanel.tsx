@@ -2,12 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { PeriodChips } from '@/components/monitor/PeriodChips';
+import { DashboardDateFilter } from '@/components/monitor/DashboardDateFilter';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { getInventoryMovements } from '@/services/api';
 import type { StockMovementRow } from '@/types/api';
-import { formatDateTime, periodDateRange, type PeriodKey } from '@/utils/datetime';
+import { dashboardPresetRange, formatDateTime } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
 
 type MovementType = '' | 'IN' | 'OUT' | 'ADJUSTMENT';
@@ -20,7 +20,7 @@ const TYPE_META = {
 };
 
 export function StockMovementsPanel({ companyId, refreshKey }: Props) {
-  const [period, setPeriod] = useState<PeriodKey>('week');
+  const [range, setRange] = useState(() => dashboardPresetRange('week'));
   const [type, setType] = useState<MovementType>('');
   const [query, setQuery] = useState('');
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
@@ -36,7 +36,7 @@ export function StockMovementsPanel({ companyId, refreshKey }: Props) {
       if (append) setLoadingMore(true);
       else setLoading(true);
       setError(null);
-      const { dateFrom, dateTo } = periodDateRange(period);
+      const { dateFrom, dateTo } = range;
       try {
         const result = await getInventoryMovements({
           companyId,
@@ -59,7 +59,7 @@ export function StockMovementsPanel({ companyId, refreshKey }: Props) {
         setLoadingMore(false);
       }
     },
-    [companyId, order, period],
+    [companyId, order, range],
   );
 
   useEffect(() => {
@@ -101,7 +101,11 @@ export function StockMovementsPanel({ companyId, refreshKey }: Props) {
         </Pressable>
       </View>
 
-      <PeriodChips value={period} onChange={setPeriod} />
+      <DashboardDateFilter
+        dateFrom={range.dateFrom}
+        dateTo={range.dateTo}
+        onChange={(dateFrom, dateTo) => setRange({ dateFrom, dateTo })}
+      />
 
       <View style={styles.chart}>
         {(['IN', 'OUT', 'ADJUSTMENT'] as const).map((key) => {

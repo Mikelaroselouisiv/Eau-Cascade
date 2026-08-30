@@ -7,6 +7,7 @@ import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import type { DashboardSalesByProductRow } from '@/types/api';
 import { formatQuantity } from '@/utils/quantity';
+import { formatYmdDisplay } from '@/utils/datetime';
 
 type DepartmentGroup = {
   key: string;
@@ -80,7 +81,7 @@ export function VentesDepartmentModal({ group, dateFrom, dateTo, onClose }: Prop
             {group?.label ?? ''}
           </Text>
           <Text style={styles.period}>
-            {dateFrom} → {dateTo}
+            {formatYmdDisplay(dateFrom)} → {formatYmdDisplay(dateTo)}
           </Text>
         </View>
         <Pressable onPress={onClose} hitSlop={12}>

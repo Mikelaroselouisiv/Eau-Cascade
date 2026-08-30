@@ -1532,19 +1532,28 @@ function DepartmentEditModal({
           </label>
           <label>
             Type
-            <select value={kind} onChange={(e) => setKind(e.target.value as DepartmentKind)}>
+            <select
+              value={kind}
+              onChange={(e) => {
+                const next = e.target.value as DepartmentKind;
+                setKind(next);
+                if (next !== 'PRODUCTION_DISTRIBUTION') setOffersHomeDelivery(false);
+              }}
+            >
               <option value="DISTRIBUTION">Distribution</option>
               <option value="PRODUCTION_DISTRIBUTION">Production et distribution</option>
             </select>
           </label>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={offersHomeDelivery}
-              onChange={(e) => setOffersHomeDelivery(e.target.checked)}
-            />
-            Ce département fait des livraisons à domicile
-          </label>
+          {kind === 'PRODUCTION_DISTRIBUTION' ? (
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={offersHomeDelivery}
+                onChange={(e) => setOffersHomeDelivery(e.target.checked)}
+              />
+              Livraisons à domicile
+            </label>
+          ) : null}
           {err ? <p className="error-text">{err}</p> : null}
           <div className="modal-actions">
             <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -1734,21 +1743,27 @@ function CompanyDepartmentsPanel({
               }}
             />
           </label>
-          <label className="checkbox-row" style={{ alignSelf: 'end' }}>
-            <input
-              type="checkbox"
-              checked={offersHomeDelivery}
-              disabled={!canEdit}
-              onChange={(e) => setOffersHomeDelivery(e.target.checked)}
-            />
-            Livraisons à domicile
-          </label>
+          {kind === 'PRODUCTION_DISTRIBUTION' ? (
+            <label className="checkbox-row" style={{ alignSelf: 'end' }}>
+              <input
+                type="checkbox"
+                checked={offersHomeDelivery}
+                disabled={!canEdit}
+                onChange={(e) => setOffersHomeDelivery(e.target.checked)}
+              />
+              Livraisons à domicile
+            </label>
+          ) : null}
           <label>
             Type
             <select
               value={kind}
               disabled={!canEdit}
-              onChange={(e) => setKind(e.target.value as DepartmentKind)}
+              onChange={(e) => {
+                const next = e.target.value as DepartmentKind;
+                setKind(next);
+                if (next !== 'PRODUCTION_DISTRIBUTION') setOffersHomeDelivery(false);
+              }}
             >
               <option value="DISTRIBUTION">Distribution</option>
               <option value="PRODUCTION_DISTRIBUTION">Production et distribution</option>
@@ -1788,7 +1803,7 @@ function CompanyDepartmentsPanel({
                   {d.kind === 'PRODUCTION_DISTRIBUTION' ? (
                     <span className="dept-card-meta">Production</span>
                   ) : null}
-                  {d.offersHomeDelivery ? (
+                  {d.kind === 'PRODUCTION_DISTRIBUTION' && d.offersHomeDelivery ? (
                     <span className="dept-card-meta">Livraisons à domicile</span>
                   ) : null}
                   {d.description ? <span className="dept-card-meta">{d.description}</span> : null}

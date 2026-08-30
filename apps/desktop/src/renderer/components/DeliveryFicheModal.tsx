@@ -66,7 +66,7 @@ export function DeliveryFicheModal({
     if (lockDepartmentId != null) {
       return departments.filter((d) => d.id === lockDepartmentId);
     }
-    return home ? departments.filter((d) => d.offersHomeDelivery) : departments;
+    return home ? departments.filter((d) => d.kind === 'PRODUCTION_DISTRIBUTION') : departments;
   }, [departments, home, lockDepartmentId]);
 
   function applyForm(d: Delivery) {

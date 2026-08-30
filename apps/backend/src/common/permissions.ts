@@ -207,8 +207,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'products.view',
     'sales.create',
     'sales.view',
-    'deliveries.view',
-    'deliveries.manage',
     'transfers.confirm',
     'stock.raw_in',
   ],

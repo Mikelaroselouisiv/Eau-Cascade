@@ -6,6 +6,13 @@ export function isProductionDepartment(
   return kind === DepartmentKind.PRODUCTION_DISTRIBUTION;
 }
 
+/** Livraison à domicile = usine uniquement (pas un magasin DISTRIBUTION). */
+export function departmentAllowsHomeDelivery(
+  kind?: DepartmentKind | string | null,
+): boolean {
+  return isProductionDepartment(kind);
+}
+
 export function holdsFinishedGoodsStock(
   kind?: DepartmentKind | string | null,
 ): boolean {

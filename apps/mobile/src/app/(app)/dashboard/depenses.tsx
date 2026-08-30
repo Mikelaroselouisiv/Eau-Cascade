@@ -13,7 +13,7 @@ import {
 
 import { MoneyText } from '@/components/MoneyText';
 import { KpiCard } from '@/components/monitor/KpiCard';
-import { PeriodChips } from '@/components/monitor/PeriodChips';
+import { DashboardDateFilter } from '@/components/monitor/DashboardDateFilter';
 import { RefreshableScroll } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
 import { BrandColors } from '@/constants/brand';
@@ -30,9 +30,8 @@ import {
 import type { DashboardBalanceSnapshot, FinanceLedgerRow } from '@/types/api';
 import {
   businessTodayYmd,
+  dashboardPresetRange,
   formatDateTime,
-  periodDateRange,
-  type PeriodKey,
 } from '@/utils/datetime';
 
 type LedgerNature = 'all' | 'purchase' | 'sale' | 'expense';
@@ -54,7 +53,7 @@ export default function DepensesScreen() {
   const canViewFinance = isAdmin || canPerm('finance.view') || canPerm('finance.write');
   const canWriteFinance =
     isAdmin || canPerm('finance.write') || canPerm('finance.expense');
-  const [period, setPeriod] = useState<PeriodKey>('month');
+  const [range, setRange] = useState(() => dashboardPresetRange('month'));
   const [snapshot, setSnapshot] = useState<DashboardBalanceSnapshot | null>(null);
   const [ledger, setLedger] = useState<FinanceLedgerRow[]>([]);
   const [ledgerTotal, setLedgerTotal] = useState(0);
@@ -71,7 +70,7 @@ export default function DepensesScreen() {
 
   const load = useCallback(async () => {
     if (companyId == null) return;
-    const { dateFrom, dateTo } = periodDateRange(period);
+    const { dateFrom, dateTo } = range;
     try {
       const [snap, led] = await Promise.all([
         getDashboardSummaryRange({ companyId, dateFrom, dateTo }),
@@ -85,7 +84,7 @@ export default function DepensesScreen() {
       setLedger([]);
       setLedgerTotal(0);
     }
-  }, [companyId, nature, period]);
+  }, [companyId, nature, range]);
 
   useFocusEffect(
     useCallback(() => {
@@ -133,7 +132,7 @@ export default function DepensesScreen() {
   async function loadMore() {
     if (loadingMore || ledger.length >= ledgerTotal || companyId == null) return;
     setLoadingMore(true);
-    const { dateFrom, dateTo } = periodDateRange(period);
+    const { dateFrom, dateTo } = range;
     try {
       const next = await getFinanceLedger({
         companyId,
@@ -176,7 +175,11 @@ export default function DepensesScreen() {
   return (
     <Screen keyboard>
       <RefreshableScroll refreshing={refreshing} onRefresh={onRefresh}>
-        <PeriodChips value={period} onChange={setPeriod} />
+        <DashboardDateFilter
+          dateFrom={range.dateFrom}
+          dateTo={range.dateTo}
+          onChange={(dateFrom, dateTo) => setRange({ dateFrom, dateTo })}
+        />
         {canViewFinance && snapshot ? (
           <View style={styles.kpiGrid}>
             {isAdmin ? (

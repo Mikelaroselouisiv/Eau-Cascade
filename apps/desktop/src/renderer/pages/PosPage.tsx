@@ -48,7 +48,7 @@ import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../utils/volumeU
 import { formatMoney, resolveCurrencyCode } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { formatRegisterCode } from '../utils/registerDisplay';
-import { departmentsForUser, isAdminRole, resolvedDepartmentIds } from '../utils/user-scope';
+import { departmentsForUser, isAdminRole, isProductionKind, resolvedDepartmentIds } from '../utils/user-scope';
 
 function sessionHolder(s: RegisterSessionDetail) {
   const who = s.openedBy?.fullName?.trim() || s.openedBy?.phone?.trim() || 'Utilisateur';
@@ -252,6 +252,22 @@ export function PosPage() {
     }
     return selectedDepartmentId === '' ? undefined : selectedDepartmentId;
   }, [posScopeLocked, assignedDeptIds, selectedDepartmentId]);
+
+  const canSellHome = useMemo(() => {
+    const kind = departments.find((d) => d.id === effectiveDepartmentId)?.kind;
+    if (isProductionKind(kind)) return true;
+    return (
+      effectiveDepartmentId != null &&
+      (user?.productionDepartmentIds ?? []).includes(effectiveDepartmentId)
+    );
+  }, [departments, effectiveDepartmentId, user?.productionDepartmentIds]);
+
+  useEffect(() => {
+    if (canSellHome) return;
+    setDrafts((prev) =>
+      prev.map((d) => (d.fulfillmentType === 'HOME' ? { ...d, fulfillmentType: 'ON_SITE' } : d)),
+    );
+  }, [canSellHome]);
 
   const effectiveCompanyId = useMemo(() => {
     if (posScopeLocked) {
@@ -1545,21 +1561,23 @@ export function PosPage() {
                 >
                   Sur place
                 </button>
-                <button
-                  type="button"
-                  className={`pos-fulfillment-btn${activeDraft.fulfillmentType === 'HOME' ? ' active' : ''}`}
-                  disabled={!salesEnabled}
-                  onClick={() =>
-                    updateActiveDraft((d) => ({
-                      ...d,
-                      fulfillmentType: 'HOME',
-                      deliveryStops:
-                        d.deliveryStops?.length ? d.deliveryStops : [{ address: '', quantity: '' }],
-                    }))
-                  }
-                >
-                  À domicile
-                </button>
+                {canSellHome ? (
+                  <button
+                    type="button"
+                    className={`pos-fulfillment-btn${activeDraft.fulfillmentType === 'HOME' ? ' active' : ''}`}
+                    disabled={!salesEnabled}
+                    onClick={() =>
+                      updateActiveDraft((d) => ({
+                        ...d,
+                        fulfillmentType: 'HOME',
+                        deliveryStops:
+                          d.deliveryStops?.length ? d.deliveryStops : [{ address: '', quantity: '' }],
+                      }))
+                    }
+                  >
+                    À domicile
+                  </button>
+                ) : null}
               </div>
               <label className="pos-draft-name-label">
                 Nom fiche

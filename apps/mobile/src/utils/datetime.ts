@@ -35,6 +35,10 @@ export function formatMoney(value: number | string | null | undefined): string {
 }
 
 export type PeriodKey = 'day' | 'week' | 'month';
+export type DashboardDatePreset = 'today' | 'yesterday' | 'dayBefore' | 'week' | 'month';
+export type DateRangeYmd = { dateFrom: string; dateTo: string };
+
+const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 export function businessTodayYmd(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -45,29 +49,76 @@ export function businessTodayYmd(): string {
   }).format(new Date());
 }
 
+export function parseYmd(ymd: string): { year: number; month: number; day: number } | null {
+  const match = YMD_RE.exec(ymd.trim());
+  if (!match) return null;
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+}
+
+export function formatYmdParts(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Affichage JJ/MM/AAAA (jour civil, sans conversion de fuseau). */
+export function formatYmdDisplay(ymd: string): string {
+  const parts = parseYmd(ymd);
+  if (!parts) return ymd;
+  return `${String(parts.day).padStart(2, '0')}/${String(parts.month).padStart(2, '0')}/${parts.year}`;
+}
+
+export function monthStartYmd(ymd: string = businessTodayYmd()): string {
+  const parts = parseYmd(ymd);
+  if (!parts) return ymd;
+  return formatYmdParts(parts.year, parts.month, 1);
+}
+
+export function clampYmd(ymd: string, minYmd?: string | null, maxYmd?: string | null): string {
+  let next = ymd;
+  if (minYmd && next < minYmd) next = minYmd;
+  if (maxYmd && next > maxYmd) next = maxYmd;
+  return next;
+}
+
+export function normalizeDateRange(
+  dateFrom: string,
+  dateTo: string,
+  minYmd?: string | null,
+  maxYmd?: string | null,
+): DateRangeYmd {
+  const from = clampYmd(dateFrom, minYmd, maxYmd);
+  const to = clampYmd(dateTo, minYmd, maxYmd);
+  if (from && to && from > to) return { dateFrom: to, dateTo: from };
+  return { dateFrom: from, dateTo: to };
+}
+
+export function dashboardPresetRange(preset: DashboardDatePreset): DateRangeYmd {
+  const today = businessTodayYmd();
+  if (preset === 'today') return { dateFrom: today, dateTo: today };
+  if (preset === 'yesterday') {
+    const day = addDaysYmd(today, -1);
+    return { dateFrom: day, dateTo: day };
+  }
+  if (preset === 'dayBefore') {
+    const day = addDaysYmd(today, -2);
+    return { dateFrom: day, dateTo: day };
+  }
+  if (preset === 'week') return { dateFrom: addDaysYmd(today, -6), dateTo: today };
+  return { dateFrom: monthStartYmd(today), dateTo: today };
+}
+
+export function matchDashboardPreset(dateFrom: string, dateTo: string): DashboardDatePreset | null {
+  const presets: DashboardDatePreset[] = ['today', 'yesterday', 'dayBefore', 'week', 'month'];
+  for (const preset of presets) {
+    const range = dashboardPresetRange(preset);
+    if (range.dateFrom === dateFrom && range.dateTo === dateTo) return preset;
+  }
+  return null;
+}
+
 /** Bornes YYYY-MM-DD pour les filtres API (jour civil Port-au-Prince). */
-export function periodDateRange(period: PeriodKey): { dateFrom: string; dateTo: string } {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: APP_TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now);
-  const y = Number(parts.find((p) => p.type === 'year')?.value);
-  const m = Number(parts.find((p) => p.type === 'month')?.value);
-  const d = Number(parts.find((p) => p.type === 'day')?.value);
-  const today = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-
-  if (period === 'day') return { dateFrom: today, dateTo: today };
-
-  const end = new Date(Date.UTC(y, m - 1, d));
-  const start = new Date(end);
-  if (period === 'week') start.setUTCDate(start.getUTCDate() - 6);
-  else start.setUTCDate(1);
-
-  const from = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, '0')}-${String(start.getUTCDate()).padStart(2, '0')}`;
-  return { dateFrom: from, dateTo: today };
+export function periodDateRange(period: PeriodKey): DateRangeYmd {
+  if (period === 'day') return dashboardPresetRange('today');
+  return dashboardPresetRange(period);
 }
 
 function businessDateTimeIso(ymd: string, endOfDay: boolean): string {

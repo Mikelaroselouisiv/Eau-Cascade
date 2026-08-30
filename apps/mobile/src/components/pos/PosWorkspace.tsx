@@ -67,7 +67,7 @@ import {
   specialPricesReady,
   type CartLine,
 } from '@/utils/posCart';
-import { departmentsForUser, isAdminRole, resolvedDepartmentIds } from '@/utils/user-scope';
+import { departmentsForUser, isAdminRole, isProductionKind, resolvedDepartmentIds } from '@/utils/user-scope';
 
 const DANGER = BrandColors.danger;
 const WARNING = '#B45309';
@@ -166,6 +166,19 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     : selectedDepartmentId === ''
       ? undefined
       : selectedDepartmentId;
+
+  const canSellHome = useMemo(() => {
+    const kind = departments.find((d) => d.id === departmentId)?.kind;
+    if (isProductionKind(kind)) return true;
+    return departmentId != null && (user?.productionDepartmentIds ?? []).includes(departmentId);
+  }, [departments, departmentId, user?.productionDepartmentIds]);
+
+  useEffect(() => {
+    if (canSellHome) return;
+    setDrafts((prev) =>
+      prev.map((d) => (d.fulfillmentType === 'HOME' ? { ...d, fulfillmentType: 'ON_SITE' } : d)),
+    );
+  }, [canSellHome]);
 
   const activeDraft = useMemo(
     () => drafts.find((d) => d.id === activeDraftId) ?? drafts[0],
@@ -1148,28 +1161,30 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
                   Sur place
                 </Text>
               </Pressable>
-              <Pressable
-                style={[
-                  styles.fulfillBtn,
-                  activeDraft?.fulfillmentType === 'HOME' && styles.fulfillBtnActive,
-                ]}
-                onPress={() =>
-                  updateActiveDraft((d) => ({
-                    ...d,
-                    fulfillmentType: 'HOME',
-                    deliveryStops: d.deliveryStops?.length
-                      ? d.deliveryStops
-                      : [{ address: '', quantity: '' }],
-                  }))
-                }>
-                <Text
+              {canSellHome ? (
+                <Pressable
                   style={[
-                    styles.fulfillBtnText,
-                    activeDraft?.fulfillmentType === 'HOME' && styles.fulfillBtnTextActive,
-                  ]}>
-                  À domicile
-                </Text>
-              </Pressable>
+                    styles.fulfillBtn,
+                    activeDraft?.fulfillmentType === 'HOME' && styles.fulfillBtnActive,
+                  ]}
+                  onPress={() =>
+                    updateActiveDraft((d) => ({
+                      ...d,
+                      fulfillmentType: 'HOME',
+                      deliveryStops: d.deliveryStops?.length
+                        ? d.deliveryStops
+                        : [{ address: '', quantity: '' }],
+                    }))
+                  }>
+                  <Text
+                    style={[
+                      styles.fulfillBtnText,
+                      activeDraft?.fulfillmentType === 'HOME' && styles.fulfillBtnTextActive,
+                    ]}>
+                    À domicile
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
             {activeDraft?.fulfillmentType === 'HOME' ? (
               <>

@@ -82,7 +82,9 @@ export function AppLayout() {
       return canPerm('stock.raw_in') && (user?.productionDepartmentIds?.length ?? 0) > 0;
     }
     if (!canPerm(item.permission)) return false;
-    if (item.to === '/app/livraisons' && user?.role === 'CHEF_PRODUCTION') return false;
+    if (item.to === '/app/livraisons' && (user?.role === 'CHEF_PRODUCTION' || user?.role === 'CASHIER')) {
+      return false;
+    }
     return true;
   });
 

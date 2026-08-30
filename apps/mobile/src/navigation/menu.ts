@@ -46,7 +46,7 @@ export const MENU_ITEMS: MenuItem[] = [
     label: 'Livraisons',
     href: '/(app)/deliveries',
     icon: 'bag-check-outline',
-    roles: ['ADMIN', 'MANAGER', 'CASHIER', 'LIVREUR', 'ACCOUNTANT'],
+    roles: ['ADMIN', 'MANAGER', 'LIVREUR', 'ACCOUNTANT'],
     permission: 'deliveries.view',
   },
   {
@@ -338,7 +338,12 @@ export function canAccessMenuItem(item: MenuItem, access: AccessFns): boolean {
     }
     return access.canPerm('stock.raw_in') && (access.productionDepartmentIds?.length ?? 0) > 0;
   }
-  if (item.key === 'deliveries' && access.role === 'CHEF_PRODUCTION') return false;
+  if (
+    item.key === 'deliveries' &&
+    (access.role === 'CHEF_PRODUCTION' || access.role === 'CASHIER')
+  ) {
+    return false;
+  }
   if (item.permission) return access.canPerm(item.permission);
   return access.can(item.roles);
 }

@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { MoneyText } from '@/components/MoneyText';
 import { KpiCard } from '@/components/monitor/KpiCard';
-import { PeriodChips } from '@/components/monitor/PeriodChips';
+import { DashboardDateFilter } from '@/components/monitor/DashboardDateFilter';
 import { RefreshableScroll } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
 import { BrandColors } from '@/constants/brand';
@@ -13,25 +13,25 @@ import { useAuth } from '@/context/AuthContext';
 import { useCompanyScope } from '@/hooks/useCompanyScope';
 import { getMarginAnalysis } from '@/services/api';
 import type { MarginAnalysisReport } from '@/types/api';
-import { periodDateRange, type PeriodKey } from '@/utils/datetime';
+import { dashboardPresetRange } from '@/utils/datetime';
 
 export default function BeneficesScreen() {
   const { can } = useAuth();
   const { companyId, ready } = useCompanyScope();
   const showCosts = can(['ADMIN']);
-  const [period, setPeriod] = useState<PeriodKey>('month');
+  const [range, setRange] = useState(() => dashboardPresetRange('month'));
   const [report, setReport] = useState<MarginAnalysisReport | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     if (companyId == null) return;
-    const { dateFrom, dateTo } = periodDateRange(period);
+    const { dateFrom, dateTo } = range;
     try {
       setReport(await getMarginAnalysis({ companyId, dateFrom, dateTo }));
     } catch {
       setReport(null);
     }
-  }, [companyId, period]);
+  }, [companyId, range]);
 
   useFocusEffect(
     useCallback(() => {
@@ -49,7 +49,11 @@ export default function BeneficesScreen() {
   return (
     <Screen>
       <RefreshableScroll refreshing={refreshing} onRefresh={onRefresh}>
-        <PeriodChips value={period} onChange={setPeriod} />
+        <DashboardDateFilter
+          dateFrom={range.dateFrom}
+          dateTo={range.dateTo}
+          onChange={(dateFrom, dateTo) => setRange({ dateFrom, dateTo })}
+        />
         {report ? (
           <View style={styles.kpiGrid}>
             <KpiCard label="CA" value={report.revenue} money />
