@@ -196,16 +196,11 @@ export function DeliveriesListScreen({ status }: Props) {
       </View>
       <View style={styles.filterRow}>
         {(
-          (user?.role === 'CASHIER'
-            ? [
-                { id: '', label: 'Toutes' },
-                { id: 'ON_SITE', label: 'Sur place' },
-              ]
-            : [
-                { id: '', label: 'Toutes' },
-                { id: 'ON_SITE', label: 'Sur place' },
-                { id: 'HOME', label: 'À domicile' },
-              ]) as const
+          [
+            { id: '', label: 'Toutes' },
+            { id: 'ON_SITE', label: 'Sur place' },
+            { id: 'HOME', label: 'À domicile' },
+          ] as const
         ).map((opt) => (
           <Pressable
             key={opt.id || 'all'}

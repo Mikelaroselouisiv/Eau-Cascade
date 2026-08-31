@@ -283,19 +283,17 @@ export function DeliveryPage() {
             <option value="PARTIAL">Partiel</option>
             <option value="DELIVERED">Livré</option>
           </select>
-          {user?.role !== 'CASHIER' ? (
-            <select
-              value={fulfillmentFilter}
-              onChange={(e) =>
-                setFulfillmentFilter(e.target.value as '' | 'ON_SITE' | 'HOME')
-              }
-              aria-label="Type de fiche"
-            >
-              <option value="">Toutes les fiches</option>
-              <option value="ON_SITE">Sur place</option>
-              <option value="HOME">À domicile</option>
-            </select>
-          ) : null}
+          <select
+            value={fulfillmentFilter}
+            onChange={(e) =>
+              setFulfillmentFilter(e.target.value as '' | 'ON_SITE' | 'HOME')
+            }
+            aria-label="Type de fiche"
+          >
+            <option value="">Toutes les fiches</option>
+            <option value="ON_SITE">Sur place</option>
+            <option value="HOME">À domicile</option>
+          </select>
         </div>
       </header>
       {message ? <p className="delivery-toast">{message}</p> : null}

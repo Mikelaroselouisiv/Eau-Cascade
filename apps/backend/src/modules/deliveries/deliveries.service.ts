@@ -241,19 +241,26 @@ export class DeliveriesService {
     const skip = Math.max(filters.skip ?? 0, 0);
     const q = filters.q?.trim() ?? '';
     const seesHomePool = this.seesHomeDeliveryPool(user);
+    const cashierOwnSales = user.role === 'CASHIER' && user.id != null;
 
-    if (fulfillmentType === FulfillmentType.HOME && !seesHomePool) {
+    if (fulfillmentType === FulfillmentType.HOME && !seesHomePool && !cashierOwnSales) {
       return { items: [], total: 0, skip, take };
     }
 
     const where: Prisma.DeliveryWhereInput = {
       deletedAt: null,
-      sale: { status: 'COMPLETED', deletedAt: null },
+      sale: {
+        status: 'COMPLETED',
+        deletedAt: null,
+        ...(cashierOwnSales ? { userId: user.id } : {}),
+      },
       ...(scope.companyId != null ? { companyId: scope.companyId } : {}),
-      // HOME : pool entreprise pour usine / livreur / gérant — pas les caissiers magasin.
-      ...(fulfillmentType === FulfillmentType.HOME && filters.departmentId == null
+      // Caissier : fiches de ses ventes. Autres rôles : département ± pool HOME entreprise.
+      ...(cashierOwnSales
         ? {}
-        : this.departmentListClause(scope, seesHomePool)),
+        : fulfillmentType === FulfillmentType.HOME && filters.departmentId == null
+          ? {}
+          : this.departmentListClause(scope, seesHomePool)),
       ...(status ? { status } : {}),
       ...(fulfillmentType ? { fulfillmentType } : {}),
     };
@@ -324,6 +331,7 @@ export class DeliveriesService {
       delivery.companyId,
       delivery.departmentId,
       delivery.fulfillmentType,
+      delivery.sale?.user?.id,
     );
     return this.withSaleRef(delivery);
   }
@@ -405,7 +413,7 @@ export class DeliveriesService {
   async update(id: number, dto: UpdateDeliveryDto, user: ScopeUser) {
     const delivery = await this.prisma.delivery.findFirst({
       where: { id, deletedAt: null },
-      include: { items: true, sale: { select: { id: true, status: true } } },
+      include: { items: true, sale: { select: { id: true, status: true, userId: true } } },
     });
     if (!delivery) throw new NotFoundException('Livraison introuvable');
     if (delivery.sale.status !== 'COMPLETED') {
@@ -416,6 +424,7 @@ export class DeliveriesService {
       delivery.companyId,
       delivery.departmentId,
       delivery.fulfillmentType,
+      delivery.sale.userId,
     );
     await this.assertCanManageFulfillment(user, delivery.fulfillmentType);
 
@@ -528,7 +537,7 @@ export class DeliveriesService {
       where: { id, deletedAt: null },
       include: {
         items: true,
-        sale: { select: { id: true, status: true } },
+        sale: { select: { id: true, status: true, userId: true } },
       },
     });
     if (!delivery) throw new NotFoundException('Livraison introuvable');
@@ -540,6 +549,7 @@ export class DeliveriesService {
       delivery.companyId,
       delivery.departmentId,
       delivery.fulfillmentType,
+      delivery.sale.userId,
     );
     await this.assertCanManageFulfillment(user, delivery.fulfillmentType);
 
@@ -1100,6 +1110,7 @@ export class DeliveriesService {
     companyId: number,
     departmentId: number | null,
     fulfillmentType?: FulfillmentType | string | null,
+    saleUserId?: number | null,
   ) {
     const role = user.role ?? '';
     if (role === 'ADMIN') return;
@@ -1109,10 +1120,12 @@ export class DeliveriesService {
     }
     if (fulfillmentType === FulfillmentType.HOME || fulfillmentType === 'HOME') {
       if (user.role === 'CASHIER') {
+        if (user.id != null && saleUserId === user.id) return;
         throw new ForbiddenException('Accès refusé');
       }
       return;
     }
+    if (user.role === 'CASHIER' && user.id != null && saleUserId === user.id) return;
     if (!canAccessAssignedDepartment(user, departmentId)) {
       throw new ForbiddenException('Accès refusé');
     }
