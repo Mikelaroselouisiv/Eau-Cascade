@@ -18,6 +18,7 @@ import { Permissions, PermissionsAny } from '../../common/decorators/permissions
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { formatDateFr } from '../../common/pdf/pdf-format';
+import { mergePlantCashierPermissions } from '../../common/plant-cashier';
 import { permissionsSatisfy } from '../../common/permissions';
 import { RolesService } from '../roles/roles.service';
 import { CloseCashDto, CreateFinanceEntryDto } from './dto/finance-entry.dto';
@@ -126,16 +127,25 @@ export class FinanceController {
   @PermissionsAny('finance.write', 'finance.expense')
   async createEntry(
     @Body() dto: CreateFinanceEntryDto,
-    @GetUser() user?: { id?: number; role?: string },
+    @GetUser()
+    user?: { id?: number; role?: string; productionDepartmentIds?: number[] },
   ) {
     if (user?.role) {
-      const perms = await this.rolesService.getPermissionsForUserRole(user.role);
+      const rolePerms = await this.rolesService.getPermissionsForUserRole(user.role);
+      const perms = mergePlantCashierPermissions(
+        user.role,
+        rolePerms,
+        user.productionDepartmentIds,
+      );
       const canFullWrite = permissionsSatisfy(perms, ['finance.write']);
       if (!canFullWrite && dto.type !== FinanceType.EXPENSE) {
         throw new ForbiddenException('Vous ne pouvez enregistrer que des dépenses.');
       }
     }
-    return this.financeService.createEntry(dto, user?.id);
+    return this.financeService.createEntry(dto, user?.id, {
+      role: user?.role,
+      productionDepartmentIds: user?.productionDepartmentIds,
+    });
   }
 
   @Post('cash-closure')

@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InventorySessionKind, RegisterSessionStatus } from '@prisma/client';
+import { FinanceType, InventorySessionKind, RegisterSessionStatus } from '@prisma/client';
 import { USER_ATTRIBUTION_SELECT, formatUserAttribution } from '../../common/user-attribution';
 import { ymdToBusinessDayEnd, ymdToBusinessDayStart } from '../../common/utils/business-timezone';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -417,6 +417,41 @@ export class RegisterSessionsService {
       unsettledChange,
       expected: expected < 0 ? 0 : expected,
     };
+  }
+
+  async listSessionExpenses(sessionId: number, userId: number) {
+    const session = await this.prisma.registerSession.findFirst({
+      where: { id: sessionId, deletedAt: null },
+    });
+    if (!session) {
+      throw new NotFoundException('Session introuvable');
+    }
+    if (session.openedById !== userId) {
+      throw new ForbiddenException('Session d’un autre utilisateur.');
+    }
+    const rows = await this.prisma.financeEntry.findMany({
+      where: {
+        type: FinanceType.EXPENSE,
+        deletedAt: null,
+        userId: session.openedById,
+        createdAt: { gte: session.openedAt },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        amount: true,
+        description: true,
+        detail: true,
+        createdAt: true,
+      },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      amount: Number(row.amount),
+      description: row.description,
+      detail: row.detail,
+      createdAt: row.createdAt,
+    }));
   }
 
   private round2(n: number) {

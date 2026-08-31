@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { Prisma } from '@prisma/client';
+import { DepartmentKind, Prisma } from '@prisma/client';
 import { isAdminRole } from '../../common/user-scope';
 import { normalizePhone } from '../../common/utils/phone';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -106,6 +106,20 @@ export class UsersService {
       throw new NotFoundException('Utilisateur introuvable');
     }
     return this.toPublic(user);
+  }
+
+  async plantDepartmentIds(departmentIds: number[]): Promise<number[]> {
+    const ids = departmentIds.filter((id) => Number.isFinite(id) && id > 0);
+    if (!ids.length) return [];
+    const plants = await this.prisma.department.findMany({
+      where: {
+        id: { in: ids },
+        kind: DepartmentKind.PRODUCTION_DISTRIBUTION,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    return plants.map((p) => p.id);
   }
 
   findByPhone(phone: string) {

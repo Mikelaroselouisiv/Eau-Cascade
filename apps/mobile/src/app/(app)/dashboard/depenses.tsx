@@ -47,12 +47,13 @@ function expenseParts(row: FinanceLedgerRow): { label: string; detail: string | 
 }
 
 export default function DepensesScreen() {
-  const { can, canPerm } = useAuth();
+  const { can, canPerm, user } = useAuth();
   const { companyId, ready } = useCompanyScope();
   const isAdmin = can(['ADMIN']);
   const canViewFinance = isAdmin || canPerm('finance.view') || canPerm('finance.write');
   const canWriteFinance =
-    isAdmin || canPerm('finance.write') || canPerm('finance.expense');
+    user?.role !== 'CASHIER' &&
+    (isAdmin || canPerm('finance.write') || canPerm('finance.expense'));
   const [range, setRange] = useState(() => dashboardPresetRange('month'));
   const [snapshot, setSnapshot] = useState<DashboardBalanceSnapshot | null>(null);
   const [ledger, setLedger] = useState<FinanceLedgerRow[]>([]);

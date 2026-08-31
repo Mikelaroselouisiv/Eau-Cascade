@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/c
 import { JwtService } from '@nestjs/jwt';
 import { DepartmentKind } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { mergePlantCashierPermissions } from '../../common/plant-cashier';
 import { normalizePhone } from '../../common/utils/phone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -191,6 +192,7 @@ export class AuthService {
       });
       productionDepartmentIds = plants.map((p) => p.id);
     }
+    permissions = mergePlantCashierPermissions(user.role, permissions, productionDepartmentIds);
     return {
       id: user.id,
       phone: user.phone,

@@ -41,6 +41,7 @@ import type {
 } from '../types/api';
 import { RegisterStockCountForm } from '../components/RegisterStockCountForm';
 import { TransferInboxPanel } from '../components/TransferInboxPanel';
+import { PosSessionExpensesPanel } from '../components/PosSessionExpensesPanel';
 import { MoneyField } from '../components/MoneyField';
 import { useAuth } from '../context/AuthContext';
 import { useAutoClearMessage } from '../hooks/useAutoClearMessage';
@@ -48,7 +49,7 @@ import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../utils/volumeU
 import { formatMoney, resolveCurrencyCode } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { formatRegisterCode } from '../utils/registerDisplay';
-import { departmentsForUser, isAdminRole, isProductionKind, resolvedDepartmentIds } from '../utils/user-scope';
+import { departmentsForUser, isAdminRole, isPlantCashier, isProductionKind, resolvedDepartmentIds } from '../utils/user-scope';
 
 function sessionHolder(s: RegisterSessionDetail) {
   const who = s.openedBy?.fullName?.trim() || s.openedBy?.phone?.trim() || 'Utilisateur';
@@ -153,7 +154,8 @@ export function PosPage() {
   const posScopeLocked = !isAdminRole(user?.role) && assignedDeptIds.length === 1;
   const canSpecialSale = canPerm('sales.special_price');
   const canConfirmTransfers = canPerm('transfers.confirm');
-  const [posPane, setPosPane] = useState<'sale' | 'receive'>('sale');
+  const canPosExpense = isPlantCashier(user);
+  const [posPane, setPosPane] = useState<'sale' | 'receive' | 'expense'>('sale');
   const [transferInbox, setTransferInbox] = useState<InternalTransferRow[]>([]);
   const [saleMode, setSaleMode] = useState<'classic' | 'special'>('classic');
   const [products, setProducts] = useState<Product[]>([]);
@@ -245,6 +247,10 @@ export function PosPage() {
       .then(setTransferInbox)
       .catch(() => setTransferInbox([]));
   }, [canConfirmTransfers]);
+
+  useEffect(() => {
+    if (!canPosExpense && posPane === 'expense') setPosPane('sale');
+  }, [canPosExpense, posPane]);
 
   const effectiveDepartmentId = useMemo(() => {
     if (posScopeLocked) {
@@ -1200,6 +1206,17 @@ export function PosPage() {
               Réceptions{transferInbox.length ? ` (${transferInbox.length})` : ''}
             </button>
           ) : null}
+          {canPosExpense ? (
+            <button
+              type="button"
+              role="tab"
+              className={`pos-sale-mode-btn${posPane === 'expense' ? ' active' : ''}`}
+              aria-selected={posPane === 'expense'}
+              onClick={() => setPosPane('expense')}
+            >
+              Dépenses
+            </button>
+          ) : null}
         </div>
         {registerSession ? (
           <span className="info-text" style={{ margin: 0 }}>
@@ -1392,6 +1409,15 @@ export function PosPage() {
           <h2 style={{ marginTop: 0 }}>Réceptions</h2>
           <TransferInboxPanel inbox={transferInbox} onChange={setTransferInbox} />
         </section>
+      ) : posPane === 'expense' && canPosExpense ? (
+        <PosSessionExpensesPanel
+          sessionId={registerSession?.id ?? null}
+          companyId={
+            registerSession?.department.company.id ??
+            (selectedCompanyId === '' ? null : selectedCompanyId)
+          }
+          enabled={registerSession != null}
+        />
       ) : (
       <div className="pos-grid">
         <section className="card pos-products">

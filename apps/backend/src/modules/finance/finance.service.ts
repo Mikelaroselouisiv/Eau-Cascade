@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { FinanceType, GoodsReceiptStatus, Prisma } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { FinanceType, GoodsReceiptStatus, Prisma, RegisterSessionStatus } from '@prisma/client';
 import {
   collectPdfBuffer,
   createPdfDoc,
@@ -9,6 +9,7 @@ import {
   generatedMetaLine,
 } from '../../common/pdf/pdf-document';
 import { formatDateFr, formatDateTimeFr, formatMoneyHtg } from '../../common/pdf/pdf-format';
+import { isPlantCashier } from '../../common/plant-cashier';
 import {
   ymdToBusinessDayEnd,
   ymdToBusinessDayStart,
@@ -284,7 +285,33 @@ export class FinanceService {
     return collectPdfBuffer(doc);
   }
 
-  async createEntry(dto: CreateFinanceEntryDto, userId?: number) {
+  async createEntry(
+    dto: CreateFinanceEntryDto,
+    userId?: number,
+    actor?: { role?: string | null; productionDepartmentIds?: number[] | null },
+  ) {
+    const plantCashier = isPlantCashier(actor);
+    if (plantCashier) {
+      if (dto.type !== FinanceType.EXPENSE) {
+        throw new ForbiddenException('Vous ne pouvez enregistrer que des dépenses.');
+      }
+      if (userId == null) {
+        throw new ForbiddenException('Session invalide.');
+      }
+      const open = await this.prisma.registerSession.findFirst({
+        where: {
+          openedById: userId,
+          status: RegisterSessionStatus.OPEN,
+          closedAt: null,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (!open) {
+        throw new BadRequestException('Ouvrez la caisse pour enregistrer une dépense.');
+      }
+    }
+
     const companyId =
       dto.companyId ??
       (userId != null
@@ -310,7 +337,12 @@ export class FinanceService {
       }
     }
 
-    const createdAt = dto.entryDate ? this.entryDateFromYmd(dto.entryDate) : undefined;
+    // Caissier usine : horodatage immédiat pour que la clôture de caisse voit la dépense.
+    const createdAt = plantCashier
+      ? undefined
+      : dto.entryDate
+        ? this.entryDateFromYmd(dto.entryDate)
+        : undefined;
 
     const detail = dto.detail?.trim() || null;
 

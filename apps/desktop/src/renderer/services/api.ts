@@ -1080,6 +1080,23 @@ export async function getRegisterClosingCashPreview(sessionId: number): Promise<
   return data;
 }
 
+export type RegisterSessionExpenseRow = {
+  id: number;
+  amount: number;
+  description: string;
+  detail: string | null;
+  createdAt: string;
+};
+
+export async function listRegisterSessionExpenses(
+  sessionId: number,
+): Promise<RegisterSessionExpenseRow[]> {
+  const { data } = await api.get<RegisterSessionExpenseRow[]>(
+    `/register-sessions/${sessionId}/expenses`,
+  );
+  return data;
+}
+
 export async function getGlobalStockSnapshot(params?: {
   companyIds?: number[];
   departmentIds?: number[];

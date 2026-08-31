@@ -36,7 +36,7 @@ export class BanksController {
 
   /** Liste pour config banques + sélection compte au POS (paiement banque). */
   @Get()
-  @PermissionsAny('banks.view', 'pos.use', 'sales.create')
+  @PermissionsAny('banks.view', 'pos.use', 'sales.create', 'credit.manage')
   listBanks(
     @Query('companyId', ParseIntPipe) companyId: number,
     @Query('includeInactive') includeInactive?: string,

@@ -114,6 +114,11 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
       icon: 'download-outline',
       permission: 'transfers.confirm',
     },
+    {
+      name: 'expenses',
+      title: 'Dépenses',
+      icon: 'cash-outline',
+    },
   ],
   deliveries: [
     { name: 'all', title: 'Tous', icon: 'list-outline', permission: 'deliveries.view' },
@@ -357,11 +362,15 @@ export function canAccessTab(tab: SectionTab, access: AccessFns): boolean {
     return access.canPerm('stock.global') || access.canPerm('reports.view');
   }
   if (tab.name === 'depenses') {
+    if (access.role === 'CASHIER') return false;
     return (
       access.canPerm('finance.view') ||
       access.canPerm('finance.write') ||
       access.canPerm('finance.expense')
     );
+  }
+  if (tab.name === 'expenses') {
+    return access.role === 'CASHIER' && (access.productionDepartmentIds?.length ?? 0) > 0;
   }
   if (tab.name === 'harmonisation') {
     if (access.role === 'CHEF_PRODUCTION') return false;

@@ -39,13 +39,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException();
     }
 
+    const departmentIds = user.departmentIds ?? [];
+    const productionDepartmentIds = await this.usersService.plantDepartmentIds(departmentIds);
     return {
       id,
       phone: user.phone,
       role: user.role,
       companyId: user.companyId,
       departmentId: user.departmentId,
-      departmentIds: user.departmentIds ?? [],
+      departmentIds,
+      productionDepartmentIds,
     };
   }
 }

@@ -18,8 +18,10 @@ import { Screen } from '@/components/Screen';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
+import { resolvedDepartmentIds } from '@/utils/user-scope';
 import { useCompanyScope } from '@/hooks/useCompanyScope';
 import {
+  createCreditCustomer,
   createCreditSale,
   getCreditCustomer,
   getCreditSummary,
@@ -76,10 +78,11 @@ function matchesMode(c: CreditCustomerListItem, mode: CreditListMode): boolean {
 }
 
 export function CreditCustomersScreen({ mode }: Props) {
-  const { canPerm } = useAuth();
+  const { canPerm, user } = useAuth();
   const { companyId, ready } = useCompanyScope();
   const allowed = canPerm('credit.view');
   const canManage = canPerm('credit.manage');
+  const defaultDeptId = resolvedDepartmentIds(user)[0];
 
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
@@ -107,6 +110,14 @@ export function CreditCustomersScreen({ mode }: Props) {
   const [saleNote, setSaleNote] = useState('');
   const [saleBusy, setSaleBusy] = useState(false);
   const [saleStatus, setSaleStatus] = useState<string | null>(null);
+  const [createVisible, setCreateVisible] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newAddress, setNewAddress] = useState('');
+  const [newLimit, setNewLimit] = useState('0');
+  const [newNote, setNewNote] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createStatus, setCreateStatus] = useState<string | null>(null);
 
   const filtered = useMemo(
     () => customers.filter((c) => matchesMode(c, mode)),
@@ -303,11 +314,54 @@ export function CreditCustomersScreen({ mode }: Props) {
     }
   }
 
+  async function submitCreateCustomer() {
+    if (!canManage || companyId == null) return;
+    const name = newName.trim();
+    if (!name) {
+      setCreateStatus('Nom requis');
+      return;
+    }
+    const limit = Number(String(newLimit).replace(',', '.'));
+    if (!Number.isFinite(limit) || limit < 0) {
+      setCreateStatus('Plafond invalide');
+      return;
+    }
+    setCreating(true);
+    setCreateStatus(null);
+    try {
+      const created = await createCreditCustomer({
+        companyId,
+        departmentId: defaultDeptId,
+        name,
+        phone: newPhone.trim() || undefined,
+        address: newAddress.trim() || undefined,
+        note: newNote.trim() || undefined,
+        creditLimit: limit,
+      });
+      setCreateVisible(false);
+      setNewName('');
+      setNewPhone('');
+      setNewAddress('');
+      setNewLimit('0');
+      setNewNote('');
+      await load();
+      try {
+        setDetail(await getCreditCustomer(created.id));
+      } catch {
+        /* liste déjà rafraîchie */
+      }
+    } catch (err) {
+      setCreateStatus(formatApiError(err, 'Enregistrement impossible'));
+    } finally {
+      setCreating(false);
+    }
+  }
+
   if (!allowed) {
     return (
       <Screen>
         <View style={styles.blocked}>
-          <Text style={styles.blockedText}>Crédit réservé aux administrateurs et gestionnaires.</Text>
+          <Text style={styles.blockedText}>Accès refusé.</Text>
         </View>
       </Screen>
     );
@@ -350,6 +404,16 @@ export function CreditCustomersScreen({ mode }: Props) {
         <Pressable style={styles.searchBtn} onPress={() => setQuery(q.trim())}>
           <Text style={styles.searchBtnText}>OK</Text>
         </Pressable>
+        {canManage ? (
+          <Pressable
+            style={styles.searchBtn}
+            onPress={() => {
+              setCreateStatus(null);
+              setCreateVisible(true);
+            }}>
+            <Text style={styles.searchBtnText}>+</Text>
+          </Pressable>
+        ) : null}
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -777,6 +841,72 @@ export function CreditCustomersScreen({ mode }: Props) {
         <View style={styles.modalTop}>
           <Text style={styles.modalTopTitle}>Nouvelle vente à crédit</Text>
           <Pressable onPress={() => setSaleVisible(false)} hitSlop={12}>
+            <Text style={styles.modalClose}>Fermer</Text>
+          </Pressable>
+        </View>
+      </ModalShell>
+      <ModalShell
+        visible={createVisible}
+        onRequestClose={() => setCreateVisible(false)}
+        body={
+          <View style={styles.saleBody}>
+            <TextInput
+              style={styles.input}
+              placeholder="Nom *"
+              placeholderTextColor={BrandColors.textMuted}
+              value={newName}
+              onChangeText={setNewName}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Téléphone"
+              placeholderTextColor={BrandColors.textMuted}
+              keyboardType="phone-pad"
+              value={newPhone}
+              onChangeText={setNewPhone}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Adresse"
+              placeholderTextColor={BrandColors.textMuted}
+              value={newAddress}
+              onChangeText={setNewAddress}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Plafond"
+              placeholderTextColor={BrandColors.textMuted}
+              keyboardType="decimal-pad"
+              value={newLimit}
+              onChangeText={setNewLimit}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Note"
+              placeholderTextColor={BrandColors.textMuted}
+              value={newNote}
+              onChangeText={setNewNote}
+            />
+            {createStatus ? <Text style={styles.error}>{createStatus}</Text> : null}
+          </View>
+        }
+        footer={
+          <View style={styles.footer}>
+            <Pressable
+              style={[styles.primaryBtn, creating && styles.disabled]}
+              disabled={creating}
+              onPress={() => void submitCreateCustomer()}>
+              {creating ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryBtnText}>Enregistrer</Text>
+              )}
+            </Pressable>
+          </View>
+        }>
+        <View style={styles.modalTop}>
+          <Text style={styles.modalTopTitle}>Nouveau client</Text>
+          <Pressable onPress={() => setCreateVisible(false)} hitSlop={12}>
             <Text style={styles.modalClose}>Fermer</Text>
           </Pressable>
         </View>

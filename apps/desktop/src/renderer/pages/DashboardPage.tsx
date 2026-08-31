@@ -77,7 +77,8 @@ export function DashboardPage() {
   /** Voir journal / totaux finance (pas seulement saisir une dépense). */
   const canViewFinance = canPerm('finance.view') || canManageFinance;
   /** Formulaire dépense seul — sans accès au reste de la finance. */
-  const canRecordExpense = canPerm('finance.expense') || canManageFinance;
+  const canRecordExpense =
+    user?.role !== 'CASHIER' && (canPerm('finance.expense') || canManageFinance);
   const showExpensesTab = canRecordExpense || canViewFinance;
   const canCancelOrRefund = canPerm('sales.cancel');
   const canDeleteSale = canPerm('sales.delete');

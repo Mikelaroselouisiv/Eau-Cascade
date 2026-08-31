@@ -140,6 +140,15 @@ export class RegisterSessionsController {
     return this.registerSessionsService.getClosingCashPreview(id, user.id);
   }
 
+  @Get(':id/expenses')
+  @Permissions('pos.use')
+  sessionExpenses(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: { id: number },
+  ) {
+    return this.registerSessionsService.listSessionExpenses(id, user.id);
+  }
+
   @Get(':id')
   @Permissions('pos.use')
   getOne(@Param('id', ParseIntPipe) id: number) {

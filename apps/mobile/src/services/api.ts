@@ -1034,6 +1034,23 @@ export async function getRegisterClosingCashPreview(
   return data;
 }
 
+export type RegisterSessionExpenseRow = {
+  id: number;
+  amount: number;
+  description: string;
+  detail: string | null;
+  createdAt: string;
+};
+
+export async function listRegisterSessionExpenses(
+  sessionId: number,
+): Promise<RegisterSessionExpenseRow[]> {
+  const { data } = await api.get<RegisterSessionExpenseRow[]>(
+    `/register-sessions/${sessionId}/expenses`,
+  );
+  return data;
+}
+
 export async function listAuditLogs(params?: {
   skip?: number;
   take?: number;
@@ -1328,6 +1345,19 @@ export async function listCreditCustomers(params: {
 
 export async function getCreditCustomer(id: number): Promise<CreditCustomerDetail> {
   const { data } = await api.get<CreditCustomerDetail>(`/credit/customers/${id}`);
+  return data;
+}
+
+export async function createCreditCustomer(payload: {
+  companyId: number;
+  departmentId?: number;
+  name: string;
+  phone?: string;
+  address?: string;
+  note?: string;
+  creditLimit?: number;
+}): Promise<{ id: number }> {
+  const { data } = await api.post<{ id: number }>('/credit/customers', payload);
   return data;
 }
 

@@ -47,6 +47,17 @@ export function isProductionKind(kind?: string | null): boolean {
   return kind === 'PRODUCTION_DISTRIBUTION';
 }
 
+/** Caissier affecté à au moins une usine (production + distribution). */
+export function isPlantCashier(user: {
+  role?: string | null;
+  productionDepartmentIds?: number[] | null;
+} | null | undefined): boolean {
+  return (
+    user?.role === 'CASHIER' &&
+    (user.productionDepartmentIds ?? []).some((id) => Number.isFinite(id) && id > 0)
+  );
+}
+
 /** Caissier (ou autre) affecté uniquement à des magasins DISTRIBUTION — pas d’usine. */
 export function isDistributionOnlyUser(user: {
   departmentId?: number | null;

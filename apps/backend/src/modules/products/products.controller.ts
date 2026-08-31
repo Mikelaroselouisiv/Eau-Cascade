@@ -11,7 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Permissions } from '../../common/decorators/permissions.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -34,7 +34,7 @@ export class ProductsController {
   }
 
   @Get()
-  @Permissions('products.view')
+  @PermissionsAny('products.view', 'pos.use', 'credit.manage')
   findAll(
     @Query('departmentId') departmentIdRaw?: string,
     @Query('asOf') asOf?: string,

@@ -5,6 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { mergePlantCashierPermissions } from '../plant-cashier';
 import { permissionsSatisfy } from '../permissions';
 import {
   PERMISSIONS_ANY_KEY,
@@ -41,14 +42,22 @@ export class RolesGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest();
-    const user = request.user as { role?: string } | undefined;
+    const user = request.user as {
+      role?: string;
+      productionDepartmentIds?: number[];
+    } | undefined;
 
     if (!user?.role) {
       throw new ForbiddenException('Accès refusé pour votre rôle');
     }
 
     if (hasPermMeta) {
-      const userPerms = await this.rolesService.getPermissionsForUserRole(user.role);
+      const rolePerms = await this.rolesService.getPermissionsForUserRole(user.role);
+      const userPerms = mergePlantCashierPermissions(
+        user.role,
+        rolePerms,
+        user.productionDepartmentIds,
+      );
       if (userPerms.includes('*')) return true;
 
       if (requiredAll && requiredAll.length > 0) {
