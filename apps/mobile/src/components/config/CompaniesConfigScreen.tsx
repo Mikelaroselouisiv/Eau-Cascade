@@ -12,30 +12,22 @@ import {
   View,
 } from 'react-native';
 
+import { CompanyDepartmentsPanel } from '@/components/config/CompanyDepartmentsPanel';
 import { ModalShell } from '@/components/ModalShell';
 import { Screen } from '@/components/Screen';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import {
-  createCompany,
-  createDepartment,
-  deleteCompany,
-  deleteDepartment,
-  getCompanies,
-  getDepartments,
-  updateCompany,
-  updateDepartment,
-} from '@/services/api';
-import type { CompanyListItem, Department } from '@/types/api';
+import { createCompany, deleteCompany, getCompanies, updateCompany } from '@/services/api';
+import type { CompanyListItem } from '@/types/api';
 
 export function CompaniesConfigScreen() {
   const { can, canPerm } = useAuth();
   const canCreate = can(['ADMIN']) || canPerm('company.manage');
-  const canEdit =
-    canPerm('company.manage') || canPerm('config.manage');
+  const canEditCompany = canPerm('company.manage') || canPerm('config.manage');
+  const canEditDepts = canPerm('departments.manage');
   const canDelete = can(['ADMIN']) || canPerm('company.manage');
-  const allowed = canEdit || canPerm('config.view');
+  const allowed = canEditCompany || canEditDepts || canPerm('config.view');
 
   const [rows, setRows] = useState<CompanyListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -49,11 +41,6 @@ export function CompaniesConfigScreen() {
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [phone, setPhone] = useState('');
-  const [depts, setDepts] = useState<Department[]>([]);
-  const [newDept, setNewDept] = useState('');
-  const [newDeptHome, setNewDeptHome] = useState(false);
-  const [renamingId, setRenamingId] = useState<number | null>(null);
-  const [renameValue, setRenameValue] = useState('');
 
   const load = useCallback(async () => {
     if (!allowed) return;
@@ -77,9 +64,6 @@ export function CompaniesConfigScreen() {
     setAddress('');
     setCity('');
     setPhone('');
-    setDepts([]);
-    setNewDept('');
-    setNewDeptHome(false);
     setStatus(null);
     setModal('create');
   }
@@ -90,18 +74,12 @@ export function CompaniesConfigScreen() {
     setAddress(row.address ?? '');
     setCity(row.city ?? '');
     setPhone(row.phone ?? '');
-    setNewDept('');
-    setNewDeptHome(false);
     setStatus(null);
     setModal('edit');
-    try {
-      setDepts(await getDepartments(row.id));
-    } catch {
-      setDepts([]);
-    }
   }
 
   async function submitCompany() {
+    if (!canEditCompany && modal !== 'create') return;
     if (!name.trim()) {
       setStatus('Raison sociale requise');
       return;
@@ -120,8 +98,7 @@ export function CompaniesConfigScreen() {
         const created = await createCompany(payload);
         setEditId(created.id);
         setModal('edit');
-        setStatus('Entreprise créée — ajoutez des départements');
-        setDepts(await getDepartments(created.id));
+        setStatus('Entreprise créée');
       } else if (editId != null) {
         await updateCompany(editId, payload);
         setStatus('Entreprise enregistrée');
@@ -132,64 +109,6 @@ export function CompaniesConfigScreen() {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function addDepartment() {
-    if (editId == null || !newDept.trim()) return;
-    setBusy(true);
-    try {
-      await createDepartment({
-        companyId: editId,
-        name: newDept.trim(),
-        offersHomeDelivery: newDeptHome,
-      });
-      setNewDept('');
-      setNewDeptHome(false);
-      setDepts(await getDepartments(editId));
-      await load();
-    } catch {
-      setStatus('Création département impossible');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function startRename(d: Department) {
-    setRenamingId(d.id);
-    setRenameValue(d.name);
-  }
-
-  async function commitRename() {
-    if (renamingId == null || editId == null || !renameValue.trim()) return;
-    setBusy(true);
-    try {
-      await updateDepartment(renamingId, { name: renameValue.trim() });
-      setRenamingId(null);
-      setDepts(await getDepartments(editId));
-    } catch {
-      setStatus('Renommage impossible');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function confirmDeleteDept(d: Department) {
-    if (editId == null) return;
-    Alert.alert('Supprimer', `Supprimer le département « ${d.name} » ?`, [
-      { text: 'Annuler', style: 'cancel' },
-      {
-        text: 'Supprimer',
-        style: 'destructive',
-        onPress: () => {
-          void deleteDepartment(d.id)
-            .then(async () => {
-              setDepts(await getDepartments(editId));
-              await load();
-            })
-            .catch(() => setStatus('Suppression département impossible'));
-        },
-      },
-    ]);
   }
 
   function confirmDeleteCompany(row: CompanyListItem) {
@@ -250,7 +169,7 @@ export function CompaniesConfigScreen() {
               prod.
             </Text>
             <View style={styles.rowActions}>
-              {canEdit ? (
+              {canEditCompany || canEditDepts ? (
                 <Pressable onPress={() => void openEdit(row)}>
                   <Text style={styles.link}>Modifier</Text>
                 </Pressable>
@@ -277,6 +196,7 @@ export function CompaniesConfigScreen() {
               placeholderTextColor={BrandColors.textMuted}
               value={name}
               onChangeText={setName}
+              editable={canEditCompany || modal === 'create'}
             />
             <TextInput
               style={styles.input}
@@ -284,6 +204,7 @@ export function CompaniesConfigScreen() {
               placeholderTextColor={BrandColors.textMuted}
               value={address}
               onChangeText={setAddress}
+              editable={canEditCompany || modal === 'create'}
             />
             <TextInput
               style={styles.input}
@@ -291,6 +212,7 @@ export function CompaniesConfigScreen() {
               placeholderTextColor={BrandColors.textMuted}
               value={city}
               onChangeText={setCity}
+              editable={canEditCompany || modal === 'create'}
             />
             <TextInput
               style={styles.input}
@@ -299,84 +221,16 @@ export function CompaniesConfigScreen() {
               keyboardType="phone-pad"
               value={phone}
               onChangeText={setPhone}
+              editable={canEditCompany || modal === 'create'}
             />
 
             {editId != null ? (
-              <>
-                <Text style={styles.section}>Départements</Text>
-                {depts.map((d) => (
-                  <View key={d.id} style={styles.deptRow}>
-                    {renamingId === d.id ? (
-                      <>
-                        <TextInput
-                          style={[styles.input, styles.flex]}
-                          value={renameValue}
-                          onChangeText={setRenameValue}
-                        />
-                        <Pressable onPress={() => void commitRename()}>
-                          <Text style={styles.link}>OK</Text>
-                        </Pressable>
-                      </>
-                    ) : (
-                      <>
-                        <Text style={styles.flex}>
-                          {d.name}
-                          {d.kind === 'PRODUCTION_DISTRIBUTION' && d.offersHomeDelivery
-                            ? ' · domicile'
-                            : ''}
-                        </Text>
-                        {d.kind === 'PRODUCTION_DISTRIBUTION' ? (
-                          <Pressable
-                            onPress={() =>
-                              void updateDepartment(d.id, {
-                                offersHomeDelivery: !d.offersHomeDelivery,
-                              }).then(async () => setDepts(await getDepartments(editId)))
-                            }>
-                            <Text style={styles.link}>
-                              {d.offersHomeDelivery ? 'Sans domicile' : 'À domicile'}
-                            </Text>
-                          </Pressable>
-                        ) : null}
-                        <Pressable onPress={() => startRename(d)}>
-                          <Text style={styles.link}>Renommer</Text>
-                        </Pressable>
-                        {canDelete ? (
-                          <Pressable onPress={() => confirmDeleteDept(d)}>
-                            <Text style={styles.danger}>×</Text>
-                          </Pressable>
-                        ) : null}
-                      </>
-                    )}
-                  </View>
-                ))}
-                {canEdit ? (
-                  <>
-                    <View style={styles.deptRow}>
-                      <TextInput
-                        style={[styles.input, styles.flex]}
-                        placeholder="Nouveau département"
-                        placeholderTextColor={BrandColors.textMuted}
-                        value={newDept}
-                        onChangeText={setNewDept}
-                      />
-                      <Pressable onPress={() => void addDepartment()} disabled={busy}>
-                        <Text style={styles.link}>Ajouter</Text>
-                      </Pressable>
-                    </View>
-                    <Pressable
-                      onPress={() => setNewDeptHome((v) => !v)}
-                      style={{ paddingVertical: 6 }}>
-                      <Text style={styles.meta}>
-                        {newDeptHome ? '☑ Livraisons à domicile' : '☐ Livraisons à domicile'}
-                      </Text>
-                    </Pressable>
-                  </>
-                ) : null}
-              </>
+              <CompanyDepartmentsPanel companyId={editId} onChanged={() => void load()} />
             ) : null}
           </ScrollView>
         }
         footer={
+          canEditCompany || modal === 'create' ? (
           <View style={styles.footer}>
             <Pressable
               style={[styles.primaryBtn, busy && styles.disabled]}
@@ -391,6 +245,7 @@ export function CompaniesConfigScreen() {
               )}
             </Pressable>
           </View>
+          ) : null
         }>
         <View style={styles.modalTop}>
           <Text style={styles.modalTopTitle}>
@@ -456,7 +311,4 @@ const styles = StyleSheet.create({
     color: BrandColors.text,
     backgroundColor: BrandColors.surface,
   },
-  section: { fontWeight: '700', color: BrandColors.text, marginTop: Spacing.two },
-  deptRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  flex: { flex: 1 },
 });

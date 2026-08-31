@@ -31,6 +31,7 @@ import type {
   Delivery,
   DeliveryStatus,
   Department,
+  DepartmentKind,
   DepartmentPrinterSettings,
   FinanceEntry,
   FinanceLedgerRow,
@@ -236,16 +237,20 @@ export async function createProduct(payload: {
   departmentId?: number;
   productFamilyId?: number | null;
   sku?: string;
+  barcode?: string;
+  description?: string;
   isService?: boolean;
   trackStock?: boolean;
   nature?: ProductNature;
   cost?: number;
+  stock?: number;
   stockMin?: number;
   saleUnits: Array<{
     packagingUnitId: number;
     salePrice: number;
     labelOverride?: string;
     isDefault?: boolean;
+    volumePrices?: Array<{ minQuantity: number; unitPrice: number }>;
   }>;
 }): Promise<Product> {
   const { data } = await api.post<Product>('/products', payload);
@@ -261,6 +266,8 @@ export async function updateProduct(
     departmentId: number | null;
     productFamilyId: number | null;
     sku: string;
+    barcode: string;
+    description: string;
     isService: boolean;
     trackStock: boolean;
     nature: ProductNature;
@@ -268,7 +275,9 @@ export async function updateProduct(
     stock: number;
     stockMin: number;
     salePrice: number;
+    volumePrices: Array<{ minQuantity: number; unitPrice: number }>;
     packagingUnitId: number;
+    labelOverride: string | null;
   }>,
 ): Promise<Product> {
   const { data } = await api.patch<Product>(`/products/${id}`, payload);
@@ -359,6 +368,7 @@ export async function createDepartment(payload: {
   description?: string;
   companyId?: number;
   offersHomeDelivery?: boolean;
+  kind?: DepartmentKind;
 }): Promise<Department> {
   const { data } = await api.post<Department>('/departments', payload);
   return data;
@@ -366,7 +376,12 @@ export async function createDepartment(payload: {
 
 export async function updateDepartment(
   id: number,
-  payload: { name?: string; description?: string; offersHomeDelivery?: boolean },
+  payload: {
+    name?: string;
+    description?: string;
+    offersHomeDelivery?: boolean;
+    kind?: DepartmentKind;
+  },
 ): Promise<Department> {
   const { data } = await api.patch<Department>(`/departments/${id}`, payload);
   return data;
@@ -815,6 +830,15 @@ export async function listRegisters(params?: {
       departmentId: params?.departmentId,
     },
   });
+  return data;
+}
+
+export async function createRegister(payload: {
+  companyId: number;
+  departmentId: number;
+  code: string;
+}): Promise<RegisterListItem> {
+  const { data } = await api.post<RegisterListItem>('/register-sessions/registers', payload);
   return data;
 }
 

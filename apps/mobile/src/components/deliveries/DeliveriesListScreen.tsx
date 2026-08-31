@@ -300,6 +300,7 @@ export function DeliveriesListScreen({ status }: Props) {
         columnWrapperStyle={styles.cardRow}
         refreshing={refreshing}
         onRefresh={() => void onRefresh()}
+        alwaysBounceVertical
         onEndReached={() => void onEndReached()}
         onEndReachedThreshold={0.4}
         keyboardShouldPersistTaps="handled"

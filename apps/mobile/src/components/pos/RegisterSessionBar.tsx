@@ -45,6 +45,7 @@ type Props = {
   session: RegisterSessionDetail | null;
   mineElsewhere: RegisterSessionDetail | null;
   occupancy: RegisterSessionDetail | null;
+  refreshKey?: number;
   onContextChange: (ctx: RegisterSessionContext) => void;
   onStatus: (message: string) => void;
 };
@@ -106,6 +107,7 @@ export function RegisterSessionBar({
   session,
   mineElsewhere,
   occupancy,
+  refreshKey = 0,
   onContextChange,
   onStatus,
 }: Props) {
@@ -134,7 +136,7 @@ export function RegisterSessionBar({
     void refreshSession().catch(() =>
       onContextChange({ local: null, mineElsewhere: null, occupancy: null }),
     );
-  }, [refreshSession, onContextChange]);
+  }, [refreshSession, onContextChange, refreshKey]);
 
   const linesReady = useMemo(
     () => countProducts.every((p) => parseQty(counts[p.id] ?? '') !== null),

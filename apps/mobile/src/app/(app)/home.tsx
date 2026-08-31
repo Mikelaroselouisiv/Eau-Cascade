@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 import Animated, {
   Easing,
   FadeIn,
@@ -26,14 +26,20 @@ export default function HomeScreen() {
   const displayName = user?.fullName?.trim() || user?.phone || '';
   const roleLabel = user?.role ? formatRoleLabel(user.role, user.roleLabel) : '';
 
-  const shortcuts = filterMenuItems(MENU_ITEMS, {
+  const visible = filterMenuItems(MENU_ITEMS, {
     can,
     canPerm,
     role: user?.role,
     productionDepartmentIds: user?.productionDepartmentIds,
-  })
-    .filter((item) => item.key !== 'home')
-    .slice(0, 3);
+  }).filter((item) => item.key !== 'home');
+  const dashboard = visible.find((item) => item.key === 'dashboard');
+  const rest = visible.filter((item) => item.key !== 'dashboard' && item.key !== 'production');
+  const production = visible.find((item) => item.key === 'production');
+  const shortcuts = [
+    ...(dashboard ? [dashboard] : []),
+    ...rest,
+    ...(!dashboard && production ? [production] : []),
+  ].slice(0, 3);
 
   const enter = (delayMs: number) =>
     reduceMotion

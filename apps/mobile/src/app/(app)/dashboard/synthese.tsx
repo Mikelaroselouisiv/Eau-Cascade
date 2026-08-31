@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useState, type ComponentProps } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState, type ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ChipScroll } from '@/components/ChipScroll';
@@ -32,7 +31,7 @@ export default function SyntheseScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<'overview' | 'sessions' | 'audit'>('overview');
+  const [view, setView] = useState<'overview' | 'caisse' | 'production' | 'audit'>('overview');
 
   const load = useCallback(async () => {
     if (!canSeeSynthesis || companyId == null) return;
@@ -56,18 +55,22 @@ export default function SyntheseScreen() {
     }
   }, [canSeeSynthesis, companyId, range]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!ready) return;
-      void load();
-    }, [load, ready]),
-  );
+  useEffect(() => {
+    if (!ready || view !== 'overview') return;
+    void load();
+  }, [load, ready, view]);
 
   async function onRefresh() {
     setRefreshing(true);
-    await load();
-    setRefreshKey((key) => key + 1);
-    setRefreshing(false);
+    try {
+      if (view === 'overview') await load();
+      else {
+        setRefreshKey((key) => key + 1);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   if (!canSeeSynthesis) {
@@ -110,7 +113,7 @@ export default function SyntheseScreen() {
           dateTo={range.dateTo}
           onChange={(dateFrom, dateTo) => setRange({ dateFrom, dateTo })}
         />
-        <View style={styles.viewSwitch}>
+        <ChipScroll contentStyle={styles.viewSwitch}>
           <ViewSwitchButton
             icon="pie-chart-outline"
             label="Aperçu"
@@ -119,9 +122,15 @@ export default function SyntheseScreen() {
           />
           <ViewSwitchButton
             icon="storefront-outline"
-            label="Sessions"
-            active={view === 'sessions'}
-            onPress={() => setView('sessions')}
+            label="Caisse"
+            active={view === 'caisse'}
+            onPress={() => setView('caisse')}
+          />
+          <ViewSwitchButton
+            icon="construct-outline"
+            label="Production"
+            active={view === 'production'}
+            onPress={() => setView('production')}
           />
           <ViewSwitchButton
             icon="shield-checkmark-outline"
@@ -129,7 +138,7 @@ export default function SyntheseScreen() {
             active={view === 'audit'}
             onPress={() => setView('audit')}
           />
-        </View>
+        </ChipScroll>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {ready && companyId == null ? (
           <Text style={styles.error}>Aucune entreprise disponible pour le monitoring.</Text>
@@ -159,21 +168,22 @@ export default function SyntheseScreen() {
           </>
         ) : null}
 
-        {companyId != null && view === 'sessions' ? (
-          <>
-            <RegisterSessionsPanel
-              companyId={companyId}
-              dateFrom={range.dateFrom}
-              dateTo={range.dateTo}
-              refreshKey={refreshKey}
-            />
-            <ProductionSessionsPanel
-              companyId={companyId}
-              dateFrom={range.dateFrom}
-              dateTo={range.dateTo}
-              refreshKey={refreshKey}
-            />
-          </>
+        {companyId != null && view === 'caisse' ? (
+          <RegisterSessionsPanel
+            companyId={companyId}
+            dateFrom={range.dateFrom}
+            dateTo={range.dateTo}
+            refreshKey={refreshKey}
+          />
+        ) : null}
+
+        {companyId != null && view === 'production' ? (
+          <ProductionSessionsPanel
+            companyId={companyId}
+            dateFrom={range.dateFrom}
+            dateTo={range.dateTo}
+            refreshKey={refreshKey}
+          />
         ) : null}
 
         {companyId != null && view === 'audit' ? (
@@ -231,19 +241,19 @@ const styles = StyleSheet.create({
   section: { marginTop: Spacing.two, fontSize: 15, fontWeight: '700', color: BrandColors.text },
   empty: { color: BrandColors.textMuted },
   viewSwitch: {
-    flexDirection: 'row',
-    backgroundColor: BrandColors.bgDeep,
-    borderRadius: 14,
-    padding: 4,
     gap: 4,
+    padding: 4,
+    borderRadius: 14,
+    backgroundColor: BrandColors.bgDeep,
   },
   viewButton: {
-    flex: 1,
+    minWidth: 92,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
     borderRadius: 10,
+    paddingHorizontal: 10,
     paddingVertical: 9,
   },
   viewButtonActive: { backgroundColor: BrandColors.primary },

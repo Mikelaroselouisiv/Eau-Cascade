@@ -12,6 +12,22 @@ type RefreshableScrollProps = {
   padded?: boolean;
 };
 
+export function makeRefreshControl(
+  refreshing: boolean,
+  onRefresh: () => void | Promise<void>,
+) {
+  return (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={() => {
+        void onRefresh();
+      }}
+      tintColor={BrandColors.primary}
+      colors={[BrandColors.primary]}
+    />
+  );
+}
+
 /** Scroll + pull-to-refresh standard pour les écrans de section. */
 export function RefreshableScroll({
   children,
@@ -22,17 +38,10 @@ export function RefreshableScroll({
   return (
     <AppScrollView
       padded={padded}
+      alwaysBounceVertical
+      bounces
       contentStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
-            void onRefresh();
-          }}
-          tintColor={BrandColors.primary}
-          colors={[BrandColors.primary]}
-        />
-      }>
+      refreshControl={makeRefreshControl(refreshing, onRefresh)}>
       {children}
     </AppScrollView>
   );

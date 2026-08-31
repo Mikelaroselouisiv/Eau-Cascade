@@ -47,6 +47,19 @@ export function isProductionKind(kind?: string | null): boolean {
   return kind === 'PRODUCTION_DISTRIBUTION';
 }
 
+/** Caissier (ou autre) affecté uniquement à des magasins DISTRIBUTION — pas d’usine. */
+export function isDistributionOnlyUser(user: {
+  departmentId?: number | null;
+  departmentIds?: number[] | null;
+  productionDepartmentIds?: number[] | null;
+} | null | undefined): boolean {
+  const assigned = resolvedDepartmentIds(user);
+  if (!assigned.length) return false;
+  const plants = new Set((user?.productionDepartmentIds ?? []).filter((id) => id > 0));
+  if (!plants.size) return true;
+  return !assigned.some((id) => plants.has(id));
+}
+
 export function assignedProductionDepartmentIds<
   T extends { id: number; kind?: string | null },
 >(

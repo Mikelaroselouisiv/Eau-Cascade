@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { ModalShell } from '@/components/ModalShell';
+import { makeRefreshControl } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
 import { DeliveryExecuteModal } from '@/components/deliveries/DeliveryExecuteModal';
 import { DeliveryFicheCard } from '@/components/deliveries/DeliveryFicheCard';
@@ -104,6 +105,7 @@ export function ProductionWorkspace() {
   );
   const [fiches, setFiches] = useState<Delivery[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
 
   const session = ctx.local;
   const mineElsewhere = ctx.mineElsewhere;
@@ -129,6 +131,50 @@ export function ProductionWorkspace() {
     for (const p of sheet.products) nextCounts[p.id] = String(p.stock);
     setCounts(nextCounts);
   }, []);
+
+  const reloadFiches = useCallback(async (deptId: number, nextDest: Dest) => {
+    if (nextDest === 'TRANSFER' || nextDest === 'RECEIVE') {
+      setFiches([]);
+      return;
+    }
+    try {
+      const res =
+        nextDest === 'HOME'
+          ? await listDeliveries({
+              ...(user?.companyId != null ? { companyId: user.companyId } : {}),
+              fulfillmentType: 'HOME',
+              take: 100,
+            })
+          : await listDeliveries({ departmentId: deptId, fulfillmentType: nextDest, take: 100 });
+      const rows = res.items.filter((d) => d.status !== 'DELIVERED');
+      setFiches(nextDest === 'HOME' ? rows : rows.filter((d) => belongsToPlant(d, deptId)));
+    } catch {
+      setFiches([]);
+    }
+  }, [user?.companyId]);
+
+  const reloadWorkspace = useCallback(
+    async (deptId: number, nextDest: Dest = dest) => {
+      await refresh(deptId);
+      const [prods, out] = await Promise.all([
+        getProducts(deptId)
+          .then((rows) => rows.filter((p) => p.nature !== 'RAW_MATERIAL'))
+          .catch(() => [] as Product[]),
+        listInternalTransfers({ fromDepartmentId: deptId }).catch(() => [] as InternalTransferRow[]),
+      ]);
+      setProducts(prods);
+      setOutgoing(out);
+      if (canConfirm) {
+        setInbox(
+          await listInternalTransfers({ inbox: true, status: 'PENDING' }).catch(
+            () => [] as InternalTransferRow[],
+          ),
+        );
+      }
+      await reloadFiches(deptId, nextDest);
+    },
+    [canConfirm, dest, refresh, reloadFiches],
+  );
 
   useEffect(() => {
     const companyId = user?.companyId;
@@ -158,34 +204,36 @@ export function ProductionWorkspace() {
     void getProducts(departmentId)
       .then((rows) => setProducts(rows.filter((p) => p.nature !== 'RAW_MATERIAL')))
       .catch(() => setProducts([]));
-    void listInternalTransfers({ fromDepartmentId: departmentId }).then(setOutgoing).catch(() => setOutgoing([]));
+    void listInternalTransfers({ fromDepartmentId: departmentId })
+      .then(setOutgoing)
+      .catch(() => setOutgoing([]));
     if (canConfirm) {
-      void listInternalTransfers({ inbox: true, status: 'PENDING' }).then(setInbox).catch(() => setInbox([]));
+      void listInternalTransfers({ inbox: true, status: 'PENDING' })
+        .then(setInbox)
+        .catch(() => setInbox([]));
     }
   }, [departmentId, canConfirm, refresh]);
 
   useEffect(() => {
     setSelectedId(null);
-    if (departmentId === '' || dest === 'TRANSFER' || dest === 'RECEIVE') {
+    if (departmentId === '') {
       setFiches([]);
       return;
     }
-    void (dest === 'HOME'
-      ? listDeliveries({
-          ...(user?.companyId != null ? { companyId: user.companyId } : {}),
-          fulfillmentType: 'HOME',
-          take: 100,
-        })
-      : listDeliveries({ departmentId, fulfillmentType: dest, take: 100 })
-    )
-      .then((res) => {
-        const rows = res.items.filter((d) => d.status !== 'DELIVERED');
-        setFiches(
-          dest === 'HOME' ? rows : rows.filter((d) => belongsToPlant(d, departmentId)),
-        );
-      })
-      .catch(() => setFiches([]));
-  }, [departmentId, dest, user?.companyId]);
+    void reloadFiches(departmentId, dest);
+  }, [departmentId, dest, reloadFiches]);
+
+  async function onPullRefresh() {
+    if (departmentId === '') return;
+    setPullRefreshing(true);
+    try {
+      await reloadWorkspace(departmentId, dest);
+    } catch (e) {
+      setStatus(formatApiError(e, 'Chargement impossible'));
+    } finally {
+      setPullRefreshing(false);
+    }
+  }
 
   function buildLines() {
     const lines: Array<{ productId: number; countedQty: number }> = [];
@@ -304,7 +352,11 @@ export function ProductionWorkspace() {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        alwaysBounceVertical
+        refreshControl={makeRefreshControl(pullRefreshing, onPullRefresh)}>
         {status ? <Text style={styles.status}>{status}</Text> : null}
         <View style={styles.bar}>
           <View style={styles.barInfo}>

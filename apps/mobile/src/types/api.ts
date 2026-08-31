@@ -912,13 +912,15 @@ export interface FixedAssetRow {
   remainingDepreciable: number;
 }
 
+export type DepartmentKind = 'DISTRIBUTION' | 'PRODUCTION_DISTRIBUTION';
+
 export interface Department {
   id: number;
   companyId: number;
   name: string;
   description?: string | null;
   offersHomeDelivery?: boolean;
-  kind?: 'DISTRIBUTION' | 'PRODUCTION_DISTRIBUTION';
+  kind?: DepartmentKind;
   company?: { id: number; name: string };
 }
 

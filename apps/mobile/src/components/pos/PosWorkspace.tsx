@@ -16,6 +16,7 @@ import { useFocusEffect } from 'expo-router';
 import { ChipScroll } from '@/components/ChipScroll';
 import { MoneyText } from '@/components/MoneyText';
 import { RegisterSessionBar } from '@/components/pos/RegisterSessionBar';
+import { makeRefreshControl } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
@@ -67,7 +68,13 @@ import {
   specialPricesReady,
   type CartLine,
 } from '@/utils/posCart';
-import { departmentsForUser, isAdminRole, isProductionKind, resolvedDepartmentIds } from '@/utils/user-scope';
+import {
+  departmentsForUser,
+  isAdminRole,
+  isDistributionOnlyUser,
+  isProductionKind,
+  resolvedDepartmentIds,
+} from '@/utils/user-scope';
 
 const DANGER = BrandColors.danger;
 const WARNING = '#B45309';
@@ -152,6 +159,8 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const [cashGapBusyId, setCashGapBusyId] = useState<number | null>(null);
   const [cashGapQuery, setCashGapQuery] = useState('');
   const [banks, setBanks] = useState<BankRow[]>([]);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
 
   const companyId = posScopeLocked
     ? typeof user?.companyId === 'number'
@@ -199,14 +208,16 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const showTenderField = paymentMethod === 'CASH' || paymentMethod === 'SPLIT';
   const salesEnabled = registerSession != null;
 
-  const loadProducts = useCallback(() => {
+  const loadProducts = useCallback(async () => {
     if (!posScopeLocked && departmentId == null) {
       setProducts([]);
       return;
     }
-    loadProductsWithCache(departmentId)
-      .then(setProducts)
-      .catch(() => setStatus('Catalogue indisponible (hors ligne, pas de cache)'));
+    try {
+      setProducts(await loadProductsWithCache(departmentId));
+    } catch {
+      setStatus('Catalogue indisponible (hors ligne, pas de cache)');
+    }
   }, [departmentId, posScopeLocked]);
 
   const refreshCashGaps = useCallback(async () => {
@@ -226,6 +237,24 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       // panneau secondaire
     }
   }, [companyId, departmentId]);
+
+  const onPullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try {
+      await Promise.all([
+        loadProducts(),
+        refreshCashGaps(),
+        syncSalesQueue()
+          .then((result) => {
+            if (result.synced > 0) emitPendingSalesChanged();
+          })
+          .catch(() => undefined),
+      ]);
+      setSessionRefreshKey((key) => key + 1);
+    } finally {
+      setPullRefreshing(false);
+    }
+  }, [loadProducts, refreshCashGaps]);
 
   useEffect(() => {
     if (posScopeLocked) return;
@@ -299,7 +328,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   }, [products, posScopeLocked, companyId, departmentId]);
 
   useEffect(() => {
-    loadProducts();
+    void loadProducts();
   }, [loadProducts]);
 
   useEffect(() => {
@@ -722,6 +751,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       const parts = [`Vente #${txnRef} enregistrée`];
       if (changeDue > 0.009) parts.push(`monnaie ${formatMoney(changeDue)}`);
       if (balanceDue > 0.009) parts.push(`reste ${formatMoney(balanceDue)}`);
+      if (fulfillmentType === 'ON_SITE' && isDistributionOnlyUser(user)) parts.push('Livré');
       setStatus(parts.join(' — '));
 
       if (printTicket) {
@@ -758,7 +788,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
 
       removeActiveDraftFromUI();
       await refreshCashGaps();
-      loadProducts();
+      void loadProducts();
     } catch (e) {
       const online = await isOnline();
       if ((isLikelyNetworkError(e) || !online) && methodSnapshot !== 'BANK') {
@@ -846,6 +876,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
         session={registerSession}
         mineElsewhere={mineElsewhere}
         occupancy={sessionOccupancy}
+        refreshKey={sessionRefreshKey}
         onContextChange={handleContextChange}
         onStatus={setStatus}
       />
@@ -1001,6 +1032,8 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
         columnWrapperStyle={styles.gridRow}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
+        alwaysBounceVertical
+        refreshControl={makeRefreshControl(pullRefreshing, onPullRefresh)}
         renderItem={({ item }) => {
           const inCart = quantityInCart(item);
           const sellable = productSellable(item, activeDraft?.fulfillmentType === 'HOME');
@@ -1051,6 +1084,8 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
             contentContainerStyle={styles.cartListContent}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
+            alwaysBounceVertical
+            refreshControl={makeRefreshControl(pullRefreshing, onPullRefresh)}
             renderItem={({ item }) => {
               const product = productsById.get(item.productId);
               const price = effectiveUnitPrice(product, item, familyQtyMap);
@@ -1411,7 +1446,9 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
         <ScrollView
           style={styles.changePane}
           contentContainerStyle={styles.changePaneContent}
-          keyboardShouldPersistTaps="handled">
+          keyboardShouldPersistTaps="handled"
+          alwaysBounceVertical
+          refreshControl={makeRefreshControl(pullRefreshing, onPullRefresh)}>
           <TextInput
             style={styles.gapsSearch}
             placeholder="Rechercher (#fiche, client…)"
