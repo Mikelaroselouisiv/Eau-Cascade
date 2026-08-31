@@ -58,6 +58,25 @@ export function assignedProductionDepartmentIds<
   return plants.filter((d) => ids.has(d.id)).map((d) => d.id);
 }
 
+type ScopeUser = {
+  role?: string | null;
+  departmentId?: number | null;
+  departmentIds?: number[] | null;
+} | null;
+
+/** Harmonisation : usines seulement (entrée MP caissier) ou tout le périmètre (ajustements). */
+export function harmonisationDepartments<T extends { id: number; kind?: string | null }>(
+  depts: T[],
+  user: ScopeUser,
+  plantsOnly: boolean,
+): T[] {
+  if (plantsOnly) {
+    const plantIds = new Set(assignedProductionDepartmentIds(depts, user));
+    return depts.filter((d) => plantIds.has(d.id));
+  }
+  return departmentsForUser(depts, user);
+}
+
 export function salesQueryDepartmentParams(user: {
   role?: string | null;
   departmentId?: number | null;

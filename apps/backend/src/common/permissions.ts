@@ -178,6 +178,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'pos.use',
     'stock.view',
     'stock.manage',
+    'stock.adjust',
     'products.view',
     'products.manage',
     'inventory.physical',
@@ -214,6 +215,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   STOCK_MANAGER: [
     'stock.view',
     'stock.manage',
+    'stock.adjust',
     'products.view',
     'products.manage',
     'inventory.physical',

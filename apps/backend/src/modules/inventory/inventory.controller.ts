@@ -172,7 +172,7 @@ export class InventoryController {
   }
 
   @Post('adjustments')
-  @Permissions('stock.adjust')
+  @PermissionsAny('stock.adjust', 'stock.manage')
   adjust(@Body() dto: StockAdjustmentDto, @GetUser() user?: { id?: number }) {
     return this.inventoryService.adjustStock(dto.productId, dto.quantity, dto.reason, user?.id);
   }

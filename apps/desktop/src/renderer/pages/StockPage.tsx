@@ -31,7 +31,11 @@ import { PurchasingSection } from '../components/PurchasingSection';
 import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { formatYmd } from '../utils/datetime';
-import { departmentsForUser, assignedProductionDepartmentIds } from '../utils/user-scope';
+import {
+  departmentsForUser,
+  assignedProductionDepartmentIds,
+  harmonisationDepartments,
+} from '../utils/user-scope';
 import {
   stockPackagingLabel,
 } from '../utils/packagingDisplay';
@@ -158,7 +162,7 @@ export function StockPage() {
   const [addProductOpen, setAddProductOpen] = useState(false);
 
   const canStockIn = canPerm('stock.manage') || canPerm('stock.adjust') || canPerm('stock.raw_in');
-  const canStockOut = canPerm('stock.adjust');
+  const canStockOut = canPerm('stock.adjust') || canPerm('stock.manage');
   const rawInOnly = canPerm('stock.raw_in') && !canPerm('stock.manage') && !canPerm('stock.adjust');
   const plantIds = useMemo(
     () =>
@@ -188,8 +192,8 @@ export function StockPage() {
   );
 
   const opVisibleDepartments = useMemo(
-    () => opFilterDepartments.filter((d) => plantIds.includes(d.id)),
-    [opFilterDepartments, plantIds],
+    () => harmonisationDepartments(opFilterDepartments, user, rawInOnly),
+    [opFilterDepartments, user, rawInOnly],
   );
 
   const opFilteredProducts = useMemo(() => {
@@ -197,9 +201,9 @@ export function StockPage() {
     return stockableProducts
       .filter((p) => (p.companyId ?? p.company?.id) === opFilterCompanyId)
       .filter((p) => p.department?.id === opFilterDeptId)
-      .filter((p) => p.nature === 'RAW_MATERIAL')
+      .filter((p) => !rawInOnly || p.nature === 'RAW_MATERIAL')
       .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
-  }, [stockableProducts, opFilterCompanyId, opFilterDeptId]);
+  }, [stockableProducts, opFilterCompanyId, opFilterDeptId, rawInOnly]);
 
   const opSelectedProduct = useMemo(
     () => (opProductId === '' ? null : products.find((x) => x.id === opProductId) ?? null),
@@ -224,6 +228,7 @@ export function StockPage() {
     setProducts(p);
     setCompanies(co);
     if (co.length && companyId === '') setCompanyId(co[0].id);
+    if (co.length && opFilterCompanyId === '') setOpFilterCompanyId(co[0].id);
     if (catalogAsOfApplied.trim()) {
       const hist = await getProducts(undefined, { asOf: catalogAsOfApplied.trim() });
       setCatalogStockById(new Map(hist.map((x) => [x.id, Number(x.stock)])));
@@ -310,13 +315,14 @@ export function StockPage() {
     }
     void getDepartments(opFilterCompanyId).then((d) => {
       setOpFilterDepartments(d);
-      const plants = assignedProductionDepartmentIds(d, user);
+      const visible = harmonisationDepartments(d, user, rawInOnly);
+      const visibleIds = visible.map((x) => x.id);
       setOpFilterDeptId((prev) => {
-        if (prev !== '' && plants.includes(prev)) return prev;
-        return plants.length === 1 ? plants[0] : '';
+        if (prev !== '' && visibleIds.includes(prev)) return prev;
+        return visible[0]?.id ?? '';
       });
     });
-  }, [opFilterCompanyId, user]);
+  }, [opFilterCompanyId, user, rawInOnly]);
 
   useEffect(() => {
     if (opProductId === '') return;
@@ -474,10 +480,15 @@ export function StockPage() {
           setOpMsg('Entrée non autorisée.', { persist: true });
           return;
         }
+        const prodIn = products.find((x) => x.id === opProductId);
         await stockIn({
           productId: Number(opProductId),
           quantity: qty,
-          reason: reason ?? 'Matière première confiée à la production',
+          reason:
+            reason ??
+            (prodIn?.nature === 'RAW_MATERIAL'
+              ? 'Matière première confiée à la production'
+              : 'Entrée manuelle'),
         });
       } else {
         if (!canStockOut) {
@@ -914,10 +925,10 @@ export function StockPage() {
             <label>
               Type d’opération
               <select value={opKind} onChange={(e) => setOpKind(e.target.value === 'out' ? 'out' : 'in')}>
-                {canStockIn ? <option value="in">Entrée (matière première confiée)</option> : null}
-                {canStockOut && !rawInOnly ? (
-                  <option value="out">Sortie (diminuer le stock)</option>
+                {canStockIn ? (
+                  <option value="in">{rawInOnly ? 'Entrée (matière première)' : 'Entrée'}</option>
                 ) : null}
+                {canStockOut && !rawInOnly ? <option value="out">Sortie</option> : null}
               </select>
             </label>
             <label>
@@ -953,7 +964,11 @@ export function StockPage() {
                 required
               >
                 <option value="">
-                  {opFilterCompanyId === '' ? '— Choisir une entreprise d’abord —' : '— Choisir —'}
+                  {opFilterCompanyId === ''
+                    ? '— Choisir une entreprise d’abord —'
+                    : opVisibleDepartments.length === 0
+                      ? 'Aucun département'
+                      : '— Choisir —'}
                 </option>
                 {opVisibleDepartments.map((d) => (
                   <option key={d.id} value={d.id}>
@@ -979,7 +994,9 @@ export function StockPage() {
                 </option>
                 {opFilteredProducts.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} — {stockPackagingLabel(p)} — stock {formatQuantity(Number(p.stock))}
+                    {p.name}
+                    {p.nature === 'RAW_MATERIAL' ? ' · matière première' : ' · produit fini'} —{' '}
+                    {stockPackagingLabel(p)} — stock {formatQuantity(Number(p.stock))}
                   </option>
                 ))}
               </select>
@@ -1016,13 +1033,9 @@ export function StockPage() {
           </form>
           {stockableProducts.length === 0 ? (
             <p className="info-text" style={{ marginTop: '1rem' }}>
-              Aucun produit avec stock suivi. Cochez « Suivre le stock » sur un produit ou créez un article physique.
+              Aucun produit avec stock suivi.
             </p>
-          ) : (
-            <p className="dept-hint" style={{ marginTop: '1rem', marginBottom: 0 }}>
-              Choisissez d’abord l’entreprise et le département pour afficher uniquement les produits concernés.
-            </p>
-          )}
+          ) : null}
         </section>
       ) : null}
 

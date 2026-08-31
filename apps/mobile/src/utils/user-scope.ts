@@ -76,3 +76,22 @@ export function assignedProductionDepartmentIds<
   if (!ids.size) return plants.map((d) => d.id);
   return plants.filter((d) => ids.has(d.id)).map((d) => d.id);
 }
+
+type ScopeUser = {
+  role?: string | null;
+  departmentId?: number | null;
+  departmentIds?: number[] | null;
+} | null;
+
+/** Harmonisation : usines seulement (entrée MP caissier) ou tout le périmètre (ajustements). */
+export function harmonisationDepartments<T extends { id: number; kind?: string | null }>(
+  depts: T[],
+  user: ScopeUser,
+  plantsOnly: boolean,
+): T[] {
+  if (plantsOnly) {
+    const plantIds = new Set(assignedProductionDepartmentIds(depts, user));
+    return depts.filter((d) => plantIds.has(d.id));
+  }
+  return departmentsForUser(depts, user);
+}

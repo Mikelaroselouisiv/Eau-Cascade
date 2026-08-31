@@ -24,13 +24,13 @@ import {
 } from '@/services/api';
 import type { CompanyListItem, Department, Product } from '@/types/api';
 import { stockPackagingLabel } from '@/utils/packaging';
-import { assignedProductionDepartmentIds } from '@/utils/user-scope';
+import { harmonisationDepartments } from '@/utils/user-scope';
 import { formatQuantity } from '@/utils/quantity';
 
 export function StockHarmonisationScreen() {
   const { user, canPerm } = useAuth();
   const canStockIn = canPerm('stock.manage') || canPerm('stock.adjust') || canPerm('stock.raw_in');
-  const canStockOut = canPerm('stock.adjust');
+  const canStockOut = canPerm('stock.adjust') || canPerm('stock.manage');
   const rawInOnly = canPerm('stock.raw_in') && !canPerm('stock.manage') && !canPerm('stock.adjust');
   const allowed = canStockIn || canStockOut;
 
@@ -75,30 +75,27 @@ export function StockHarmonisationScreen() {
     }
     void getDepartments(companyId).then((d) => {
       setDepartments(d);
-      const plants = assignedProductionDepartmentIds(d, user);
-      setDeptId((prev) => (prev !== '' && plants.includes(prev) ? prev : (plants[0] ?? '')));
+      const visible = harmonisationDepartments(d, user, rawInOnly);
+      const visibleIds = visible.map((x) => x.id);
+      setDeptId((prev) => (prev !== '' && visibleIds.includes(prev) ? prev : (visible[0]?.id ?? '')));
       setProductId('');
     });
-  }, [companyId, user]);
+  }, [companyId, user, rawInOnly]);
 
-  const plantIds = useMemo(
-    () => assignedProductionDepartmentIds(departments, user),
-    [departments, user],
-  );
   const visibleDepartments = useMemo(
-    () => departments.filter((d) => plantIds.includes(d.id)),
-    [departments, plantIds],
+    () => harmonisationDepartments(departments, user, rawInOnly),
+    [departments, user, rawInOnly],
   );
 
   const filteredProducts = useMemo(() => {
     if (companyId === '' || deptId === '') return [];
     return products
       .filter((p) => p.trackStock && !p.isService)
-      .filter((p) => p.nature === 'RAW_MATERIAL')
+      .filter((p) => !rawInOnly || p.nature === 'RAW_MATERIAL')
       .filter((p) => (p.companyId ?? p.company?.id) === companyId)
       .filter((p) => p.department?.id === deptId)
       .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
-  }, [products, companyId, deptId]);
+  }, [products, companyId, deptId, rawInOnly]);
 
   useEffect(() => {
     if (productId !== '' && !filteredProducts.some((p) => p.id === productId)) {
@@ -146,7 +143,11 @@ export function StockHarmonisationScreen() {
         await stockIn({
           productId,
           quantity,
-          reason: note ?? 'Matière première confiée à la production',
+          reason:
+            note ??
+            (selected?.nature === 'RAW_MATERIAL'
+              ? 'Matière première confiée à la production'
+              : 'Entrée manuelle'),
         });
       } else {
         if (!canStockOut) {
@@ -202,7 +203,7 @@ export function StockHarmonisationScreen() {
                 style={[styles.kindChip, kind === 'in' && styles.kindChipActive]}
                 onPress={() => setKind('in')}>
                 <Text style={[styles.kindText, kind === 'in' && styles.kindTextActive]}>
-                  Entrée (matière première)
+                  {rawInOnly ? 'Entrée (matière première)' : 'Entrée'}
                 </Text>
               </Pressable>
             ) : null}
@@ -228,29 +229,33 @@ export function StockHarmonisationScreen() {
           </ScrollView>
 
           <Text style={styles.fieldLabel}>Département</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
-            {visibleDepartments.map((d) => (
-              <Chip
-                key={d.id}
-                label={d.name}
-                active={deptId === d.id}
-                onPress={() => {
-                  setDeptId(d.id);
-                  setProductId('');
-                }}
-              />
-            ))}
-          </ScrollView>
+          {visibleDepartments.length === 0 ? (
+            <Text style={styles.meta}>Aucun département</Text>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+              {visibleDepartments.map((d) => (
+                <Chip
+                  key={d.id}
+                  label={d.name}
+                  active={deptId === d.id}
+                  onPress={() => {
+                    setDeptId(d.id);
+                    setProductId('');
+                  }}
+                />
+              ))}
+            </ScrollView>
+          )}
 
           <Text style={styles.fieldLabel}>Produit</Text>
           {filteredProducts.length === 0 ? (
-            <Text style={styles.meta}>Choisir entreprise et département</Text>
+            <Text style={styles.meta}>Aucun produit</Text>
           ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
               {filteredProducts.map((p) => (
                 <Chip
                   key={p.id}
-                  label={`${p.name} (${formatQuantity(p.stock)})`}
+                  label={`${p.name} (${p.nature === 'RAW_MATERIAL' ? 'matière première' : 'produit fini'} · ${formatQuantity(p.stock)})`}
                   active={productId === p.id}
                   onPress={() => setProductId(p.id)}
                 />

@@ -230,6 +230,15 @@ export class RolesService implements OnModuleInit {
           this.cache.delete(code);
         }
       }
+      if (code === 'MANAGER' || code === 'STOCK_MANAGER') {
+        if (!existing.permissions.includes('stock.adjust')) {
+          await this.prisma.appRole.update({
+            where: { id: existing.id },
+            data: { permissions: [...existing.permissions, 'stock.adjust'] },
+          });
+          this.cache.delete(code);
+        }
+      }
       if (code === 'CASHIER') {
         let next = existing.permissions;
         if (!next.includes('stock.raw_in')) next = [...next, 'stock.raw_in'];
