@@ -91,6 +91,9 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
           session.status === 'CLOSED' && session.usage?.length
             ? session.usage.reduce((sum, row) => sum + row.usedQty, 0)
             : null;
+        const flowed = session.outflow?.length
+          ? session.outflow.reduce((sum, row) => sum + row.produced, 0)
+          : null;
         return (
           <Pressable key={session.id} style={styles.card} onPress={() => setSelected(session)}>
             <View style={styles.cardTop}>
@@ -102,6 +105,9 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
             </Text>
             {used != null ? (
               <Text style={styles.meta}>MP utilisée : {formatQuantity(used)}</Text>
+            ) : null}
+            {flowed != null ? (
+              <Text style={styles.meta}>Écoulé : {formatQuantity(flowed)}</Text>
             ) : null}
           </Pressable>
         );
@@ -123,6 +129,14 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
                   ? `${formatDateTime(selected.closedAt)} — ${userLabel(selected.closedBy)}`
                   : '—'}
               </Text>
+              {(selected.outflow ?? []).map((row) => (
+                <View key={`out-${row.productId}`} style={styles.usageRow}>
+                  <Text style={styles.usageName}>{row.name}</Text>
+                  <Text style={styles.meta}>
+                    Clients {formatQuantity(row.toClients)} · transferts {formatQuantity(row.toDepartments)} · écoule {formatQuantity(row.produced)}
+                  </Text>
+                </View>
+              ))}
               {(selected.usage ?? []).map((row) => (
                 <View key={row.productId} style={styles.usageRow}>
                   <Text style={styles.usageName}>{row.name}</Text>

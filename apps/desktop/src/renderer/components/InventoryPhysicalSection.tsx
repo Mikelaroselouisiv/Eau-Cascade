@@ -23,6 +23,7 @@ import type {
 import { formatQuantity } from '../utils/formatQuantity';
 import { formatDateTime, formatYmd } from '../utils/datetime';
 import { formatUserLabel } from '../utils/userAttribution';
+import { isProductionKind } from '../utils/user-scope';
 
 function formatApiError(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -131,8 +132,9 @@ export function InventoryPhysicalSection({
       return;
     }
     void getDepartments(companyId).then((d) => {
-      setDepartments(d);
-      setSelectedDeptIds((prev) => prev.filter((id) => d.some((x) => x.id === id)));
+      const shops = d.filter((x) => !isProductionKind(x.kind));
+      setDepartments(shops);
+      setSelectedDeptIds((prev) => prev.filter((id) => shops.some((x) => x.id === id)));
     });
   }, [companyId]);
 

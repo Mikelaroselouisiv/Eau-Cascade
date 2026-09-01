@@ -49,7 +49,7 @@ import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../utils/volumeU
 import { formatMoney, resolveCurrencyCode } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { formatRegisterCode } from '../utils/registerDisplay';
-import { departmentsForUser, isAdminRole, isPlantCashier, isProductionKind, resolvedDepartmentIds } from '../utils/user-scope';
+import { departmentsForUser, isAdminRole, isPlantCashier, isProductionKind, productEnforcesSaleStock, resolvedDepartmentIds } from '../utils/user-scope';
 
 function sessionHolder(s: RegisterSessionDetail) {
   const who = s.openedBy?.fullName?.trim() || s.openedBy?.phone?.trim() || 'Utilisateur';
@@ -92,9 +92,9 @@ function roundQty(q: number): number {
   return Math.round(q * 10 ** QTY_DECIMALS) / 10 ** QTY_DECIMALS;
 }
 
-/** Quantité max vendable dans l’unité choisie (décimal), ou undefined si pas de limite stock (service). */
+/** Quantité max vendable dans l’unité choisie (décimal), ou undefined si pas de limite stock. */
 function maxQtyInSaleUnit(p: Product, unitsPerPackage: number): number | undefined {
-  if (!p.trackStock || p.isService) return undefined;
+  if (!productEnforcesSaleStock(p)) return undefined;
   const base = Number(p.stock);
   const up = Number(unitsPerPackage);
   if (!Number.isFinite(base) || !Number.isFinite(up) || up <= 0) return 0;
@@ -153,7 +153,6 @@ export function PosPage() {
   const assignedDeptIds = resolvedDepartmentIds(user);
   const posScopeLocked = !isAdminRole(user?.role) && assignedDeptIds.length === 1;
   const canSpecialSale = canPerm('sales.special_price');
-  const canConfirmTransfers = canPerm('transfers.confirm');
   const canPosExpense = isPlantCashier(user);
   const [posPane, setPosPane] = useState<'sale' | 'receive' | 'expense'>('sale');
   const [transferInbox, setTransferInbox] = useState<InternalTransferRow[]>([]);
@@ -238,26 +237,39 @@ export function PosPage() {
     }
   }, [canSpecialSale, saleMode]);
 
-  useEffect(() => {
-    if (!canConfirmTransfers) {
-      setTransferInbox([]);
-      return;
-    }
-    void listInternalTransfers({ inbox: true, status: 'PENDING' })
-      .then(setTransferInbox)
-      .catch(() => setTransferInbox([]));
-  }, [canConfirmTransfers]);
-
-  useEffect(() => {
-    if (!canPosExpense && posPane === 'expense') setPosPane('sale');
-  }, [canPosExpense, posPane]);
-
   const effectiveDepartmentId = useMemo(() => {
     if (posScopeLocked) {
       return assignedDeptIds[0];
     }
     return selectedDepartmentId === '' ? undefined : selectedDepartmentId;
   }, [posScopeLocked, assignedDeptIds, selectedDepartmentId]);
+
+  const canConfirmTransfers =
+    canPerm('transfers.confirm') &&
+    effectiveDepartmentId != null &&
+    !isProductionKind(departments.find((d) => d.id === effectiveDepartmentId)?.kind);
+
+  useEffect(() => {
+    if (!canConfirmTransfers || effectiveDepartmentId == null) {
+      setTransferInbox([]);
+      return;
+    }
+    void listInternalTransfers({
+      inbox: true,
+      status: 'PENDING',
+      toDepartmentId: effectiveDepartmentId,
+    })
+      .then(setTransferInbox)
+      .catch(() => setTransferInbox([]));
+  }, [canConfirmTransfers, effectiveDepartmentId]);
+
+  useEffect(() => {
+    if (!canConfirmTransfers && posPane === 'receive') setPosPane('sale');
+  }, [canConfirmTransfers, posPane]);
+
+  useEffect(() => {
+    if (!canPosExpense && posPane === 'expense') setPosPane('sale');
+  }, [canPosExpense, posPane]);
 
   const canSellHome = useMemo(() => {
     const kind = departments.find((d) => d.id === effectiveDepartmentId)?.kind;
@@ -293,9 +305,14 @@ export function PosPage() {
     let resolvedCompanyId = compId;
     if (deptId != null) {
       try {
-        const sheet = await loadRegisterCountRows(deptId);
-        setCountProducts(sheet.products);
-        resolvedCompanyId = resolvedCompanyId ?? sheet.companyId;
+        const kind = departments.find((d) => d.id === deptId)?.kind;
+        if (isProductionKind(kind)) {
+          setCountProducts([]);
+        } else {
+          const sheet = await loadRegisterCountRows(deptId);
+          setCountProducts(sheet.products);
+          resolvedCompanyId = resolvedCompanyId ?? sheet.companyId;
+        }
       } catch {
         setCountProducts([]);
       }
@@ -678,7 +695,8 @@ export function PosPage() {
       setStatus('Produit sans unité de vente — configurez-le dans Stock.', { persist: true });
       return;
     }
-    const ignoreStock = activeDraft?.fulfillmentType === 'HOME';
+    const ignoreStock =
+      activeDraft?.fulfillmentType === 'HOME' || !productEnforcesSaleStock(p);
     const up = Number(su.unitsPerPackage);
     const maxQ = ignoreStock ? undefined : maxQtyInSaleUnit(p, up);
     if (maxQ !== undefined && maxQ < MIN_SALE_QTY) {
@@ -1108,6 +1126,11 @@ export function PosPage() {
 
   async function refreshCountProducts() {
     if (effectiveDepartmentId == null) return;
+    const kind = departments.find((d) => d.id === effectiveDepartmentId)?.kind;
+    if (isProductionKind(kind)) {
+      setCountProducts([]);
+      return;
+    }
     try {
       const sheet = await loadRegisterCountRows(effectiveDepartmentId);
       setCountProducts(sheet.products);
@@ -1538,15 +1561,15 @@ export function PosPage() {
             {displayedProducts.map((p) => {
               const su = defaultSaleUnit(p);
               const up = su ? Number(su.unitsPerPackage) : 0;
-              const ignoreStock = activeDraft.fulfillmentType === 'HOME';
+              const ignoreStock =
+                activeDraft.fulfillmentType === 'HOME' || !productEnforcesSaleStock(p);
               const maxInUnit =
-                su && p.trackStock && !p.isService && !ignoreStock
+                su && productEnforcesSaleStock(p) && !ignoreStock
                   ? maxQtyInSaleUnit(p, up)
                   : undefined;
               const disabled =
                 !su ||
-                (p.trackStock &&
-                  !p.isService &&
+                (productEnforcesSaleStock(p) &&
                   maxInUnit !== undefined &&
                   maxInUnit < MIN_SALE_QTY);
               const tileColor = p.cardColor?.trim() || DEFAULT_PRODUCT_TILE_COLOR;

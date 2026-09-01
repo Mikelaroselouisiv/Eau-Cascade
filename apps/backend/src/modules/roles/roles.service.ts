@@ -213,6 +213,17 @@ export class RolesService implements OnModuleInit {
         continue;
       }
       // Ajustements ciblés sans réécrire toute la matrice (Config → Rôles).
+      if (code === 'MANAGER' || code === 'CHEF_PRODUCTION' || code === 'STOCK_MANAGER') {
+        const strippedConfirm = existing.permissions.filter((p) => p !== 'transfers.confirm');
+        if (strippedConfirm.length !== existing.permissions.length) {
+          await this.prisma.appRole.update({
+            where: { id: existing.id },
+            data: { permissions: strippedConfirm },
+          });
+          this.cache.delete(code);
+          existing.permissions = strippedConfirm;
+        }
+      }
       if (code === 'CHEF_PRODUCTION') {
         const stripped = existing.permissions.filter(
           (p) =>
@@ -243,6 +254,7 @@ export class RolesService implements OnModuleInit {
         let next = existing.permissions;
         if (!next.includes('stock.raw_in')) next = [...next, 'stock.raw_in'];
         if (!next.includes('deliveries.view')) next = [...next, 'deliveries.view'];
+        if (!next.includes('transfers.confirm')) next = [...next, 'transfers.confirm'];
         if (next.length !== existing.permissions.length) {
           await this.prisma.appRole.update({
             where: { id: existing.id },

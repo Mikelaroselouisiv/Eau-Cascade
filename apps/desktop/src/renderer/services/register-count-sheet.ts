@@ -1,6 +1,7 @@
 import { getInventoryCountSheet, getProducts } from './api';
 import type { InventoryCountSheetRow, Product } from '../types/api';
 import { stockPackagingLabel } from '../utils/packagingDisplay';
+import { productEnforcesSaleStock } from '../utils/user-scope';
 
 function productToCountRow(p: Product): InventoryCountSheetRow {
   return {
@@ -30,7 +31,7 @@ export async function loadRegisterCountRows(departmentId: number): Promise<{
   } catch {
     const catalog = await getProducts(departmentId);
     const products = catalog
-      .filter((p) => p.trackStock && !p.isService)
+      .filter((p) => productEnforcesSaleStock(p))
       .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }))
       .map(productToCountRow);
     const companyId =

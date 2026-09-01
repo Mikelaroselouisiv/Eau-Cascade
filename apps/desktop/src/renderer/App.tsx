@@ -64,7 +64,7 @@ export default function App() {
             <Route
               path="production"
               element={
-                <RequirePermission anyOf={['production.use', 'transfers.manage', 'transfers.confirm']}>
+                <RequirePermission anyOf={['production.use', 'transfers.manage']}>
                   <ProductionPage />
                 </RequirePermission>
               }

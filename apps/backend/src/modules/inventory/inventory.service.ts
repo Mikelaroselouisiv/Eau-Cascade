@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DepartmentKind, InventorySessionKind, InventorySessionStatus, MovementType, Prisma, ProductNature } from '@prisma/client';
+import { isProductionDepartment } from '../../common/department-kind';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
 import { canAccessAssignedDepartment } from '../../common/user-scope';
 import { ymdToDateEnd, ymdToDateStart } from '../../common/time/timezone';
@@ -320,10 +321,8 @@ export class InventoryService {
     // Faible = encore du stock, mais strictement sous le seuil (ex. seuil 5 → 0 < stock < 5).
     // Les stocks à zéro ont leur propre moniteur.
     const where: Prisma.ProductWhereInput = {
-      trackStock: true,
-      isService: false,
+      ...this.onHandStockProductWhere(companyId),
       stock: { gt: 0, lt: safeThreshold },
-      ...(companyId ? { department: { companyId } } : {}),
     };
 
     return Promise.all([
@@ -347,10 +346,8 @@ export class InventoryService {
     const take = Math.min(200, Math.max(1, Math.floor(rawTake)));
 
     const where: Prisma.ProductWhereInput = {
-      trackStock: true,
-      isService: false,
+      ...this.onHandStockProductWhere(companyId),
       stock: { lte: 0 },
-      ...(companyId ? { department: { companyId } } : {}),
     };
 
     return Promise.all([
@@ -366,6 +363,29 @@ export class InventoryService {
       }),
       this.prisma.product.count({ where }),
     ]).then(([items, total]) => ({ items, total }));
+  }
+
+  /** Stock réellement entreposé : MP, ou PF des magasins DISTRIBUTION (jamais le PF usine). */
+  private onHandStockProductWhere(companyId?: number): Prisma.ProductWhereInput {
+    return {
+      trackStock: true,
+      isService: false,
+      deletedAt: null,
+      ...(companyId ? { companyId } : {}),
+      OR: [
+        { nature: ProductNature.RAW_MATERIAL },
+        {
+          AND: [
+            { nature: { not: ProductNature.RAW_MATERIAL } },
+            { department: { kind: DepartmentKind.DISTRIBUTION } },
+          ],
+        },
+      ],
+    };
+  }
+
+  private countNatureForDepartment(kind?: DepartmentKind | string | null): ProductNature {
+    return isProductionDepartment(kind) ? ProductNature.RAW_MATERIAL : ProductNature.FINISHED_GOOD;
   }
 
   private async ensureProductExists(productId: number) {
@@ -394,6 +414,7 @@ export class InventoryService {
         departmentId,
         trackStock: true,
         isService: false,
+        nature: this.countNatureForDepartment(dept.kind),
         ...(onlyPositiveStock ? { stock: { gt: 0 } } : {}),
       },
     });
@@ -782,6 +803,7 @@ export class InventoryService {
       labelPrefix?: string;
       allowEmpty?: boolean;
       adjustStock?: boolean;
+      skipProductCount?: boolean;
     },
   ) {
     const dept = await this.prisma.department.findUnique({ where: { id: departmentId } });
@@ -789,13 +811,25 @@ export class InventoryService {
       throw new NotFoundException('Département introuvable');
     }
 
+    const skipProductCount =
+      opts?.skipProductCount === true ||
+      (opts?.natures == null && isProductionDepartment(dept.kind));
+
     const natureFilter = opts?.natures?.length
       ? { nature: { in: opts.natures } }
       : { nature: ProductNature.FINISHED_GOOD };
 
-    const products = await this.prisma.product.findMany({
-      where: { departmentId, trackStock: true, isService: false, deletedAt: null, ...natureFilter },
-    });
+    const products = skipProductCount
+      ? []
+      : await this.prisma.product.findMany({
+          where: {
+            departmentId,
+            trackStock: true,
+            isService: false,
+            deletedAt: null,
+            ...natureFilter,
+          },
+        });
     const allowEmpty = opts?.allowEmpty === true || products.length === 0;
     if (products.length === 0 && !allowEmpty) {
       throw new BadRequestException('Aucun produit avec stock suivi dans ce département.');
@@ -889,15 +923,13 @@ export class InventoryService {
     /** Stock rétrospectif à cette date (fin de journée PAP si YYYY-MM-DD). */
     asOf?: string;
   }) {
-    const where: Prisma.ProductWhereInput = {
-      trackStock: true,
-      isService: false,
-      deletedAt: null,
-    };
+    const where: Prisma.ProductWhereInput = this.onHandStockProductWhere(
+      filters?.companyIds?.length === 1 ? filters.companyIds[0] : undefined,
+    );
 
     if (filters?.departmentIds?.length) {
       where.departmentId = { in: filters.departmentIds };
-    } else if (filters?.companyIds?.length) {
+    } else if (filters?.companyIds?.length && filters.companyIds.length !== 1) {
       where.companyId = { in: filters.companyIds };
     }
 

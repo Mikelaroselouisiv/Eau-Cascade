@@ -54,7 +54,6 @@ export function ProductionPage() {
   const { user, canPerm } = useAuth();
   const canOpen = canPerm('production.use');
   const canTransfer = canPerm('transfers.manage');
-  const canConfirm = canPerm('transfers.confirm');
   const canManageDeliveries = canPerm('deliveries.manage');
   const canPrintFiche = canPerm('deliveries.print');
 
@@ -364,9 +363,9 @@ export function ProductionPage() {
           products={products}
           scopedDepts={allDepartments}
           canTransfer={canTransfer}
-          canConfirm={canConfirm}
           canManageDeliveries={canManageDeliveries}
           canPrint={canPrintFiche}
+          listCompanyOutgoing={user?.role === 'MANAGER' || user?.role === 'ADMIN'}
           executorDefault={user?.fullName?.trim() || user?.phone || ''}
           onRefuseClosed={refuseClosedProduction}
           onMessage={setMessage}

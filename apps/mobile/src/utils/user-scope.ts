@@ -47,6 +47,19 @@ export function isProductionKind(kind?: string | null): boolean {
   return kind === 'PRODUCTION_DISTRIBUTION';
 }
 
+/** PF magasin : la caisse limite la quantité au stock. Usine : vente sans stock entreposé. */
+export function productEnforcesSaleStock(p: {
+  trackStock?: boolean | null;
+  isService?: boolean | null;
+  nature?: string | null;
+  department?: { kind?: string | null } | null;
+}): boolean {
+  if (p.isService) return false;
+  if (p.nature === 'RAW_MATERIAL') return false;
+  if (p.trackStock === false) return false;
+  return !isProductionKind(p.department?.kind);
+}
+
 /** Caissier affecté à au moins une usine (production + distribution). */
 export function isPlantCashier(user: {
   role?: string | null;
@@ -69,6 +82,22 @@ export function isDistributionOnlyUser(user: {
   const plants = new Set((user?.productionDepartmentIds ?? []).filter((id) => id > 0));
   if (!plants.size) return true;
   return !assigned.some((id) => plants.has(id));
+}
+
+/** Réceptions PF : caissier d’un magasin DISTRIBUTION (pas usine, pas gérant). */
+export function canConfirmShopStockReceptions(user: {
+  role?: string | null;
+  departmentId?: number | null;
+  departmentIds?: number[] | null;
+  productionDepartmentIds?: number[] | null;
+} | null | undefined): boolean {
+  if (!user) return false;
+  if (user.role === 'ADMIN') return true;
+  if (user.role !== 'CASHIER') return false;
+  const assigned = resolvedDepartmentIds(user);
+  if (!assigned.length) return false;
+  const plants = new Set((user.productionDepartmentIds ?? []).filter((id) => id > 0));
+  return assigned.some((id) => !plants.has(id));
 }
 
 export function assignedProductionDepartmentIds<

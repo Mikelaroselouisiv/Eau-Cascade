@@ -19,6 +19,7 @@ export function SectionTabsLayout({ tabs, hiddenScreens = [] }: SectionTabsLayou
     canPerm,
     role: user?.role,
     productionDepartmentIds: user?.productionDepartmentIds,
+    departmentIds: user?.departmentIds,
   });
 
   return (

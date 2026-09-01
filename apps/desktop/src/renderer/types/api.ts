@@ -377,7 +377,7 @@ export interface Product {
   stockMin: string | number;
   saleUnits: ProductSaleUnit[];
   company?: { id: number; name: string; currency?: string } | null;
-  department?: { id: number; name: string } | null;
+  department?: { id: number; name: string; kind?: DepartmentKind } | null;
 }
 
 export interface SaleItemPayload {
@@ -1072,6 +1072,14 @@ export interface ProductionSessionDetail {
     openedQty: number;
     remainingQty: number;
     usedQty: number;
+  }>;
+  outflow?: Array<{
+    productId: number;
+    name: string;
+    toClients: number;
+    toDepartments: number;
+    received: number;
+    produced: number;
   }>;
   flows?: ProductionFlowRow[];
 }

@@ -327,6 +327,7 @@ type AccessFns = {
   canPerm: (permission: string) => boolean;
   role?: UserRole;
   productionDepartmentIds?: number[];
+  departmentIds?: number[];
 };
 
 export function canAccessMenuItem(item: MenuItem, access: AccessFns): boolean {
@@ -371,6 +372,15 @@ export function canAccessTab(tab: SectionTab, access: AccessFns): boolean {
   }
   if (tab.name === 'expenses') {
     return access.role === 'CASHIER' && (access.productionDepartmentIds?.length ?? 0) > 0;
+  }
+  if (tab.name === 'receptions') {
+    if (!access.canPerm('transfers.confirm')) return false;
+    if (access.role === 'ADMIN') return true;
+    if (access.role !== 'CASHIER') return false;
+    const plants = new Set(access.productionDepartmentIds ?? []);
+    const assigned = access.departmentIds ?? [];
+    if (!assigned.length) return false;
+    return assigned.some((id) => !plants.has(id));
   }
   if (tab.name === 'harmonisation') {
     if (access.role === 'CHEF_PRODUCTION') return false;

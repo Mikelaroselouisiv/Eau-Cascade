@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DepartmentKind } from '@prisma/client';
+import { DepartmentKind, ProductNature } from '@prisma/client';
 import { departmentAllowsHomeDelivery } from '../../common/department-kind';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
@@ -65,7 +65,7 @@ export class DepartmentsService {
       dto.offersHomeDelivery !== undefined
         ? dto.offersHomeDelivery
         : existing.offersHomeDelivery;
-    return this.prisma.department.update({
+    const updated = await this.prisma.department.update({
       where: { id },
       data: {
         ...(dto.name !== undefined && { name: dto.name.trim() }),
@@ -78,6 +78,19 @@ export class DepartmentsService {
       },
       include: { company: { select: { id: true, name: true } } },
     });
+    if (nextKind === DepartmentKind.PRODUCTION_DISTRIBUTION) {
+      await this.prisma.product.updateMany({
+        where: {
+          departmentId: id,
+          deletedAt: null,
+          isService: false,
+          trackStock: true,
+          nature: { not: ProductNature.RAW_MATERIAL },
+        },
+        data: { trackStock: false },
+      });
+    }
+    return updated;
   }
 
   async remove(id: number) {

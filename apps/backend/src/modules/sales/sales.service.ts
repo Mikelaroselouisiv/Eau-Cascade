@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { BankTransactionType, FinanceType, FulfillmentType, MovementType, PaymentMethod, Prisma, ProductNature } from '@prisma/client';
-import { isProductionDepartment } from '../../common/department-kind';
+import { isProductionDepartment, shouldEnforceFinishedGoodsAvailability } from '../../common/department-kind';
 import { permissionsSatisfy } from '../../common/permissions';
 import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from '../../common/utils/volume-unit-price';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -125,6 +125,7 @@ export class SalesService {
             name: string;
             isService: boolean;
             trackStock: boolean;
+            nature?: string | null;
             productFamilyId: number | null;
             productFamily: {
               tiers: { minQuantity: Prisma.Decimal; unitPrice: Prisma.Decimal }[];
@@ -182,45 +183,42 @@ export class SalesService {
             })
           : null;
 
+        const deptKind =
+          product.departmentId != null
+            ? (
+                await tx.department.findUnique({
+                  where: { id: product.departmentId },
+                  select: { kind: true },
+                })
+              )?.kind
+            : null;
+        const plant = isProductionDepartment(deptKind);
+
         if (product.isService && recipe?.components.length) {
-          if (fulfillmentType !== FulfillmentType.HOME) {
-            const plant =
-              product.departmentId != null &&
-              (
-                await tx.department.findUnique({
-                  where: { id: product.departmentId },
-                  select: { kind: true },
-                })
-              )?.kind === 'PRODUCTION_DISTRIBUTION';
-            if (!plant) {
-              for (const c of recipe.components) {
-                const need = Number(c.quantityPerParentBaseUnit) * baseQuantity;
-                await this.inventoryService.ensureStockAvailabilityTx(
-                  tx,
-                  c.componentProductId,
-                  need,
-                );
-              }
-            }
-          }
-        } else if (product.trackStock && !product.isService) {
-          if (fulfillmentType !== FulfillmentType.HOME) {
-            const plant =
-              product.departmentId != null &&
-              (
-                await tx.department.findUnique({
-                  where: { id: product.departmentId },
-                  select: { kind: true },
-                })
-              )?.kind === 'PRODUCTION_DISTRIBUTION';
-            if (!plant) {
+          if (fulfillmentType !== FulfillmentType.HOME && !plant) {
+            for (const c of recipe.components) {
+              const need = Number(c.quantityPerParentBaseUnit) * baseQuantity;
               await this.inventoryService.ensureStockAvailabilityTx(
                 tx,
-                product.id,
-                baseQuantity,
+                c.componentProductId,
+                need,
               );
             }
           }
+        } else if (
+          fulfillmentType !== FulfillmentType.HOME &&
+          shouldEnforceFinishedGoodsAvailability({
+            departmentKind: deptKind,
+            nature: product.nature,
+            trackStock: product.trackStock,
+            isService: product.isService,
+          })
+        ) {
+          await this.inventoryService.ensureStockAvailabilityTx(
+            tx,
+            product.id,
+            baseQuantity,
+          );
         }
 
         loadedLines.push({ item, psu, baseQuantity });
@@ -535,6 +533,7 @@ export class SalesService {
             companyId: firstCompanyId,
             departmentId: firstDepartmentId,
             fulfillmentType,
+            userId,
             items: createdItems.map((it) => ({
               saleItemId: it.id,
               quantityOrdered: Number(it.quantity),
@@ -1095,7 +1094,16 @@ export class SalesService {
                 productId: true,
                 quantity: true,
                 baseQuantity: true,
-                product: { select: { id: true, name: true, trackStock: true, isService: true } },
+                product: {
+                  select: {
+                    id: true,
+                    name: true,
+                    trackStock: true,
+                    isService: true,
+                    nature: true,
+                    department: { select: { kind: true } },
+                  },
+                },
               },
             },
           },
@@ -1114,6 +1122,7 @@ export class SalesService {
       if (baseQty <= 0.0001) continue;
 
       const product = di.saleItem.product;
+      if (isProductionDepartment(product.department?.kind)) continue;
       if (product.isService) {
         const recipe = await tx.productRecipe.findUnique({
           where: { parentProductId: product.id },

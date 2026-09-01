@@ -9,6 +9,7 @@ import {
   PaymentMethod,
   Prisma,
 } from '@prisma/client';
+import { isProductionDepartment, shouldEnforceFinishedGoodsAvailability } from '../../common/department-kind';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AccountingPostingService } from '../accounting/accounting-posting.service';
@@ -309,15 +310,18 @@ export class CreditService {
             })
           : null;
 
+        const deptKind =
+          product.departmentId != null
+            ? (
+                await tx.department.findUnique({
+                  where: { id: product.departmentId },
+                  select: { kind: true },
+                })
+              )?.kind
+            : null;
+        const plant = isProductionDepartment(deptKind);
+
         if (product.isService && recipe?.components.length) {
-          const plant =
-            product.departmentId != null &&
-            (
-              await tx.department.findUnique({
-                where: { id: product.departmentId },
-                select: { kind: true },
-              })
-            )?.kind === 'PRODUCTION_DISTRIBUTION';
           if (!plant) {
             for (const c of recipe.components) {
               await this.inventoryService.ensureStockAvailabilityTx(
@@ -327,18 +331,15 @@ export class CreditService {
               );
             }
           }
-        } else if (product.trackStock && !product.isService) {
-          const plant =
-            product.departmentId != null &&
-            (
-              await tx.department.findUnique({
-                where: { id: product.departmentId },
-                select: { kind: true },
-              })
-            )?.kind === 'PRODUCTION_DISTRIBUTION';
-          if (!plant) {
-            await this.inventoryService.ensureStockAvailabilityTx(tx, product.id, baseQuantity);
-          }
+        } else if (
+          shouldEnforceFinishedGoodsAvailability({
+            departmentKind: deptKind,
+            nature: product.nature,
+            trackStock: product.trackStock,
+            isService: product.isService,
+          })
+        ) {
+          await this.inventoryService.ensureStockAvailabilityTx(tx, product.id, baseQuantity);
         }
 
         loaded.push({ item, psu, baseQuantity });
@@ -439,6 +440,7 @@ export class CreditService {
         companyId: customer.companyId,
         departmentId: firstDepartmentId,
         fulfillmentType: 'ON_SITE',
+        userId,
         items: sale.items.map((it) => ({
           saleItemId: it.id,
           quantityOrdered: Number(it.quantity),

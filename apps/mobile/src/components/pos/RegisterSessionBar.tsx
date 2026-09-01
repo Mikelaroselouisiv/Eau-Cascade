@@ -36,6 +36,7 @@ import type {
 } from '@/types/api';
 import { formatMoney } from '@/utils/datetime';
 import { stockPackagingLabel } from '@/utils/packaging';
+import { productEnforcesSaleStock } from '@/utils/user-scope';
 
 type PanelMode = 'open' | 'close' | null;
 
@@ -92,7 +93,7 @@ async function loadRegisterCountRows(departmentId: number): Promise<{
   } catch {
     const catalog = await getProducts(departmentId);
     const products = catalog
-      .filter((p) => p.trackStock && !p.isService)
+      .filter((p) => productEnforcesSaleStock(p))
       .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }))
       .map(productToCountRow);
     const companyId = catalog.find((p) => p.companyId != null)?.companyId

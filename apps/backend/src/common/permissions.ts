@@ -201,7 +201,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'credit.manage',
     'production.use',
     'transfers.manage',
-    'transfers.confirm',
   ],
   CASHIER: [
     'pos.use',
@@ -223,7 +222,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'recipes.manage',
     'packaging.manage',
     'config.view',
-    'transfers.confirm',
   ],
   ACCOUNTANT: [
     'dashboard.view',
@@ -246,7 +244,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   CHEF_PRODUCTION: [
     'production.use',
     'transfers.manage',
-    'transfers.confirm',
     'deliveries.view',
     'deliveries.manage',
     'deliveries.manage_onsite',

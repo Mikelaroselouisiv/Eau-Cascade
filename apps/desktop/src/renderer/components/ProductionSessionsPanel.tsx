@@ -15,6 +15,12 @@ function usedTotal(session: ProductionSessionDetail) {
   return session.usage.reduce((sum, row) => sum + row.usedQty, 0);
 }
 
+function outflowTotal(session: ProductionSessionDetail) {
+  if (!session.outflow?.length) return null;
+  const sum = session.outflow.reduce((acc, row) => acc + row.produced, 0);
+  return sum > 0.0001 ? sum : null;
+}
+
 export function ProductionSessionsPanel({ companyId, onSelect }: Props) {
   const [sessions, setSessions] = useState<ProductionSessionDetail[]>([]);
   const [loading, setLoading] = useState(false);
@@ -140,21 +146,23 @@ export function ProductionSessionsPanel({ companyId, onSelect }: Props) {
               <th>Ouverture</th>
               <th>Fermeture</th>
               <th>Statut</th>
+              <th>Écoulé</th>
               <th>MP utilisée</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6}>…</td>
+                <td colSpan={7}>…</td>
               </tr>
             ) : sessions.length === 0 ? (
               <tr>
-                <td colSpan={6}>Aucune session pour ces filtres.</td>
+                <td colSpan={7}>Aucune session pour ces filtres.</td>
               </tr>
             ) : (
               sessions.map((s) => {
                 const used = usedTotal(s);
+                const flowed = outflowTotal(s);
                 return (
                   <tr
                     key={s.id}
@@ -175,6 +183,7 @@ export function ProductionSessionsPanel({ companyId, onSelect }: Props) {
                     <td>{formatDateTime(s.openedAt)}</td>
                     <td>{s.closedAt ? formatDateTime(s.closedAt) : '—'}</td>
                     <td>{s.status === 'OPEN' ? 'Ouverte' : 'Fermée'}</td>
+                    <td className="journal-amt">{flowed != null ? formatQuantity(flowed) : '—'}</td>
                     <td className="journal-amt">{used != null ? formatQuantity(used) : '—'}</td>
                   </tr>
                 );

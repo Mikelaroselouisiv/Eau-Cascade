@@ -1,5 +1,6 @@
 // Logique de panier portée de apps/desktop/src/renderer/pages/PosPage.tsx (fonctions pures).
 import type { Product, ProductSaleUnit } from '@/types/api';
+import { productEnforcesSaleStock } from './user-scope';
 import { resolveFamilyUnitPrice, resolveVolumeUnitPrice } from './volumeUnitPrice';
 
 /** Quantité décimale dans l'unité choisie (caisse, bouteille…) ; le stock est dans la même unité. */
@@ -28,7 +29,7 @@ export function roundQty(q: number): number {
 
 /** Quantité max vendable dans l'unité choisie (décimal), ou undefined si pas de limite stock (service). */
 export function maxQtyInSaleUnit(p: Product, unitsPerPackage: number): number | undefined {
-  if (!p.trackStock || p.isService) return undefined;
+  if (!productEnforcesSaleStock(p)) return undefined;
   const base = Number(p.stock);
   const up = Number(unitsPerPackage);
   if (!Number.isFinite(base) || !Number.isFinite(up) || up <= 0) return 0;

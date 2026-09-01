@@ -10,9 +10,8 @@ import type { Delivery, Department, InternalTransferRow, Product } from '../type
 import { formatDateTimeShort } from '../utils/datetime';
 import { DeliveryFicheCard } from './DeliveryFicheCard';
 import { DeliveryFicheModal } from './DeliveryFicheModal';
-import { TransferInboxPanel } from './TransferInboxPanel';
 
-type Dest = 'ON_SITE' | 'HOME' | 'TRANSFER' | 'RECEIVE';
+type Dest = 'ON_SITE' | 'HOME' | 'TRANSFER';
 
 function errMsg(err: unknown, fallback: string) {
   if (axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object') {
@@ -38,9 +37,10 @@ type Props = {
   products: Product[];
   scopedDepts: Department[];
   canTransfer: boolean;
-  canConfirm: boolean;
   canManageDeliveries: boolean;
   canPrint?: boolean;
+  /** Gérant : tous les envois de l’entreprise. Chef : usine courante seulement. */
+  listCompanyOutgoing?: boolean;
   executorDefault: string;
   onRefuseClosed: () => void;
   onMessage: (msg: string) => void;
@@ -53,35 +53,35 @@ export function ProductionOutflowSection({
   products,
   scopedDepts,
   canTransfer,
-  canConfirm,
   canManageDeliveries,
   canPrint = false,
+  listCompanyOutgoing = false,
   executorDefault,
   onRefuseClosed,
   onMessage,
 }: Props) {
-  const [dest, setDest] = useState<Dest>(
-    canManageDeliveries ? 'ON_SITE' : canConfirm ? 'RECEIVE' : 'TRANSFER',
-  );
+  const [dest, setDest] = useState<Dest>(canManageDeliveries ? 'ON_SITE' : 'TRANSFER');
   const [fiches, setFiches] = useState<Delivery[]>([]);
   const [selected, setSelected] = useState<Delivery | null>(null);
   const [toDepartmentId, setToDepartmentId] = useState<number | ''>('');
   const [transferQty, setTransferQty] = useState<Record<number, string>>({});
   const [outgoing, setOutgoing] = useState<InternalTransferRow[]>([]);
-  const [inbox, setInbox] = useState<InternalTransferRow[]>([]);
   const [busy, setBusy] = useState(false);
+
+  function outgoingParams() {
+    if (listCompanyOutgoing) {
+      return companyId != null ? { companyId } : {};
+    }
+    return { fromDepartmentId: departmentId };
+  }
 
   useEffect(() => {
     setSelected(null);
     if (dest === 'TRANSFER') {
       setFiches([]);
-      void listInternalTransfers({ fromDepartmentId: departmentId })
+      void listInternalTransfers(outgoingParams())
         .then(setOutgoing)
         .catch(() => setOutgoing([]));
-      return;
-    }
-    if (dest === 'RECEIVE') {
-      setFiches([]);
       return;
     }
     void (dest === 'HOME'
@@ -104,17 +104,7 @@ export function ProductionOutflowSection({
         );
       })
       .catch(() => setFiches([]));
-  }, [departmentId, dest, companyId]);
-
-  useEffect(() => {
-    if (!canConfirm) {
-      setInbox([]);
-      return;
-    }
-    void listInternalTransfers({ inbox: true, status: 'PENDING' })
-      .then(setInbox)
-      .catch(() => setInbox([]));
-  }, [departmentId, canConfirm]);
+  }, [departmentId, dest, companyId, listCompanyOutgoing]);
 
   async function openFiche(d: Delivery) {
     try {
@@ -147,7 +137,7 @@ export function ProductionOutflowSection({
       });
       setTransferQty({});
       onMessage('Livraison interne enregistrée.');
-      setOutgoing(await listInternalTransfers({ fromDepartmentId: departmentId }));
+      setOutgoing(await listInternalTransfers(outgoingParams()));
     } catch (e) {
       onMessage(errMsg(e, 'Envoi impossible.'));
     } finally {
@@ -187,18 +177,7 @@ export function ProductionOutflowSection({
               Autre département
             </button>
           ) : null}
-          {canConfirm ? (
-            <button
-              type="button"
-              className={`pos-sale-mode-btn${dest === 'RECEIVE' ? ' active' : ''}`}
-              onClick={() => setDest('RECEIVE')}
-            >
-              Réceptions{inbox.length ? ` (${inbox.length})` : ''}
-            </button>
-          ) : null}
         </div>
-
-        {dest === 'RECEIVE' && canConfirm ? <TransferInboxPanel inbox={inbox} onChange={setInbox} /> : null}
 
         {dest === 'TRANSFER' && canTransfer ? (
           <>
@@ -243,6 +222,7 @@ export function ProductionOutflowSection({
               <thead>
                 <tr>
                   <th>Date</th>
+                  {listCompanyOutgoing ? <th>Expéditeur</th> : null}
                   <th>Destinataire</th>
                   <th>Statut</th>
                 </tr>
@@ -251,6 +231,7 @@ export function ProductionOutflowSection({
                 {outgoing.map((t) => (
                   <tr key={t.id}>
                     <td>{formatDateTimeShort(t.createdAt)}</td>
+                    {listCompanyOutgoing ? <td>{t.fromDepartment.name}</td> : null}
                     <td>{t.toDepartment.name}</td>
                     <td>
                       {t.status === 'PENDING'
@@ -267,7 +248,7 @@ export function ProductionOutflowSection({
         ) : null}
       </section>
 
-      {dest !== 'TRANSFER' && dest !== 'RECEIVE' && canManageDeliveries ? (
+      {dest !== 'TRANSFER' && canManageDeliveries ? (
         fiches.length === 0 ? (
           <p className="delivery-empty">Aucune fiche</p>
         ) : (

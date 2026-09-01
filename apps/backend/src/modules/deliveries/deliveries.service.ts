@@ -99,6 +99,7 @@ export class DeliveriesService {
       companyId: number;
       departmentId?: number | null;
       fulfillmentType?: FulfillmentType;
+      userId?: number;
       items: Array<{ saleItemId: number; quantityOrdered: number }>;
     },
   ) {
@@ -127,6 +128,18 @@ export class DeliveriesService {
         },
       },
     });
+    if (autoDelivered) {
+      for (const it of opts.items) {
+        await this.applyStockDeltaForDeliveryItem(tx, {
+          saleId: opts.saleId,
+          saleItemId: it.saleItemId,
+          deltaSaleQty: it.quantityOrdered,
+          userId: opts.userId,
+          fulfillmentType,
+          stockDepartmentId: opts.departmentId ?? null,
+        });
+      }
+    }
     return delivery;
   }
 

@@ -8,12 +8,13 @@ import { TransferInboxPanel } from '@/components/transfers/TransferInboxPanel';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
+import { canConfirmShopStockReceptions } from '@/utils/user-scope';
 import { listInternalTransfers } from '@/services/api';
 import type { InternalTransferRow } from '@/types/api';
 
 export function PosReceptionsScreen() {
-  const { canPerm } = useAuth();
-  const allowed = canPerm('transfers.confirm');
+  const { user, canPerm } = useAuth();
+  const allowed = canPerm('transfers.confirm') && canConfirmShopStockReceptions(user);
   const [inbox, setInbox] = useState<InternalTransferRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 

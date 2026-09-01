@@ -12,10 +12,15 @@ import {
   ProductNature,
   ProductionFlowKind,
 } from '@prisma/client';
-import { isProductionDepartment } from '../../common/department-kind';
+import { holdsFinishedGoodsStock, isProductionDepartment } from '../../common/department-kind';
 import { resolveProductInDepartment } from '../../common/product-remap';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
-import { canAccessAssignedDepartment } from '../../common/user-scope';
+import {
+  isAdminRole,
+  isAssignedToDepartment,
+  isManagerRole,
+  resolvedDepartmentIds,
+} from '../../common/user-scope';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { ProductionSessionsService } from '../production-sessions/production-sessions.service';
@@ -35,6 +40,7 @@ const TRANSFER_INCLUDE = {
 type ScopeUser = {
   id: number;
   role?: string | null;
+  companyId?: number | null;
   departmentId?: number | null;
   departmentIds?: number[] | null;
 };
@@ -47,21 +53,32 @@ export class InternalTransfersService {
     private readonly productionSessions: ProductionSessionsService,
   ) {}
 
-  list(filters: {
-    companyId?: number;
-    fromDepartmentId?: number;
-    toDepartmentId?: number;
-    status?: InternalTransferStatus;
-    inboxDepartmentIds?: number[];
-  }) {
+  async list(
+    user: ScopeUser,
+    filters: {
+      companyId?: number;
+      fromDepartmentId?: number;
+      toDepartmentId?: number;
+      status?: InternalTransferStatus;
+      inbox?: boolean;
+    },
+  ) {
     const where: Prisma.InternalTransferWhereInput = { deletedAt: null };
     if (filters.companyId) where.companyId = filters.companyId;
     if (filters.fromDepartmentId) where.fromDepartmentId = filters.fromDepartmentId;
     if (filters.toDepartmentId) where.toDepartmentId = filters.toDepartmentId;
     if (filters.status) where.status = filters.status;
-    if (filters.inboxDepartmentIds?.length) {
-      where.toDepartmentId = { in: filters.inboxDepartmentIds };
+
+    if (filters.inbox) {
+      const destIds = await this.receptionInboxDepartmentIds(user, filters.toDepartmentId);
+      if (!destIds.length) return [];
+      where.toDepartmentId = { in: destIds };
+      if (!filters.status) where.status = InternalTransferStatus.PENDING;
+    } else {
+      const scoped = this.applyViewerScope(user, where, filters);
+      if (scoped === 'empty') return [];
     }
+
     return this.prisma.internalTransfer.findMany({
       where,
       include: TRANSFER_INCLUDE,
@@ -70,14 +87,90 @@ export class InternalTransfersService {
     });
   }
 
+  /** Magasins DISTRIBUTION du caissier — pas les usines, pas le gérant. */
+  private async receptionInboxDepartmentIds(
+    user: ScopeUser,
+    requestedToDepartmentId?: number,
+  ): Promise<number[]> {
+    if (!isAdminRole(user.role) && user.role !== 'CASHIER') return [];
+    const assigned = resolvedDepartmentIds(user);
+    if (!assigned.length) return [];
+    const shops = await this.prisma.department.findMany({
+      where: {
+        id: { in: assigned },
+        deletedAt: null,
+        kind: DepartmentKind.DISTRIBUTION,
+      },
+      select: { id: true },
+    });
+    let ids = shops.map((d) => d.id);
+    if (requestedToDepartmentId != null) {
+      ids = ids.filter((id) => id === requestedToDepartmentId);
+    }
+    return ids;
+  }
+
+  private applyViewerScope(
+    user: ScopeUser,
+    where: Prisma.InternalTransferWhereInput,
+    filters: { fromDepartmentId?: number; toDepartmentId?: number; companyId?: number },
+  ): 'ok' | 'empty' {
+    if (isAdminRole(user.role)) return 'ok';
+    if (isManagerRole(user.role)) {
+      if (user.companyId != null && !filters.companyId) {
+        where.companyId = user.companyId;
+      }
+      return 'ok';
+    }
+    const assigned = resolvedDepartmentIds(user);
+    if (!assigned.length) return 'empty';
+    if (filters.fromDepartmentId && !assigned.includes(filters.fromDepartmentId)) return 'empty';
+    if (filters.toDepartmentId && !assigned.includes(filters.toDepartmentId)) return 'empty';
+    if (!filters.fromDepartmentId && !filters.toDepartmentId) {
+      where.OR = [
+        { fromDepartmentId: { in: assigned } },
+        { toDepartmentId: { in: assigned } },
+      ];
+    }
+    return 'ok';
+  }
+
+  private assertCanConfirmReception(
+    user: ScopeUser,
+    dest: { id: number; kind: DepartmentKind | string; name: string },
+  ) {
+    if (isAdminRole(user.role)) return;
+    if (!holdsFinishedGoodsStock(dest.kind) || user.role !== 'CASHIER') {
+      throw new ForbiddenException(
+        'Seul le caissier du magasin destinataire peut confirmer la réception.',
+      );
+    }
+    if (!isAssignedToDepartment(user, dest.id)) {
+      throw new ForbiddenException('Cette réception n’est pas destinée à votre magasin.');
+    }
+  }
+
+  /** Gérant : n’importe quelle usine de son entreprise. Chef : usine affectée. Session ouverte obligatoire à l’envoi. */
+  private assertCanDispatch(
+    user: ScopeUser,
+    fromDept: { id: number; companyId: number },
+  ) {
+    if (isAdminRole(user.role)) return;
+    if (isManagerRole(user.role)) {
+      if (user.companyId != null && fromDept.companyId !== user.companyId) {
+        throw new ForbiddenException('Hors de votre entreprise.');
+      }
+      return;
+    }
+    if (!isAssignedToDepartment(user, fromDept.id)) {
+      throw new ForbiddenException('Vous n’êtes pas affecté au département expéditeur.');
+    }
+  }
+
   async create(dto: CreateInternalTransferDto, user: ScopeUser) {
     if (dto.fromDepartmentId === dto.toDepartmentId) {
       throw new BadRequestException('Le destinataire doit être un autre département.');
     }
-    if (!canAccessAssignedDepartment(user, dto.fromDepartmentId)) {
-      throw new ForbiddenException('Vous n’êtes pas affecté au département expéditeur.');
-    }
-
     const fromDept = await this.prisma.department.findFirst({
       where: { id: dto.fromDepartmentId, deletedAt: null },
     });
@@ -91,10 +184,7 @@ export class InternalTransfersService {
     if (!isProductionDepartment(fromDept.kind)) {
       throw new BadRequestException('Seule une unité de production peut expédier un transfert interne.');
     }
-
-    await this.prisma.$transaction(async (tx) => {
-      await this.productionSessions.requireOpenSessionTx(tx, dto.fromDepartmentId);
-    });
+    this.assertCanDispatch(user, fromDept);
 
     const productIds = dto.items.map((i) => i.productId);
     const products = await this.prisma.product.findMany({
@@ -112,21 +202,56 @@ export class InternalTransfersService {
       }
     }
 
-    const created = await this.prisma.internalTransfer.create({
-      data: {
-        companyId: fromDept.companyId,
-        fromDepartmentId: dto.fromDepartmentId,
-        toDepartmentId: dto.toDepartmentId,
-        note: dto.note?.trim() || null,
-        createdById: user.id,
-        items: {
-          create: dto.items.map((i) => ({
-            productId: i.productId,
-            quantity: i.quantity,
-          })),
+    const destIsPlant = isProductionDepartment(toDept.kind);
+    const created = await this.prisma.$transaction(async (tx) => {
+      const session = await this.productionSessions.requireOpenSessionTx(tx, dto.fromDepartmentId);
+
+      const row = await tx.internalTransfer.create({
+        data: {
+          companyId: fromDept.companyId,
+          fromDepartmentId: dto.fromDepartmentId,
+          toDepartmentId: dto.toDepartmentId,
+          note: dto.note?.trim() || null,
+          createdById: user.id,
+          status: destIsPlant ? InternalTransferStatus.CONFIRMED : InternalTransferStatus.PENDING,
+          ...(destIsPlant
+            ? { confirmedById: user.id, confirmedAt: new Date() }
+            : {}),
+          items: {
+            create: dto.items.map((i) => ({
+              productId: i.productId,
+              quantity: i.quantity,
+            })),
+          },
         },
-      },
-      include: TRANSFER_INCLUDE,
+        include: TRANSFER_INCLUDE,
+      });
+
+      for (const item of dto.items) {
+        const qty = Number(item.quantity);
+        await this.productionSessions.recordFlowTx(tx, {
+          departmentId: dto.fromDepartmentId,
+          productId: item.productId,
+          kind: ProductionFlowKind.FLOW_TRANSFER_OUT,
+          quantity: qty,
+          userId: user.id,
+          productionSessionId: session.id,
+          internalTransferId: row.id,
+        });
+        if (destIsPlant) {
+          const destProductId = await resolveProductInDepartment(tx, byId.get(item.productId)!, dto.toDepartmentId);
+          await this.productionSessions.recordFlowTx(tx, {
+            departmentId: dto.toDepartmentId,
+            productId: destProductId,
+            kind: ProductionFlowKind.TRANSFER_IN,
+            quantity: qty,
+            userId: user.id,
+            internalTransferId: row.id,
+          });
+        }
+      }
+
+      return row;
     });
 
     await this.auditService.log({
@@ -166,36 +291,19 @@ export class InternalTransfersService {
     if (transfer.status !== InternalTransferStatus.PENDING) {
       throw new BadRequestException('Ce transfert n’est plus en attente.');
     }
-    if (!canAccessAssignedDepartment(user, transfer.toDepartmentId)) {
-      throw new ForbiddenException('Vous n’êtes pas affecté au département destinataire.');
-    }
+    this.assertCanConfirmReception(user, transfer.toDepartment);
 
-    const destIsPlant = transfer.toDepartment.kind === DepartmentKind.PRODUCTION_DISTRIBUTION;
+    const destIsPlant = isProductionDepartment(transfer.toDepartment.kind);
 
     await this.prisma.$transaction(async (tx) => {
-      const open = await tx.productionSession.findFirst({
-        where: {
-          departmentId: transfer.fromDepartmentId,
-          status: 'OPEN',
-          deletedAt: null,
-        },
-        select: { id: true },
-      });
-
       for (const item of transfer.items) {
         const qty = Number(item.quantity);
-        await this.productionSessions.recordFlowTx(tx, {
-          departmentId: transfer.fromDepartmentId,
-          productId: item.productId,
-          kind: ProductionFlowKind.FLOW_TRANSFER_OUT,
-          quantity: qty,
-          userId: user.id,
-          productionSessionId: open?.id ?? null,
-          internalTransferId: transfer.id,
-        });
-
         if (destIsPlant) {
-          const destProductId = await resolveProductInDepartment(tx, item.product, transfer.toDepartmentId);
+          const destProductId = await resolveProductInDepartment(
+            tx,
+            item.product,
+            transfer.toDepartmentId,
+          );
           await this.productionSessions.recordFlowTx(tx, {
             departmentId: transfer.toDepartmentId,
             productId: destProductId,
@@ -205,7 +313,11 @@ export class InternalTransfersService {
             internalTransferId: transfer.id,
           });
         } else {
-          const destProductId = await resolveProductInDepartment(tx, item.product, transfer.toDepartmentId);
+          const destProductId = await resolveProductInDepartment(
+            tx,
+            item.product,
+            transfer.toDepartmentId,
+          );
           await tx.product.update({
             where: { id: destProductId },
             data: { stock: { increment: qty } },
@@ -253,9 +365,12 @@ export class InternalTransfersService {
     if (transfer.status !== InternalTransferStatus.PENDING) {
       throw new BadRequestException('Ce transfert n’est plus en attente.');
     }
-    if (!canAccessAssignedDepartment(user, transfer.toDepartmentId)) {
-      throw new ForbiddenException('Vous n’êtes pas affecté au département destinataire.');
-    }
+    const dest = await this.prisma.department.findFirst({
+      where: { id: transfer.toDepartmentId, deletedAt: null },
+      select: { id: true, kind: true, name: true },
+    });
+    if (!dest) throw new NotFoundException('Département introuvable');
+    this.assertCanConfirmReception(user, dest);
 
     const updated = await this.prisma.internalTransfer.update({
       where: { id },

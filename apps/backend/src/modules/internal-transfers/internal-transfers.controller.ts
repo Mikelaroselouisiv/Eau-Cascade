@@ -14,13 +14,13 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { resolvedDepartmentIds } from '../../common/user-scope';
 import { CreateInternalTransferDto } from './dto/internal-transfer.dto';
 import { InternalTransfersService } from './internal-transfers.service';
 
 type ScopeUser = {
   id: number;
   role?: string | null;
+  companyId?: number | null;
   departmentId?: number | null;
   departmentIds?: number[] | null;
 };
@@ -48,14 +48,14 @@ export class InternalTransfersController {
         ? (statusRaw as InternalTransferStatus)
         : undefined;
     const inbox = inboxRaw === '1' || inboxRaw === 'true';
-    return this.transfers.list({
+    return this.transfers.list(user, {
       companyId: Number.isFinite(companyId) && companyId! > 0 ? companyId : undefined,
       fromDepartmentId:
         Number.isFinite(fromDepartmentId) && fromDepartmentId! > 0 ? fromDepartmentId : undefined,
       toDepartmentId:
         Number.isFinite(toDepartmentId) && toDepartmentId! > 0 ? toDepartmentId : undefined,
       status,
-      inboxDepartmentIds: inbox ? resolvedDepartmentIds(user) : undefined,
+      inbox,
     });
   }
 

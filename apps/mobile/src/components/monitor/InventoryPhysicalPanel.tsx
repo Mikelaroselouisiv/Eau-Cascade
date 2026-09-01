@@ -110,12 +110,13 @@ export function InventoryPhysicalPanel({ companyId, refreshKey, onStockChanged }
         listInventorySessions({ companyId }),
       ]);
       if (cancelled?.() || !mountedRef.current) return;
-      setDepartments(departmentRows);
+      const shops = departmentRows.filter((row) => row.kind !== 'PRODUCTION_DISTRIBUTION');
+      setDepartments(shops);
       setSessions(sessionRows);
       setDepartmentId((current) =>
-        current != null && departmentRows.some((row) => row.id === current)
+        current != null && shops.some((row) => row.id === current)
           ? current
-          : (departmentRows[0]?.id ?? null),
+          : (shops[0]?.id ?? null),
       );
     } catch {
       if (cancelled?.() || !mountedRef.current) return;

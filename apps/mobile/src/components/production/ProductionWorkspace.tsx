@@ -16,7 +16,6 @@ import { makeRefreshControl } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
 import { DeliveryExecuteModal } from '@/components/deliveries/DeliveryExecuteModal';
 import { DeliveryFicheCard } from '@/components/deliveries/DeliveryFicheCard';
-import { TransferInboxPanel } from '@/components/transfers/TransferInboxPanel';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
@@ -48,7 +47,7 @@ import { canEditDeliveryExecutor, departmentsForUser } from '@/utils/user-scope'
 import { formatQuantity } from '@/utils/quantity';
 
 type PanelMode = 'open' | 'close' | null;
-type Dest = 'ON_SITE' | 'HOME' | 'TRANSFER' | 'RECEIVE';
+type Dest = 'ON_SITE' | 'HOME' | 'TRANSFER';
 
 function belongsToPlant(d: Delivery, plantId: number): boolean {
   if (d.departmentId === plantId) return true;
@@ -76,8 +75,8 @@ export function ProductionWorkspace() {
   const { user, canPerm } = useAuth();
   const canOpen = canPerm('production.use');
   const canTransfer = canPerm('transfers.manage');
-  const canConfirm = canPerm('transfers.confirm');
   const canManageDeliveries = canPerm('deliveries.manage');
+  const listCompanyOutgoing = user?.role === 'MANAGER' || user?.role === 'ADMIN';
   const canPrintFiche = canPerm('deliveries.print');
   const canChangeExecutor = canEditDeliveryExecutor(user?.role);
 
@@ -99,10 +98,7 @@ export function ProductionWorkspace() {
   const [toDepartmentId, setToDepartmentId] = useState<number | ''>('');
   const [transferQty, setTransferQty] = useState<Record<number, string>>({});
   const [outgoing, setOutgoing] = useState<InternalTransferRow[]>([]);
-  const [inbox, setInbox] = useState<InternalTransferRow[]>([]);
-  const [dest, setDest] = useState<Dest>(
-    canManageDeliveries ? 'ON_SITE' : canConfirm ? 'RECEIVE' : 'TRANSFER',
-  );
+  const [dest, setDest] = useState<Dest>(canManageDeliveries ? 'ON_SITE' : 'TRANSFER');
   const [fiches, setFiches] = useState<Delivery[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [pullRefreshing, setPullRefreshing] = useState(false);
@@ -133,7 +129,7 @@ export function ProductionWorkspace() {
   }, []);
 
   const reloadFiches = useCallback(async (deptId: number, nextDest: Dest) => {
-    if (nextDest === 'TRANSFER' || nextDest === 'RECEIVE') {
+    if (nextDest === 'TRANSFER') {
       setFiches([]);
       return;
     }
@@ -153,6 +149,16 @@ export function ProductionWorkspace() {
     }
   }, [user?.companyId]);
 
+  const outgoingQuery = useCallback(
+    (deptId: number) => {
+      if (listCompanyOutgoing) {
+        return user?.companyId != null ? { companyId: user.companyId } : {};
+      }
+      return { fromDepartmentId: deptId };
+    },
+    [listCompanyOutgoing, user?.companyId],
+  );
+
   const reloadWorkspace = useCallback(
     async (deptId: number, nextDest: Dest = dest) => {
       await refresh(deptId);
@@ -160,20 +166,13 @@ export function ProductionWorkspace() {
         getProducts(deptId)
           .then((rows) => rows.filter((p) => p.nature !== 'RAW_MATERIAL'))
           .catch(() => [] as Product[]),
-        listInternalTransfers({ fromDepartmentId: deptId }).catch(() => [] as InternalTransferRow[]),
+        listInternalTransfers(outgoingQuery(deptId)).catch(() => [] as InternalTransferRow[]),
       ]);
       setProducts(prods);
       setOutgoing(out);
-      if (canConfirm) {
-        setInbox(
-          await listInternalTransfers({ inbox: true, status: 'PENDING' }).catch(
-            () => [] as InternalTransferRow[],
-          ),
-        );
-      }
       await reloadFiches(deptId, nextDest);
     },
-    [canConfirm, dest, refresh, reloadFiches],
+    [dest, refresh, reloadFiches, outgoingQuery],
   );
 
   useEffect(() => {
@@ -204,15 +203,10 @@ export function ProductionWorkspace() {
     void getProducts(departmentId)
       .then((rows) => setProducts(rows.filter((p) => p.nature !== 'RAW_MATERIAL')))
       .catch(() => setProducts([]));
-    void listInternalTransfers({ fromDepartmentId: departmentId })
+    void listInternalTransfers(outgoingQuery(departmentId))
       .then(setOutgoing)
       .catch(() => setOutgoing([]));
-    if (canConfirm) {
-      void listInternalTransfers({ inbox: true, status: 'PENDING' })
-        .then(setInbox)
-        .catch(() => setInbox([]));
-    }
-  }, [departmentId, canConfirm, refresh]);
+  }, [departmentId, refresh, outgoingQuery]);
 
   useEffect(() => {
     setSelectedId(null);
@@ -334,7 +328,7 @@ export function ProductionWorkspace() {
       });
       setTransferQty({});
       setStatus('Livraison interne enregistrée.');
-      setOutgoing(await listInternalTransfers({ fromDepartmentId: departmentId }));
+      setOutgoing(await listInternalTransfers(outgoingQuery(departmentId)));
     } catch (e) {
       setStatus(formatApiError(e, 'Envoi impossible'));
     } finally {
@@ -403,7 +397,7 @@ export function ProductionWorkspace() {
           ) : null}
         </View>
 
-        {departmentId !== '' && (canTransfer || canManageDeliveries || canConfirm) ? (
+        {departmentId !== '' && (canTransfer || canManageDeliveries) ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Écoulement</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
@@ -434,20 +428,7 @@ export function ProductionWorkspace() {
                   </Text>
                 </Pressable>
               ) : null}
-              {canConfirm ? (
-                <Pressable
-                  onPress={() => setDest('RECEIVE')}
-                  style={[styles.chip, dest === 'RECEIVE' && styles.chipActive]}>
-                  <Text style={[styles.chipText, dest === 'RECEIVE' && styles.chipTextActive]}>
-                    Réceptions{inbox.length ? ` (${inbox.length})` : ''}
-                  </Text>
-                </Pressable>
-              ) : null}
             </ScrollView>
-
-            {dest === 'RECEIVE' && canConfirm ? (
-              <TransferInboxPanel inbox={inbox} onChange={setInbox} />
-            ) : null}
 
             {dest === 'TRANSFER' && canTransfer ? (
               <>
@@ -482,6 +463,7 @@ export function ProductionWorkspace() {
                 </Pressable>
                 {outgoing.map((t) => (
                   <Text key={t.id} style={styles.meta}>
+                    {listCompanyOutgoing ? `${t.fromDepartment.name} → ` : ''}
                     {t.toDepartment.name} ·{' '}
                     {t.status === 'PENDING'
                       ? 'En attente'
@@ -495,7 +477,7 @@ export function ProductionWorkspace() {
           </View>
         ) : null}
 
-        {departmentId !== '' && dest !== 'TRANSFER' && dest !== 'RECEIVE' && canManageDeliveries ? (
+        {departmentId !== '' && dest !== 'TRANSFER' && canManageDeliveries ? (
           fiches.length === 0 ? (
             <Text style={styles.meta}>Aucune fiche</Text>
           ) : (

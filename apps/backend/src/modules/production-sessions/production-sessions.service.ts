@@ -86,7 +86,11 @@ export class ProductionSessionsService {
     const local =
       mine && mine.openedDeviceId && mine.openedDeviceId === deviceId.trim() ? mine : null;
     const mineElsewhere = mine && !local ? mine : null;
-    return { local, mineElsewhere, occupancy };
+    return {
+      local: local ? this.withUsage(local) : null,
+      mineElsewhere: mineElsewhere ? this.withUsage(mineElsewhere) : null,
+      occupancy: occupancy ? this.withUsage(occupancy) : null,
+    };
   }
 
   async claimSession(
@@ -201,10 +205,47 @@ export class ProductionSessionsService {
     });
   }
 
-  private withUsage<T extends Parameters<ProductionSessionsService['usageFromInventory']>[0]>(
-    session: T,
-  ) {
-    return { ...session, usage: this.usageFromInventory(session) };
+  private outflowFromFlows(session: {
+    flows?: Array<{
+      kind: ProductionFlowKind;
+      quantity: Prisma.Decimal | number;
+      product: { id: number; name: string };
+    }>;
+  }) {
+    const byProduct = new Map<
+      number,
+      { productId: number; name: string; toClients: number; toDepartments: number; received: number }
+    >();
+    for (const flow of session.flows ?? []) {
+      const row = byProduct.get(flow.product.id) ?? {
+        productId: flow.product.id,
+        name: flow.product.name,
+        toClients: 0,
+        toDepartments: 0,
+        received: 0,
+      };
+      const qty = Number(flow.quantity);
+      if (flow.kind === ProductionFlowKind.FLOW_CLIENT) row.toClients += qty;
+      else if (flow.kind === ProductionFlowKind.FLOW_TRANSFER_OUT) row.toDepartments += qty;
+      else if (flow.kind === ProductionFlowKind.TRANSFER_IN) row.received += qty;
+      byProduct.set(flow.product.id, row);
+    }
+    return [...byProduct.values()]
+      .map((row) => ({
+        ...row,
+        produced: row.toClients + row.toDepartments,
+      }))
+      .filter((row) => row.produced > 0.0001 || row.received > 0.0001)
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+  }
+
+  private withUsage<T extends Parameters<ProductionSessionsService['usageFromInventory']>[0] &
+    Parameters<ProductionSessionsService['outflowFromFlows']>[0]>(session: T) {
+    return {
+      ...session,
+      usage: this.usageFromInventory(session),
+      outflow: this.outflowFromFlows(session),
+    };
   }
 
   private holderText(session: {

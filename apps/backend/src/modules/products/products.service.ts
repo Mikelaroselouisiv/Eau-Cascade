@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DepartmentKind, Prisma, ProductNature } from '@prisma/client';
+import { isProductionDepartment } from '../../common/department-kind';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -49,6 +50,38 @@ export class ProductsService {
       }
     }
     return { nature, trackStock };
+  }
+
+  private presentProduct<T extends {
+    trackStock: boolean;
+    isService: boolean;
+    nature?: ProductNature | string | null;
+    department?: { kind?: DepartmentKind | string | null } | null;
+  }>(product: T): T {
+    if (
+      !product.isService &&
+      product.nature !== ProductNature.RAW_MATERIAL &&
+      isProductionDepartment(product.department?.kind)
+    ) {
+      return { ...product, trackStock: false };
+    }
+    return product;
+  }
+
+  async healPlantFinishedGoodsTracking(departmentId?: number) {
+    await this.prisma.product.updateMany({
+      where: {
+        deletedAt: null,
+        isService: false,
+        trackStock: true,
+        nature: { not: ProductNature.RAW_MATERIAL },
+        department: {
+          kind: DepartmentKind.PRODUCTION_DISTRIBUTION,
+          ...(departmentId != null ? { id: departmentId } : {}),
+        },
+      },
+      data: { trackStock: false },
+    });
   }
 
   private async assertDepartmentBelongsToCompany(
@@ -225,14 +258,16 @@ export class ProductsService {
         entityId: String(product.id),
         metadata: { name: product.name },
       });
-      return result;
+      return this.presentProduct(result);
     });
   }
 
   async findAll(departmentId?: number, asOf?: string) {
+    await this.healPlantFinishedGoodsTracking(departmentId);
     const products = await this.productsRepository.findAll(departmentId);
-    if (!asOf?.trim()) return products;
-    return this.inventoryService.applyStockAsOf(products, asOf.trim());
+    const presented = products.map((p) => this.presentProduct(p));
+    if (!asOf?.trim()) return presented;
+    return this.inventoryService.applyStockAsOf(presented, asOf.trim());
   }
 
   async update(id: number, updateProductDto: UpdateProductDto, userId?: number) {
@@ -405,7 +440,7 @@ export class ProductsService {
         entityId: String(id),
         metadata: { name: result.name },
       });
-      return result;
+      return this.presentProduct(result);
     });
   }
 

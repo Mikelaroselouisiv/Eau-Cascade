@@ -92,5 +92,21 @@ export function canAccessAssignedDepartment(
   return ids.includes(departmentId);
 }
 
+/** Affectation stricte : une liste vide n’ouvre pas tout le périmètre. */
+export function isAssignedToDepartment(
+  user: {
+    role?: string | null;
+    departmentId?: number | null;
+    departmentIds?: number[] | null;
+  },
+  departmentId: number | null | undefined,
+): boolean {
+  if (departmentId == null) return false;
+  if (isAdminRole(user.role)) return true;
+  const ids = resolvedDepartmentIds(user);
+  if (!ids.length) return false;
+  return ids.includes(departmentId);
+}
+
 /** Alias : le périmètre n’est plus réservé au code MANAGER. */
 export const managerCanAccessDepartment = canAccessAssignedDepartment;

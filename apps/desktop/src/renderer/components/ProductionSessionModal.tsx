@@ -19,6 +19,7 @@ export function ProductionSessionModal({ session, onClose }: Props) {
   if (!session) return null;
 
   const usage = session.usage ?? [];
+  const outflow = session.outflow ?? [];
   const flows = session.flows ?? [];
   const closed = session.status === 'CLOSED';
 
@@ -57,7 +58,37 @@ export function ProductionSessionModal({ session, onClose }: Props) {
           </dd>
         </dl>
 
-        <h3 style={{ fontSize: '1rem', margin: '0 0 0.5rem' }}>Matières premières</h3>
+        {outflow.length > 0 ? (
+          <>
+            <h3 style={{ fontSize: '1rem', margin: '0 0 0.5rem' }}>Écoulement</h3>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Produit</th>
+                    <th>Clients</th>
+                    <th>Transferts</th>
+                    <th>Écoulé</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {outflow.map((row) => (
+                    <tr key={row.productId}>
+                      <td>{row.name}</td>
+                      <td className="journal-amt">{formatQuantity(row.toClients)}</td>
+                      <td className="journal-amt">{formatQuantity(row.toDepartments)}</td>
+                      <td className="journal-amt">{formatQuantity(row.produced)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : null}
+
+        <h3 style={{ fontSize: '1rem', margin: outflow.length ? '0.75rem 0 0.5rem' : '0 0 0.5rem' }}>
+          Matières premières
+        </h3>
         {usage.length === 0 ? (
           <p className="dept-hint" style={{ marginTop: 0 }}>
             Aucune matière première.
@@ -97,7 +128,7 @@ export function ProductionSessionModal({ session, onClose }: Props) {
 
         {closed && flows.length > 0 ? (
           <>
-            <h3 style={{ fontSize: '1rem', margin: '0.75rem 0 0.5rem' }}>Écoulement</h3>
+            <h3 style={{ fontSize: '1rem', margin: '0.75rem 0 0.5rem' }}>Détail des flux</h3>
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
