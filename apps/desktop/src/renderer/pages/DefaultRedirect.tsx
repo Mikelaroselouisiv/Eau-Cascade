@@ -26,6 +26,7 @@ export function DefaultRedirect() {
   if (canPerm('deliveries.view')) return <Navigate to="/app/livraisons" replace />;
   if (canPerm('stock.view')) return <Navigate to="/app/stock" replace />;
   if (canPerm('credit.view')) return <Navigate to="/app/credit" replace />;
+  if (canPerm('donation.view')) return <Navigate to="/app/dons" replace />;
   if (canPerm('accounting.view')) return <Navigate to="/app/comptabilite" replace />;
   if (canPerm('config.view')) return <Navigate to="/app/config" replace />;
   return <Navigate to="/app/pos" replace />;

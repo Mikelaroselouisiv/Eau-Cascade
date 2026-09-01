@@ -13,6 +13,7 @@ const FLOW_LABEL: Record<ProductionFlowRow['kind'], string> = {
   TRANSFER_IN: 'Transfert reçu',
   FLOW_CLIENT: 'Client',
   FLOW_TRANSFER_OUT: 'Transfert sortant',
+  FLOW_DONATION: 'Don',
 };
 
 export function ProductionSessionModal({ session, onClose }: Props) {
@@ -68,6 +69,7 @@ export function ProductionSessionModal({ session, onClose }: Props) {
                     <th>Produit</th>
                     <th>Clients</th>
                     <th>Transferts</th>
+                    <th>Dons</th>
                     <th>Écoulé</th>
                   </tr>
                 </thead>
@@ -77,6 +79,7 @@ export function ProductionSessionModal({ session, onClose }: Props) {
                       <td>{row.name}</td>
                       <td className="journal-amt">{formatQuantity(row.toClients)}</td>
                       <td className="journal-amt">{formatQuantity(row.toDepartments)}</td>
+                      <td className="journal-amt">{formatQuantity(row.toDonations ?? 0)}</td>
                       <td className="journal-amt">{formatQuantity(row.produced)}</td>
                     </tr>
                   ))}

@@ -40,6 +40,7 @@ function AppStack() {
         <Stack.Screen name="production" options={{ header: () => <AppHeader title="Production" /> }} />
         <Stack.Screen name="dashboard" options={{ header: () => <AppHeader title="Tableau de bord" /> }} />
         <Stack.Screen name="credit" options={{ header: () => <AppHeader title="Crédit" /> }} />
+        <Stack.Screen name="dons" options={{ header: () => <AppHeader title="Dons" /> }} />
         <Stack.Screen name="stock" options={{ header: () => <AppHeader title="Stocks" /> }} />
         <Stack.Screen name="accounting" options={{ header: () => <AppHeader title="Comptabilité" /> }} />
         <Stack.Screen name="config" options={{ header: () => <AppHeader title="Configuration" /> }} />

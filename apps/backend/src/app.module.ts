@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { BanksModule } from './modules/banks/banks.module';
 import { CompanyModule } from './modules/company/company.module';
 import { CreditModule } from './modules/credit/credit.module';
+import { DonationsModule } from './modules/donations/donations.module';
 import { DeliveriesModule } from './modules/deliveries/deliveries.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
 import { PackagingModule } from './modules/packaging/packaging.module';
@@ -46,6 +47,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ProductFamiliesModule,
     SalesModule,
     CreditModule,
+    DonationsModule,
     BanksModule,
     DeliveriesModule,
     InventoryModule,

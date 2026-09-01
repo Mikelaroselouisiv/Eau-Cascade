@@ -150,6 +150,7 @@ export class ProductionSessionsService {
       userId?: number;
       productionSessionId?: number | null;
       internalTransferId?: number | null;
+      donationId?: number | null;
       deliveryId?: number | null;
     },
   ) {
@@ -163,6 +164,7 @@ export class ProductionSessionsService {
         quantity: Math.abs(qty),
         productionSessionId: data.productionSessionId ?? null,
         internalTransferId: data.internalTransferId ?? null,
+        donationId: data.donationId ?? null,
         deliveryId: data.deliveryId ?? null,
         createdById: data.userId ?? null,
       },
@@ -214,7 +216,7 @@ export class ProductionSessionsService {
   }) {
     const byProduct = new Map<
       number,
-      { productId: number; name: string; toClients: number; toDepartments: number; received: number }
+      { productId: number; name: string; toClients: number; toDepartments: number; toDonations: number; received: number }
     >();
     for (const flow of session.flows ?? []) {
       const row = byProduct.get(flow.product.id) ?? {
@@ -222,18 +224,20 @@ export class ProductionSessionsService {
         name: flow.product.name,
         toClients: 0,
         toDepartments: 0,
+        toDonations: 0,
         received: 0,
       };
       const qty = Number(flow.quantity);
       if (flow.kind === ProductionFlowKind.FLOW_CLIENT) row.toClients += qty;
       else if (flow.kind === ProductionFlowKind.FLOW_TRANSFER_OUT) row.toDepartments += qty;
+      else if (flow.kind === ProductionFlowKind.FLOW_DONATION) row.toDonations += qty;
       else if (flow.kind === ProductionFlowKind.TRANSFER_IN) row.received += qty;
       byProduct.set(flow.product.id, row);
     }
     return [...byProduct.values()]
       .map((row) => ({
         ...row,
-        produced: row.toClients + row.toDepartments,
+        produced: row.toClients + row.toDepartments + row.toDonations,
       }))
       .filter((row) => row.produced > 0.0001 || row.received > 0.0001)
       .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));

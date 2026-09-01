@@ -63,6 +63,8 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ id: string; label: string; codes
       'production.use',
       'transfers.manage',
       'transfers.confirm',
+      'donation.view',
+      'donation.manage',
       'stores.manage',
     ],
   },

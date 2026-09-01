@@ -18,6 +18,7 @@ import {
 } from '../services/api';
 import { isLikelyNetworkError } from '../services/api-errors';
 import type { SessionUser, UserRole } from '../types/api';
+import { mergePlantCashierPermissions } from '../utils/user-scope';
 
 type AuthContextValue = {
   user: SessionUser | null;
@@ -136,10 +137,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const canPerm = useCallback(
     (permission: string) => {
       if (!user) return false;
-      const perms = user.permissions;
+      const perms = mergePlantCashierPermissions(
+        user.role,
+        user.permissions ?? [],
+        user.productionDepartmentIds,
+      );
       // ADMIN sans permissions hydratées (ancien login / cache) : accès complet.
       if ((!perms || perms.length === 0) && user.role === 'ADMIN') return true;
-      if (!perms) return false;
+      if (!perms.length) return false;
       if (perms.includes('*')) return true;
       if (perms.includes(permission)) return true;
       if (

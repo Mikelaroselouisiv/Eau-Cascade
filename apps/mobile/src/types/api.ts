@@ -269,6 +269,7 @@ export interface ProductionSessionDetail {
     name: string;
     toClients: number;
     toDepartments: number;
+    toDonations?: number;
     received: number;
     produced: number;
   }>;
@@ -712,6 +713,56 @@ export interface CreditSummary {
   overdue: number;
   totalReceivable: number;
   topDebtors: CreditCustomerListItem[];
+}
+
+export interface DonationBeneficiaryListItem {
+  id: number;
+  uuid: string;
+  companyId: number;
+  departmentId: number | null;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  note: string | null;
+  isActive: boolean;
+  donationsCount: number;
+  lastDonationAt: string | null;
+  department?: { id: number; name: string } | null;
+  company?: { id: number; name: string } | null;
+}
+
+export interface DonationItemRow {
+  id: number;
+  productId: number;
+  quantity: number;
+  product?: { id: number; name: string; sku?: string | null } | null;
+}
+
+export interface DonationRow {
+  id: number;
+  uuid: string;
+  companyId: number;
+  departmentId: number;
+  beneficiaryId: number;
+  note: string | null;
+  createdAt: string;
+  department?: { id: number; name: string; kind?: string } | null;
+  beneficiary?: { id: number; name: string } | null;
+  createdBy?: UserAttribution | null;
+  items: DonationItemRow[];
+}
+
+export interface DonationBeneficiaryDetail extends DonationBeneficiaryListItem {
+  quantityTotal: number;
+  donations: DonationRow[];
+}
+
+export interface DonationSummary {
+  beneficiariesTotal: number;
+  donationsTotal: number;
+  itemsTotal: number;
+  quantityTotal: number;
+  lastDonationAt: string | null;
 }
 
 export interface CompanyListItem {

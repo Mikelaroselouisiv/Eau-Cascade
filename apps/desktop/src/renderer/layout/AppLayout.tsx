@@ -13,6 +13,7 @@ const nav: Array<{ to: string; label: string; permission: string }> = [
   { to: '/app/production', label: 'Production', permission: 'production.use' },
   { to: '/app/dashboard', label: 'Tableau de bord', permission: 'dashboard.view' },
   { to: '/app/credit', label: 'Crédit', permission: 'credit.view' },
+  { to: '/app/dons', label: 'Dons', permission: 'donation.view' },
   { to: '/app/stock', label: 'Stocks', permission: 'stock.view' },
   { to: '/app/comptabilite', label: 'Comptabilité', permission: 'accounting.view' },
   { to: '/app/config', label: 'Configuration', permission: 'config.view' },

@@ -263,6 +263,25 @@ export class RolesService implements OnModuleInit {
           this.cache.delete(code);
         }
       }
+      if (code === 'MANAGER' || code === 'CHEF_PRODUCTION') {
+        let next = existing.permissions;
+        if (!next.includes('donation.view')) next = [...next, 'donation.view'];
+        if (!next.includes('donation.manage')) next = [...next, 'donation.manage'];
+        if (next.length !== existing.permissions.length) {
+          await this.prisma.appRole.update({
+            where: { id: existing.id },
+            data: { permissions: next },
+          });
+          this.cache.delete(code);
+        }
+      }
+      if (code === 'ACCOUNTANT' && !existing.permissions.includes('donation.view')) {
+        await this.prisma.appRole.update({
+          where: { id: existing.id },
+          data: { permissions: [...existing.permissions, 'donation.view'] },
+        });
+        this.cache.delete(code);
+      }
     }
   }
 }

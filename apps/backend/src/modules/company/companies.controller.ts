@@ -22,7 +22,7 @@ export class CompaniesController {
   constructor(private readonly companyService: CompanyService) {}
 
   @Get()
-  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'deliveries.view', 'finance.view', 'credit.view')
+  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'deliveries.view', 'finance.view', 'credit.view', 'donation.view')
   findAll() {
     return this.companyService.findAll();
   }
@@ -34,7 +34,7 @@ export class CompaniesController {
   }
 
   @Get(':id')
-  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'deliveries.view', 'finance.view', 'credit.view')
+  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'deliveries.view', 'finance.view', 'credit.view', 'donation.view')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.companyService.findOne(id);
   }

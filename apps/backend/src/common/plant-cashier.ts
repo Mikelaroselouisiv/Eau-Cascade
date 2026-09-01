@@ -2,6 +2,8 @@
 export const PLANT_CASHIER_PERMISSIONS = [
   'credit.view',
   'credit.manage',
+  'donation.view',
+  'donation.manage',
   'finance.expense',
 ] as const;
 

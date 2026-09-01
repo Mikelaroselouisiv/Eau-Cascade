@@ -34,7 +34,7 @@ export class ProductsController {
   }
 
   @Get()
-  @PermissionsAny('products.view', 'pos.use', 'credit.manage')
+  @PermissionsAny('products.view', 'pos.use', 'credit.manage', 'donation.manage')
   findAll(
     @Query('departmentId') departmentIdRaw?: string,
     @Query('asOf') asOf?: string,

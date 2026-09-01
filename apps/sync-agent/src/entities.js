@@ -15,6 +15,7 @@ export const ENTITY_ORDER = [
   'UserDepartment',
   'ExpenseCategory',
   'CreditCustomer',
+  'DonationBeneficiary',
   // Banques avant Payment / CreditPayment / BankTransaction (FK bankAccountId).
   'Bank',
   'BankAccount',
@@ -38,6 +39,8 @@ export const ENTITY_ORDER = [
   'ProductionSession',
   'InternalTransfer',
   'InternalTransferItem',
+  'Donation',
+  'DonationItem',
   'PurchaseOrder',
   'PurchaseOrderLine',
   'GoodsReceipt',

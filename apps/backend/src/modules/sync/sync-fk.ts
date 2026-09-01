@@ -95,6 +95,25 @@ export const ENTITY_FK_MAP: Partial<Record<SyncEntityName, SyncFkRef[]>> = {
     { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: true },
     { uuidField: 'departmentUuid', idField: 'departmentId', parent: 'Department', required: false },
   ],
+  DonationBeneficiary: [
+    { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: true },
+    { uuidField: 'departmentUuid', idField: 'departmentId', parent: 'Department', required: false },
+  ],
+  Donation: [
+    { uuidField: 'companyUuid', idField: 'companyId', parent: 'Company', required: true },
+    { uuidField: 'departmentUuid', idField: 'departmentId', parent: 'Department', required: true },
+    {
+      uuidField: 'beneficiaryUuid',
+      idField: 'beneficiaryId',
+      parent: 'DonationBeneficiary',
+      required: true,
+    },
+    { uuidField: 'createdByUuid', idField: 'createdById', parent: 'User', required: false },
+  ],
+  DonationItem: [
+    { uuidField: 'donationUuid', idField: 'donationId', parent: 'Donation', required: true },
+    { uuidField: 'productUuid', idField: 'productId', parent: 'Product', required: true },
+  ],
   Sale: [
     { uuidField: 'userUuid', idField: 'userId', parent: 'User', required: false },
     { uuidField: 'storeUuid', idField: 'storeId', parent: 'Store', required: false },
@@ -287,6 +306,7 @@ export const ENTITY_FK_MAP: Partial<Record<SyncEntityName, SyncFkRef[]>> = {
       parent: 'InternalTransfer',
       required: false,
     },
+    { uuidField: 'donationUuid', idField: 'donationId', parent: 'Donation', required: false },
     { uuidField: 'deliveryUuid', idField: 'deliveryId', parent: 'Delivery', required: false },
     { uuidField: 'createdByUuid', idField: 'createdById', parent: 'User', required: false },
   ],
@@ -366,6 +386,9 @@ export const RELATION_OBJECT_KEYS = new Set([
   'entries',
   'financeEntry',
   'creditCustomer',
+  'donationBeneficiary',
+  'beneficiary',
+  'donation',
   'creditPayment',
   'creditPayments',
   'delivery',

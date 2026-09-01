@@ -71,6 +71,25 @@ export function isPlantCashier(user: {
   );
 }
 
+/** Mêmes pouvoirs extra que le backend (`plant-cashier.ts`) : crédit, dons, dépenses. */
+export const PLANT_CASHIER_PERMISSIONS = [
+  'credit.view',
+  'credit.manage',
+  'donation.view',
+  'donation.manage',
+  'finance.expense',
+] as const;
+
+export function mergePlantCashierPermissions(
+  role: string | null | undefined,
+  permissions: string[],
+  productionDepartmentIds?: number[] | null,
+): string[] {
+  if (!isPlantCashier({ role, productionDepartmentIds })) return permissions;
+  if (permissions.includes('*')) return permissions;
+  return Array.from(new Set([...permissions, ...PLANT_CASHIER_PERMISSIONS]));
+}
+
 /** Caissier (ou autre) affecté uniquement à des magasins DISTRIBUTION — pas d’usine. */
 export function isDistributionOnlyUser(user: {
   departmentId?: number | null;
@@ -98,6 +117,28 @@ export function canConfirmShopStockReceptions(user: {
   if (!assigned.length) return false;
   const plants = new Set((user.productionDepartmentIds ?? []).filter((id) => id > 0));
   return assigned.some((id) => !plants.has(id));
+}
+
+/** Département de don : usine affectée en priorité, sinon premier du périmètre. */
+export function defaultAssignedPlantDepartmentId<
+  T extends { id: number; kind?: string | null },
+>(
+  depts: T[],
+  user: { productionDepartmentIds?: number[] | null } | null | undefined,
+  preferredId?: number | null,
+): number | '' {
+  const plantIds = new Set((user?.productionDepartmentIds ?? []).filter((id) => id > 0));
+  if (plantIds.size) {
+    if (preferredId != null && plantIds.has(preferredId) && depts.some((d) => d.id === preferredId)) {
+      return preferredId;
+    }
+    const assignedPlant = depts.find((d) => plantIds.has(d.id));
+    if (assignedPlant) return assignedPlant.id;
+    const kindPlant = depts.find((d) => isProductionKind(d.kind));
+    if (kindPlant) return kindPlant.id;
+  }
+  if (preferredId != null && depts.some((d) => d.id === preferredId)) return preferredId;
+  return depts[0]?.id ?? '';
 }
 
 export function assignedProductionDepartmentIds<

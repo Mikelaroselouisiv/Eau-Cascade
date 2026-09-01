@@ -3,6 +3,7 @@ import { AuthProvider } from './context/AuthContext';
 import { AppLayout } from './layout/AppLayout';
 import { AccountingPage } from './pages/AccountingPage';
 import { ConfigPage } from './pages/ConfigPage';
+import { DonationPage } from './pages/DonationPage';
 import { CreditPage } from './pages/CreditPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DefaultRedirect } from './pages/DefaultRedirect';
@@ -42,6 +43,14 @@ export default function App() {
               element={
                 <RequirePermission permission="credit.view">
                   <CreditPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="dons"
+              element={
+                <RequirePermission permission="donation.view">
+                  <DonationPage />
                 </RequirePermission>
               }
             />

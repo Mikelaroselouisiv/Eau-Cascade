@@ -133,7 +133,11 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
                 <View key={`out-${row.productId}`} style={styles.usageRow}>
                   <Text style={styles.usageName}>{row.name}</Text>
                   <Text style={styles.meta}>
-                    Clients {formatQuantity(row.toClients)} · transferts {formatQuantity(row.toDepartments)} · écoule {formatQuantity(row.produced)}
+                    Clients {formatQuantity(row.toClients)} · transferts {formatQuantity(row.toDepartments)}
+                    {(row.toDonations ?? 0) > 0.0001
+                      ? ` · dons ${formatQuantity(row.toDonations)}`
+                      : ''}{' '}
+                    · écoule {formatQuantity(row.produced)}
                   </Text>
                 </View>
               ))}

@@ -11,7 +11,7 @@ describe('plant-cashier', () => {
     expect(isPlantCashier({ role: 'MANAGER', productionDepartmentIds: [4] })).toBe(false);
   });
 
-  it('grants credit + expense permissions only to plant cashiers', () => {
+  it('grants credit, donation and expense permissions only to plant cashiers', () => {
     const base = ['pos.use', 'products.view'];
     expect(mergePlantCashierPermissions('CASHIER', base, [])).toEqual(base);
     expect(mergePlantCashierPermissions('MANAGER', base, [4])).toEqual(base);

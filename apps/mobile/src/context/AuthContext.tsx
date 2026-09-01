@@ -18,6 +18,7 @@ import {
 import { isLikelyNetworkError } from '../services/api-errors';
 import { initDb } from '../services/db';
 import type { SessionUser, UserRole } from '../types/api';
+import { mergePlantCashierPermissions } from '../utils/user-scope';
 import { permissionsInclude, resolveUserPermissions } from '../utils/permissions';
 
 type AuthContextValue = {
@@ -103,7 +104,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resolvedPerms = useMemo(
-    () => (user ? resolveUserPermissions(user) : []),
+    () =>
+      user
+        ? mergePlantCashierPermissions(
+            user.role,
+            resolveUserPermissions(user),
+            user.productionDepartmentIds,
+          )
+        : [],
     [user],
   );
 

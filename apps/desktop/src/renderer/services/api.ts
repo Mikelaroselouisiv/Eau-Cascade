@@ -6,6 +6,10 @@ import type {
   CreditCustomerDetail,
   CreditCustomerListItem,
   CreditSummary,
+  DonationBeneficiaryDetail,
+  DonationBeneficiaryListItem,
+  DonationRow,
+  DonationSummary,
   BankRow,
   BankSummary,
   BankTransactionRow,
@@ -1800,6 +1804,79 @@ export async function recordCreditPayment(payload: {
   note?: string;
 }) {
   const { data } = await api.post('/credit/payments', payload);
+  return data;
+}
+
+export async function getDonationSummary(companyId: number) {
+  const { data } = await api.get<DonationSummary>('/donations/summary', {
+    params: { companyId },
+  });
+  return data;
+}
+
+export async function listDonationBeneficiaries(params: {
+  companyId: number;
+  q?: string;
+  includeInactive?: boolean;
+}) {
+  const { data } = await api.get<DonationBeneficiaryListItem[]>('/donations/beneficiaries', {
+    params: {
+      companyId: params.companyId,
+      q: params.q || undefined,
+      includeInactive: params.includeInactive ? '1' : undefined,
+    },
+  });
+  return data;
+}
+
+export async function getDonationBeneficiary(id: number) {
+  const { data } = await api.get<DonationBeneficiaryDetail>(`/donations/beneficiaries/${id}`);
+  return data;
+}
+
+export async function createDonationBeneficiary(payload: {
+  companyId: number;
+  departmentId?: number;
+  name: string;
+  phone?: string;
+  address?: string;
+  note?: string;
+}) {
+  const { data } = await api.post<DonationBeneficiaryListItem>('/donations/beneficiaries', payload);
+  return data;
+}
+
+export async function updateDonationBeneficiary(
+  id: number,
+  payload: {
+    name?: string;
+    phone?: string | null;
+    address?: string | null;
+    note?: string | null;
+    isActive?: boolean;
+    departmentId?: number | null;
+  },
+) {
+  const { data } = await api.patch<DonationBeneficiaryListItem>(`/donations/beneficiaries/${id}`, payload);
+  return data;
+}
+
+export async function listDonations(params: {
+  companyId: number;
+  beneficiaryId?: number;
+  departmentId?: number;
+}) {
+  const { data } = await api.get<DonationRow[]>('/donations', { params });
+  return data;
+}
+
+export async function createDonation(payload: {
+  beneficiaryId: number;
+  departmentId: number;
+  items: Array<{ productId: number; quantity: number }>;
+  note?: string;
+}) {
+  const { data } = await api.post<DonationRow>('/donations', payload);
   return data;
 }
 
