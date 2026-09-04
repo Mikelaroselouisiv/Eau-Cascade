@@ -1,14 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { MoneyText } from '@/components/MoneyText';
 import { ChipScroll } from '@/components/ChipScroll';
@@ -37,7 +30,6 @@ import {
   businessDayStartIso,
   businessTodayYmd,
   dashboardPresetRange,
-  formatDateTime,
   formatYmdDisplay,
 } from '@/utils/datetime';
 import { isSaleDeleted, saleDisplayRef } from '@/utils/saleRef';
@@ -56,16 +48,13 @@ export default function VentesScreen() {
   const salesDeptParams = useMemo(() => salesQueryDepartmentParams(user), [user]);
   const { companyId, companies, setCompanyId, ready, lockedToSession } = useCompanyScope();
   const [range, setRange] = useState(() => dashboardPresetRange('week'));
-  const [view, setView] = useState<'departments' | 'transactions'>('departments');
   const [byProduct, setByProduct] = useState<DashboardSalesByProductRow[]>([]);
-  const [sales, setSales] = useState<Sale[]>([]);
   const [salesTotal, setSalesTotal] = useState(0);
   const [selectedDepartment, setSelectedDepartment] = useState<DepartmentGroup | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [deptRefreshKey, setDeptRefreshKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const canManageSales = canPerm('sales.cancel');
@@ -75,9 +64,8 @@ export default function VentesScreen() {
   const salesRecentMinYmd =
     canSeeUnlimitedSalesRange || !canSeeSalesTotals ? null : addDaysYmd(businessTodayYmd(), -1);
 
-  const load = useCallback(async (offset = 0) => {
+  const load = useCallback(async () => {
     if (companyId == null) return;
-    const append = offset > 0;
     const rawRange = range;
     const today = businessTodayYmd();
     const dateFrom =
@@ -91,36 +79,33 @@ export default function VentesScreen() {
         getDashboardSalesByProduct({ companyId, dateFrom, dateTo, ...salesDeptParams }),
         listSales({
           companyId,
-          skip: offset,
-          take: 20,
+          skip: 0,
+          take: 1,
           createdFrom: businessDayStartIso(dateFrom),
           createdTo: businessDayEndIso(dateTo),
           ...salesDeptParams,
         }),
       ]);
       setByProduct(products);
-      setSales((previous) => (append ? [...previous, ...salesRes.items] : salesRes.items));
       setSalesTotal(salesRes.total);
     } catch {
       setError('Impossible de charger les ventes');
-      if (!append) {
-        setByProduct([]);
-        setSales([]);
-        setSalesTotal(0);
-      }
+      setByProduct([]);
+      setSalesTotal(0);
     }
   }, [companyId, range, salesRecentMinYmd, salesDeptParams]);
 
   useFocusEffect(
     useCallback(() => {
       if (!ready) return;
-      void load(0);
+      void load();
     }, [load, ready]),
   );
 
   async function onRefresh() {
     setRefreshing(true);
-    await load(0);
+    await load();
+    setDeptRefreshKey((key) => key + 1);
     setRefreshing(false);
   }
 
@@ -146,6 +131,13 @@ export default function VentesScreen() {
     });
   }, [byProduct]);
 
+  useEffect(() => {
+    setSelectedDepartment((current) => {
+      if (!current) return current;
+      return departmentGroups.find((group) => group.key === current.key) ?? current;
+    });
+  }, [departmentGroups]);
+
   const grandTotal = byProduct.reduce((s, r) => s + Number(r.totalSubtotal || 0), 0);
   const rawDisplayRange = range;
   const todayYmd = businessTodayYmd();
@@ -156,23 +148,13 @@ export default function VentesScreen() {
   const dateTo =
     salesRecentMinYmd && rawDisplayRange.dateTo > todayYmd ? todayYmd : rawDisplayRange.dateTo;
 
-  async function openSale(id: number) {
-    setDetailLoading(true);
+  async function openSale(sale: Sale) {
     setError(null);
     try {
-      setSelectedSale(await getSaleById(id));
+      setSelectedSale(await getSaleById(sale.id));
     } catch {
-      setError('Impossible d’ouvrir cette transaction');
-    } finally {
-      setDetailLoading(false);
+      setSelectedSale(sale);
     }
-  }
-
-  async function loadMore() {
-    if (loadingMore || sales.length >= salesTotal) return;
-    setLoadingMore(true);
-    await load(sales.length);
-    setLoadingMore(false);
   }
 
   function confirmAction(kind: 'cancel' | 'refund' | 'delete', sale: Sale) {
@@ -212,7 +194,8 @@ export default function VentesScreen() {
       else if (kind === 'refund') await refundSale(sale.id);
       else await deleteSalePermanently(sale.id, companyId);
       setSelectedSale(null);
-      await load(0);
+      await load();
+      setDeptRefreshKey((key) => key + 1);
     } catch {
       Alert.alert('Action impossible', 'La transaction n’a pas pu être modifiée.');
     } finally {
@@ -246,7 +229,7 @@ export default function VentesScreen() {
         <DashboardDateFilter
           dateFrom={range.dateFrom}
           dateTo={range.dateTo}
-          onChange={(dateFrom, dateTo) => setRange({ dateFrom, dateTo })}
+          onChange={(nextFrom, nextTo) => setRange({ dateFrom: nextFrom, dateTo: nextTo })}
           minYmd={salesRecentMinYmd}
         />
         {salesRecentMinYmd ? (
@@ -254,40 +237,6 @@ export default function VentesScreen() {
             Totaux limités aux 2 derniers jours (depuis {formatYmdDisplay(salesRecentMinYmd)}).
           </Text>
         ) : null}
-        <View style={styles.viewSwitch}>
-          <Pressable
-            style={[styles.viewButton, view === 'departments' && styles.viewButtonActive]}
-            onPress={() => setView('departments')}>
-            <Ionicons
-              name="business-outline"
-              size={17}
-              color={view === 'departments' ? '#fff' : BrandColors.textMuted}
-            />
-            <Text
-              style={[
-                styles.viewButtonText,
-                view === 'departments' && styles.viewButtonTextActive,
-              ]}>
-              Départements
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.viewButton, view === 'transactions' && styles.viewButtonActive]}
-            onPress={() => setView('transactions')}>
-            <Ionicons
-              name="receipt-outline"
-              size={17}
-              color={view === 'transactions' ? '#fff' : BrandColors.textMuted}
-            />
-            <Text
-              style={[
-                styles.viewButtonText,
-                view === 'transactions' && styles.viewButtonTextActive,
-              ]}>
-              Transactions
-            </Text>
-          </Pressable>
-        </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {ready && companyId == null ? (
           <Text style={styles.error}>Aucune entreprise disponible.</Text>
@@ -298,156 +247,67 @@ export default function VentesScreen() {
           <KpiCard label="Transactions" value={String(salesTotal)} />
         </View>
 
-        {view === 'departments' ? (
-          <>
-            <View style={styles.sectionHeader}>
-              <View>
-                <Text style={styles.section}>Ventes par département</Text>
-                <Text style={styles.sectionHint}>Touchez une carte pour voir les articles</Text>
-              </View>
-              <Text style={styles.periodLabel}>
-                {formatYmdDisplay(dateFrom)} → {formatYmdDisplay(dateTo)}
-              </Text>
-            </View>
-            {departmentGroups.length === 0 ? (
-              <Text style={styles.empty}>Aucune vente sur cette période.</Text>
-            ) : (
-              <View style={styles.departmentGrid}>
-                {departmentGroups.map((group) => {
-                  const total = group.rows.reduce(
-                    (sum, row) => sum + Number(row.totalSubtotal),
-                    0,
-                  );
-                  const quantity = group.rows.reduce(
-                    (sum, row) => sum + Number(row.quantity),
-                    0,
-                  );
-                  return (
-                    <Pressable
-                      key={group.key}
-                      style={({ pressed }) => [
-                        styles.departmentCard,
-                        pressed && styles.cardPressed,
-                      ]}
-                      onPress={() => setSelectedDepartment(group)}>
-                      <View style={styles.departmentIcon}>
-                        <Ionicons name="storefront-outline" size={18} color={BrandColors.primary} />
-                      </View>
-                      <Text style={styles.departmentName} numberOfLines={2}>
-                        {group.label}
-                      </Text>
-                      <Text style={styles.departmentMeta}>
-                        {group.rows.length} article(s) · {formatQuantity(quantity)} unité(s)
-                      </Text>
-                      <MoneyText value={total} style={styles.departmentTotal} />
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
-          </>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.section}>Ventes par département</Text>
+          <Text style={styles.periodLabel}>
+            {formatYmdDisplay(dateFrom)} → {formatYmdDisplay(dateTo)}
+          </Text>
+        </View>
+        {departmentGroups.length === 0 ? (
+          <Text style={styles.empty}>Aucune vente sur cette période.</Text>
         ) : (
-          <>
-            <View style={styles.sectionHeader}>
-              <View>
-                <Text style={styles.section}>Transactions de vente</Text>
-                <Text style={styles.sectionHint}>
-                  {sales.length} affichée(s) sur {salesTotal}
-                </Text>
-              </View>
-            </View>
-            {detailLoading ? <ActivityIndicator color={BrandColors.primary} /> : null}
-            {sales.length === 0 ? (
-              <Text style={styles.empty}>Aucune transaction sur cette période.</Text>
-            ) : (
-              sales.map((sale) => {
-                const deleted = isSaleDeleted(sale);
-                const statusTone = deleted
-                  ? styles.statusDeleted
-                  : sale.status === 'COMPLETED'
-                    ? styles.statusCompleted
-                    : sale.status === 'REFUNDED'
-                      ? styles.statusRefunded
-                      : styles.statusCancelled;
-                const statusLabel = deleted
-                  ? 'Supprimée'
-                  : sale.status === 'COMPLETED'
-                    ? 'Complétée'
-                    : sale.status === 'REFUNDED'
-                      ? 'Remboursée'
-                      : 'Annulée';
-                return (
-                  <Pressable
-                    key={sale.id}
-                    style={({ pressed }) => [
-                      styles.saleCard,
-                      deleted && styles.saleCardDeleted,
-                      pressed && styles.cardPressed,
-                    ]}
-                    onPress={() => void openSale(sale.id)}>
-                    <View style={styles.saleTop}>
-                      <View style={styles.saleRefWrap}>
-                        <Text style={[styles.saleRef, deleted && styles.saleDeletedText]}>
-                          #{saleDisplayRef(sale)}
-                        </Text>
-                        <View style={[styles.statusBadge, statusTone]}>
-                          <Text style={[styles.statusText, deleted && styles.statusDeletedText]}>
-                            {statusLabel}
-                          </Text>
-                        </View>
-                      </View>
-                      <MoneyText
-                        value={sale.total}
-                        style={[styles.saleTotal, deleted && styles.saleDeletedText]}
-                      />
-                    </View>
-                    <Text
-                      style={[styles.saleClient, deleted && styles.saleDeletedText]}
-                      numberOfLines={1}>
-                      {sale.clientName?.trim() || 'Client inconnu'}
-                    </Text>
-                    <View style={styles.saleBottom}>
-                      <Text style={[styles.saleMeta, deleted && styles.saleDeletedText]}>
-                        {formatDateTime(sale.createdAt)}
-                      </Text>
-                      <Text
-                        style={[styles.saleMeta, deleted && styles.saleDeletedText]}
-                        numberOfLines={1}>
-                        {sale.user?.fullName?.trim() || sale.cashier || sale.user?.phone || '—'}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })
-            )}
-            {sales.length < salesTotal ? (
-              <Pressable
-                style={[styles.loadMore, loadingMore && styles.disabled]}
-                disabled={loadingMore}
-                onPress={() => void loadMore()}>
-                {loadingMore ? (
-                  <ActivityIndicator color={BrandColors.primary} />
-                ) : (
-                  <Text style={styles.loadMoreText}>Charger plus</Text>
-                )}
-              </Pressable>
-            ) : null}
-          </>
+          <View style={styles.departmentGrid}>
+            {departmentGroups.map((group) => {
+              const deptTotal = group.rows.reduce(
+                (sum, row) => sum + Number(row.totalSubtotal),
+                0,
+              );
+              const quantity = group.rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+              return (
+                <Pressable
+                  key={group.key}
+                  style={({ pressed }) => [
+                    styles.departmentCard,
+                    pressed && styles.cardPressed,
+                  ]}
+                  onPress={() => setSelectedDepartment(group)}>
+                  <View style={styles.departmentIcon}>
+                    <Ionicons name="storefront-outline" size={18} color={BrandColors.primary} />
+                  </View>
+                  <Text style={styles.departmentName} numberOfLines={2}>
+                    {group.label}
+                  </Text>
+                  <Text style={styles.departmentMeta}>
+                    {group.rows.length} article(s) · {formatQuantity(quantity)}
+                  </Text>
+                  <MoneyText value={deptTotal} style={styles.departmentTotal} />
+                </Pressable>
+              );
+            })}
+          </View>
         )}
       </RefreshableScroll>
 
       <VentesDepartmentModal
         group={selectedDepartment}
+        companyId={companyId}
         dateFrom={dateFrom}
         dateTo={dateTo}
-        onClose={() => setSelectedDepartment(null)}
+        refreshKey={deptRefreshKey}
+        salesDeptParams={salesDeptParams}
+        canCancel={can(['ADMIN'])}
+        cancelBusy={actionBusy}
+        onOpenSale={(sale) => void openSale(sale)}
+        onCancelSale={(sale) => confirmAction('cancel', sale)}
+        onClose={() => {
+          setSelectedDepartment(null);
+          setSelectedSale(null);
+        }}
       />
       <SaleDetailModal
         sale={selectedSale}
         busy={actionBusy}
-        canManage={
-          canManageSales && selectedSale != null && !isSaleDeleted(selectedSale)
-        }
+        canManage={canManageSales && selectedSale != null && !isSaleDeleted(selectedSale)}
         canDelete={canDeleteSales && selectedSale != null && !isSaleDeleted(selectedSale)}
         onCancel={(sale) => confirmAction('cancel', sale)}
         onRefund={(sale) => confirmAction('refund', sale)}
@@ -476,25 +336,6 @@ const styles = StyleSheet.create({
   companyChipTextActive: { color: '#fff' },
   error: { color: BrandColors.danger, fontWeight: '600' },
   kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  viewSwitch: {
-    flexDirection: 'row',
-    backgroundColor: BrandColors.bgDeep,
-    borderRadius: 14,
-    padding: 4,
-    gap: 4,
-  },
-  viewButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderRadius: 10,
-    paddingVertical: 9,
-  },
-  viewButtonActive: { backgroundColor: BrandColors.primary },
-  viewButtonText: { color: BrandColors.textMuted, fontSize: 12, fontWeight: '700' },
-  viewButtonTextActive: { color: '#fff' },
   sectionHeader: {
     marginTop: Spacing.two,
     flexDirection: 'row',
@@ -533,44 +374,5 @@ const styles = StyleSheet.create({
   departmentName: { color: BrandColors.text, fontSize: 14, fontWeight: '800', minHeight: 34 },
   departmentMeta: { color: BrandColors.textMuted, fontSize: 10, flex: 1 },
   departmentTotal: { color: BrandColors.text, fontSize: 16, fontWeight: '900' },
-  saleCardDeleted: {
-    borderColor: BrandColors.danger,
-    backgroundColor: '#FEF2F2',
-  },
-  saleDeletedText: {
-    color: BrandColors.danger,
-    textDecorationLine: 'line-through',
-  },
-  statusDeleted: { backgroundColor: '#FEE2E2' },
-  statusDeletedText: { color: BrandColors.danger },
-  saleCard: {
-    backgroundColor: BrandColors.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: BrandColors.border,
-    padding: Spacing.three,
-    gap: 7,
-  },
   cardPressed: { opacity: 0.72, transform: [{ scale: 0.99 }] },
-  saleTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  saleRefWrap: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  saleRef: { color: BrandColors.text, fontSize: 15, fontWeight: '900' },
-  statusBadge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
-  statusCompleted: { backgroundColor: '#DCFCE7' },
-  statusRefunded: { backgroundColor: '#FEF3C7' },
-  statusCancelled: { backgroundColor: '#FEE2E2' },
-  statusText: { color: BrandColors.text, fontSize: 9, fontWeight: '800' },
-  saleTotal: { color: BrandColors.text, fontSize: 15, fontWeight: '900' },
-  saleClient: { color: BrandColors.text, fontSize: 13, fontWeight: '700' },
-  saleBottom: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  saleMeta: { flex: 1, color: BrandColors.textMuted, fontSize: 10 },
-  loadMore: {
-    borderWidth: 1,
-    borderColor: BrandColors.primary,
-    borderRadius: 12,
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  loadMoreText: { color: BrandColors.primary, fontWeight: '800' },
-  disabled: { opacity: 0.55 },
 });

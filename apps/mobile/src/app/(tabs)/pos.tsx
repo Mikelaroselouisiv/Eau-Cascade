@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Modal,
@@ -33,17 +33,12 @@ import {
   type CartLine,
 } from '@/utils/posCart';
 import { emitPendingSalesChanged } from '@/utils/eventBus';
+import { posPaymentOptions } from '@/utils/posCollect';
 
 const ACCENT = '#208AEF';
 const DANGER = '#DC2626';
 const WARNING = '#B45309';
 const WARNING_BG = '#FEF3C7';
-
-const PAYMENT_OPTIONS: { method: PaymentPayload['method']; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { method: 'CASH', label: 'Espèces', icon: 'cash-outline' },
-  { method: 'CARD', label: 'Carte', icon: 'card-outline' },
-  { method: 'MOBILE_MONEY', label: 'Mobile', icon: 'phone-portrait-outline' },
-];
 
 function initials(name: string): string {
   return name.trim().slice(0, 2).toUpperCase();
@@ -54,6 +49,10 @@ export default function PosScreen() {
   const theme = useTheme();
   const cashierLabel = user?.fullName?.trim() || user?.phone || 'Caissier';
   const departmentId = typeof user?.departmentId === 'number' ? user.departmentId : undefined;
+  const paymentChoices = useMemo(
+    () => posPaymentOptions(user),
+    [user?.role, user?.productionDepartmentIds],
+  );
 
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -127,9 +126,12 @@ export default function PosScreen() {
     if (cart.length === 0 || submitting) return;
     setSubmitting(true);
     const total = cartTotal;
+    const method = paymentChoices.some((opt) => opt.method === paymentMethod)
+      ? paymentMethod
+      : 'CASH';
     const payload: CreateSalePayload = {
       items: cart.map((l) => ({ productSaleUnitId: l.productSaleUnitId, quantity: l.quantity })),
-      payments: [{ method: paymentMethod, amount: total }],
+      payments: [{ method, amount: total }],
       clientName: clientName || null,
       clientUuid: Crypto.randomUUID(),
     };
@@ -154,7 +156,7 @@ export default function PosScreen() {
             return { name: l.label, qty: l.quantity, price: effectiveUnitPrice(product, l) };
           }),
           total,
-          paymentMode: paymentMethod,
+          paymentMode: method,
           clientName,
           cashier: cashierLabel,
           departmentId,
@@ -324,7 +326,7 @@ export default function PosScreen() {
             </View>
 
             <View style={styles.paymentRow}>
-              {PAYMENT_OPTIONS.map(({ method, label, icon }) => {
+              {paymentChoices.map(({ method, label, icon }) => {
                 const active = paymentMethod === method;
                 return (
                   <Pressable

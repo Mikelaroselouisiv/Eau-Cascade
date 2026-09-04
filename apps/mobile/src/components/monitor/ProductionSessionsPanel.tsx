@@ -21,12 +21,17 @@ function userLabel(user?: { fullName?: string | null; phone?: string | null; ema
   return user?.fullName?.trim() || user?.phone?.trim() || user?.email?.trim() || 'Utilisateur';
 }
 
+const PAGE_SIZE = 12;
+const MAX_TAKE = 200;
+
 export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKey }: Props) {
   const [sessions, setSessions] = useState<ProductionSessionDetail[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [departmentId, setDepartmentId] = useState<number | null>(null);
   const [selected, setSelected] = useState<ProductionSessionDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -35,8 +40,11 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
       .catch(() => setDepartments([]));
   }, [companyId]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (currentCount = 0) => {
+    const append = currentCount > 0;
+    const take = Math.min(MAX_TAKE, currentCount + PAGE_SIZE);
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     setError(null);
     try {
       const rows = await listProductionSessions({
@@ -44,19 +52,26 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
         dateFrom,
         dateTo,
         departmentId: departmentId ?? undefined,
-        take: 80,
+        sortBy: 'openedAt',
+        sortDir: 'desc',
+        take,
       });
       setSessions(rows);
+      setHasMore(rows.length === take && take < MAX_TAKE);
     } catch {
+      if (!append) {
+        setSessions([]);
+        setHasMore(false);
+      }
       setError('Impossible de charger les sessions');
-      setSessions([]);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [companyId, dateFrom, dateTo, departmentId]);
 
   useEffect(() => {
-    void load();
+    void load(0);
   }, [load, refreshKey]);
 
   return (
@@ -80,7 +95,7 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
         </ScrollView>
       ) : null}
 
-      {loading ? <ActivityIndicator color={BrandColors.primary} /> : null}
+      {loading && sessions.length === 0 ? <ActivityIndicator color={BrandColors.primary} /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {!loading && !error && sessions.length === 0 ? (
         <Text style={styles.empty}>Aucune session pour ces filtres.</Text>
@@ -112,6 +127,19 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
           </Pressable>
         );
       })}
+
+      {hasMore ? (
+        <Pressable
+          style={[styles.loadMore, (loadingMore || loading) && styles.loadMoreDisabled]}
+          disabled={loadingMore || loading}
+          onPress={() => void load(sessions.length)}>
+          {loadingMore ? (
+            <ActivityIndicator color={BrandColors.primary} />
+          ) : (
+            <Text style={styles.loadMoreText}>Charger plus</Text>
+          )}
+        </Pressable>
+      ) : null}
 
       <ModalShell
         visible={selected != null}
@@ -190,6 +218,15 @@ const styles = StyleSheet.create({
   chipTextActive: { color: '#fff', fontWeight: '700' },
   error: { color: '#b91c1c' },
   empty: { color: BrandColors.textMuted },
+  loadMore: {
+    borderWidth: 1,
+    borderColor: BrandColors.primary,
+    borderRadius: 12,
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  loadMoreDisabled: { opacity: 0.55 },
+  loadMoreText: { color: BrandColors.primary, fontWeight: '800' },
   card: {
     padding: Spacing.three,
     borderRadius: 12,

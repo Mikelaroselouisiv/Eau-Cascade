@@ -183,3 +183,73 @@ export function addDaysYmd(ymd: string, days: number): string {
     day: '2-digit',
   }).format(noon);
 }
+
+export function monthEndYmd(ymd: string): string {
+  const parts = parseYmd(ymd);
+  if (!parts) return ymd;
+  const last = new Date(Date.UTC(parts.year, parts.month, 0)).getUTCDate();
+  return formatYmdParts(parts.year, parts.month, last);
+}
+
+export type DashboardSeriesGrain = 'day' | 'month';
+
+export type DashboardSeriesBucket = {
+  key: string;
+  dateFrom: string;
+  dateTo: string;
+};
+
+export function iterateYmd(dateFrom: string, dateTo: string, maxDays = 366): string[] {
+  const days: string[] = [];
+  if (!parseYmd(dateFrom) || !parseYmd(dateTo) || dateFrom > dateTo) return days;
+  let cursor = dateFrom;
+  while (cursor <= dateTo && days.length < maxDays) {
+    days.push(cursor);
+    cursor = addDaysYmd(cursor, 1);
+  }
+  return days;
+}
+
+export function dashboardSeriesBuckets(
+  dateFrom: string,
+  dateTo: string,
+  grain: DashboardSeriesGrain,
+): DashboardSeriesBucket[] {
+  const range = normalizeDateRange(dateFrom, dateTo);
+  if (grain === 'day') {
+    return iterateYmd(range.dateFrom, range.dateTo).map((day) => ({
+      key: day,
+      dateFrom: day,
+      dateTo: day,
+    }));
+  }
+  const buckets: DashboardSeriesBucket[] = [];
+  let cursor = range.dateFrom;
+  while (cursor <= range.dateTo && buckets.length < 48) {
+    const monthStart = monthStartYmd(cursor);
+    const start = cursor > monthStart ? cursor : monthStart;
+    const endCandidate = monthEndYmd(start);
+    const end = endCandidate > range.dateTo ? range.dateTo : endCandidate;
+    buckets.push({
+      key: start.slice(0, 7),
+      dateFrom: start,
+      dateTo: end,
+    });
+    cursor = addDaysYmd(end, 1);
+  }
+  return buckets;
+}
+
+export function dashboardSeriesBucketLabel(
+  bucket: DashboardSeriesBucket,
+  grain: DashboardSeriesGrain,
+): string {
+  if (grain === 'day') return formatYmdDisplay(bucket.dateFrom);
+  const parts = parseYmd(bucket.dateFrom);
+  if (!parts) return bucket.key;
+  return new Intl.DateTimeFormat('fr-HT', {
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(parts.year, parts.month - 1, 1)));
+}

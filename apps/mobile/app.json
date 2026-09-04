@@ -2,14 +2,14 @@
   "expo": {
     "name": "POS Eau Cascade",
     "slug": "pos-eau-cascade-mobile",
-    "version": "7.0.0",
+    "version": "7.0.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "com.eaucascade.pos.mobile",
-      "buildNumber": "12",
+      "buildNumber": "16",
       "appleTeamId": "P227YQ54ZL",
       "infoPlist": {
         "NSAppTransportSecurity": {
@@ -22,7 +22,7 @@
     },
     "android": {
       "package": "com.eaucascade.pos.mobile",
-      "versionCode": 12,
+      "versionCode": 16,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES"

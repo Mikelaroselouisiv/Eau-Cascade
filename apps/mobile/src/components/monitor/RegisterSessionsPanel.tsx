@@ -7,8 +7,14 @@ import { MoneyText } from '@/components/MoneyText';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { getDepartments, getUsers, listRegisterSessions } from '@/services/api';
-import type { Department, RegisterSessionDetail, SessionUser } from '@/types/api';
+import type { Department, InventoryLineRow, RegisterSessionDetail, SessionUser } from '@/types/api';
 import { formatDateTime } from '@/utils/datetime';
+import { formatQuantity } from '@/utils/quantity';
+import {
+  listSalesInWindow,
+  takingsBySession,
+  type SessionTakings,
+} from '@/utils/register-session-takings';
 
 type Props = {
   companyId: number;
@@ -19,8 +25,50 @@ type Props = {
 
 type StatusFilter = '' | 'OPEN' | 'CLOSED';
 
+const PAGE_SIZE = 12;
+const MAX_TAKE = 200;
+
 function userLabel(user?: { fullName?: string | null; phone?: string | null; email?: string | null } | null) {
   return user?.fullName?.trim() || user?.phone?.trim() || user?.email?.trim() || 'Utilisateur inconnu';
+}
+
+function lineQty(line: InventoryLineRow): number {
+  return Number(line.countedQty ?? line.systemQtyAtOpen) || 0;
+}
+
+function soldArticleRows(session: RegisterSessionDetail) {
+  const rows = new Map<
+    number,
+    { productId: number; name: string; opened: number | null; closed: number | null }
+  >();
+  for (const line of session.openingInventorySession?.lines ?? []) {
+    rows.set(line.productId, {
+      productId: line.productId,
+      name: line.product.name,
+      opened: lineQty(line),
+      closed: null,
+    });
+  }
+  for (const line of session.closingInventorySession?.lines ?? []) {
+    const prev = rows.get(line.productId);
+    const closed = lineQty(line);
+    if (prev) prev.closed = closed;
+    else {
+      rows.set(line.productId, {
+        productId: line.productId,
+        name: line.product.name,
+        opened: null,
+        closed,
+      });
+    }
+  }
+  return [...rows.values()]
+    .map((row) => ({
+      ...row,
+      sold: row.opened != null && row.closed != null ? row.opened - row.closed : null,
+    }))
+    .filter((row) => Math.abs(row.sold ?? 0) > 1e-9)
+    .sort((a, b) => Math.abs(b.sold ?? 0) - Math.abs(a.sold ?? 0));
 }
 
 export function RegisterSessionsPanel({ companyId, dateFrom, dateTo, refreshKey }: Props) {
@@ -33,7 +81,11 @@ export function RegisterSessionsPanel({ companyId, dateFrom, dateTo, refreshKey 
   const [selected, setSelected] = useState<RegisterSessionDetail | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [takingsById, setTakingsById] = useState<Map<number, SessionTakings>>(new Map());
+  const [takingsLoading, setTakingsLoading] = useState(false);
 
   useEffect(() => {
     void Promise.all([getUsers(), getDepartments(companyId)])
@@ -49,33 +101,74 @@ export function RegisterSessionsPanel({ companyId, dateFrom, dateTo, refreshKey 
       });
   }, [companyId]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (currentCount = 0) => {
+    const append = currentCount > 0;
+    const take = Math.min(MAX_TAKE, currentCount + PAGE_SIZE);
+    if (append) setLoadingMore(true);
+    else {
+      setLoading(true);
+      setTakingsById(new Map());
+      setTakingsLoading(true);
+    }
     setError(null);
     try {
-      setSessions(
-        await listRegisterSessions({
-          companyId,
-          dateFrom,
-          dateTo,
-          openedById: userId ?? undefined,
-          departmentId: departmentId ?? undefined,
-          status: status || undefined,
-          sortBy: 'openedAt',
-          sortDir: 'desc',
-          take: 100,
-        }),
-      );
+      const rows = await listRegisterSessions({
+        companyId,
+        dateFrom,
+        dateTo,
+        openedById: userId ?? undefined,
+        departmentId: departmentId ?? undefined,
+        status: status || undefined,
+        sortBy: 'openedAt',
+        sortDir: 'desc',
+        take,
+      });
+      setSessions(rows);
+      setHasMore(rows.length === take && take < MAX_TAKE);
+      if (rows.length === 0) {
+        setTakingsById(new Map());
+        setTakingsLoading(false);
+      } else {
+        setTakingsLoading(true);
+        const nowIso = new Date().toISOString();
+        const createdFrom = rows.reduce(
+          (min, row) => (row.openedAt < min ? row.openedAt : min),
+          rows[0].openedAt,
+        );
+        const createdTo = rows.reduce((max, row) => {
+          const end = row.closedAt ?? nowIso;
+          return end > max ? end : max;
+        }, rows[0].closedAt ?? nowIso);
+        const departmentIds = [...new Set(rows.map((row) => row.departmentId))];
+        try {
+          const sales = await listSalesInWindow({
+            companyId,
+            departmentIds,
+            createdFrom,
+            createdTo,
+          });
+          setTakingsById(takingsBySession(rows, sales));
+        } catch {
+          if (!append) setTakingsById(new Map());
+        } finally {
+          setTakingsLoading(false);
+        }
+      }
     } catch {
-      setSessions([]);
+      if (!append) {
+        setSessions([]);
+        setHasMore(false);
+        setTakingsById(new Map());
+      }
       setError('Impossible de charger les sessions de caisse.');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [companyId, dateFrom, dateTo, departmentId, status, userId]);
 
   useEffect(() => {
-    const timer = setTimeout(() => void load(), 0);
+    const timer = setTimeout(() => void load(0), 0);
     return () => clearTimeout(timer);
   }, [load, refreshKey]);
 
@@ -84,7 +177,7 @@ export function RegisterSessionsPanel({ companyId, dateFrom, dateTo, refreshKey 
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.title}>Sessions de caisse</Text>
-          <Text style={styles.subtitle}>{sessions.length} session(s) sur la période</Text>
+          <Text style={styles.subtitle}>{sessions.length} session(s)</Text>
         </View>
         <Pressable
           style={[styles.filterButton, filtersOpen && styles.filterButtonActive]}
@@ -130,7 +223,9 @@ export function RegisterSessionsPanel({ companyId, dateFrom, dateTo, refreshKey 
         </View>
       ) : null}
 
-      {loading ? <ActivityIndicator color={BrandColors.primary} style={styles.loader} /> : null}
+      {loading && sessions.length === 0 ? (
+        <ActivityIndicator color={BrandColors.primary} style={styles.loader} />
+      ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {!loading && !error && sessions.length === 0 ? (
         <Text style={styles.empty}>Aucune session pour ces filtres.</Text>
@@ -138,7 +233,7 @@ export function RegisterSessionsPanel({ companyId, dateFrom, dateTo, refreshKey 
 
       {sessions.map((session) => {
         const isOpen = session.status === 'OPEN';
-        const variance = session.cashVariance == null ? null : Number(session.cashVariance);
+        const takings = takingsById.get(session.id);
         return (
           <Pressable key={session.id} style={styles.card} onPress={() => setSelected(session)}>
             <View style={styles.cardTop}>
@@ -170,62 +265,91 @@ export function RegisterSessionsPanel({ companyId, dateFrom, dateTo, refreshKey 
                 </Text>
               </View>
             </View>
-            {!isOpen ? (
-              <View style={styles.cashRow}>
-                <Text style={styles.cashLabel}>Écart espèces</Text>
-                <MoneyText
-                  value={variance}
-                  style={[
-                    styles.cashValue,
-                    variance != null && variance !== 0 && styles.cashValueWarning,
-                  ]}
-                />
-              </View>
-            ) : null}
+            <View style={styles.cardCashGrid}>
+              {takingsLoading && !takings ? (
+                <ActivityIndicator color={BrandColors.primary} />
+              ) : (
+                <>
+                  <CardCashCell label="CA" value={takings?.total ?? 0} />
+                  <CardCashCell label="Espèces" value={takings?.cash ?? 0} />
+                  <CardCashCell label="Banque" value={takings?.bank ?? 0} />
+                </>
+              )}
+            </View>
           </Pressable>
         );
       })}
+
+      {hasMore ? (
+        <Pressable
+          style={[styles.loadMore, (loadingMore || loading) && styles.loadMoreDisabled]}
+          disabled={loadingMore || loading}
+          onPress={() => void load(sessions.length)}>
+          {loadingMore ? (
+            <ActivityIndicator color={BrandColors.primary} />
+          ) : (
+            <Text style={styles.loadMoreText}>Charger plus</Text>
+          )}
+        </Pressable>
+      ) : null}
 
       <ModalShell
         visible={selected != null}
         onRequestClose={() => setSelected(null)}
         body={
           selected ? (
-            <ScrollView contentContainerStyle={styles.detailBody}>
-              <View style={styles.detailStatusRow}>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    selected.status === 'OPEN' ? styles.openBadge : styles.closedBadge,
-                  ]}>
-                  <Text
+            <View style={styles.detailRoot}>
+              <View style={styles.cashPinned}>
+                <View style={styles.detailStatusRow}>
+                  <View
                     style={[
-                      styles.statusText,
-                      selected.status === 'OPEN' ? styles.openText : styles.closedText,
+                      styles.statusBadge,
+                      selected.status === 'OPEN' ? styles.openBadge : styles.closedBadge,
                     ]}>
-                    {selected.status === 'OPEN' ? 'Ouverte' : 'Fermée'}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.statusText,
+                        selected.status === 'OPEN' ? styles.openText : styles.closedText,
+                      ]}>
+                      {selected.status === 'OPEN' ? 'Ouverte' : 'Fermée'}
+                    </Text>
+                  </View>
+                  <Text style={styles.detailDepartment}>{selected.department.name}</Text>
                 </View>
-                <Text style={styles.detailDepartment}>{selected.department.name}</Text>
+                <Text style={styles.cashPinnedTitle}>Encaissements</Text>
+                {takingsLoading && !takingsById.has(selected.id) ? (
+                  <ActivityIndicator color={BrandColors.primary} />
+                ) : (
+                  <View style={styles.amountGrid}>
+                    <AmountCell label="CA" value={takingsById.get(selected.id)?.total ?? 0} />
+                    <AmountCell label="Espèces" value={takingsById.get(selected.id)?.cash ?? 0} />
+                    <AmountCell label="Banque" value={takingsById.get(selected.id)?.bank ?? 0} />
+                  </View>
+                )}
               </View>
-              <DetailLine label="Ouverte par" value={userLabel(selected.openedBy)} />
-              <DetailLine label="Date d’ouverture" value={formatDateTime(selected.openedAt)} />
-              <DetailLine
-                label="Fermée par"
-                value={selected.closedAt ? userLabel(selected.closedBy) : '—'}
-              />
-              <DetailLine
-                label="Date de fermeture"
-                value={selected.closedAt ? formatDateTime(selected.closedAt) : 'En cours'}
-              />
-              <Text style={styles.detailSection}>Récapitulatif espèces</Text>
-              <View style={styles.amountGrid}>
-                <AmountCell label="Fond initial" value={selected.openingCashAmount} />
-                <AmountCell label="Attendu" value={selected.closingCashExpected} />
-                <AmountCell label="Compté" value={selected.closingCashCounted} />
-                <AmountCell label="Écart" value={selected.cashVariance} warning />
-              </View>
-            </ScrollView>
+              <ScrollView style={styles.detailScroll} contentContainerStyle={styles.detailBody}>
+                <Text style={styles.detailSection}>Tiroir</Text>
+                <View style={styles.amountGrid}>
+                  <AmountCell label="Fond initial" value={selected.openingCashAmount} />
+                  <AmountCell label="Attendu" value={selected.closingCashExpected} />
+                  <AmountCell label="Compté" value={selected.closingCashCounted} />
+                  <AmountCell label="Écart" value={selected.cashVariance} warning />
+                </View>
+                <DetailLine label="Ouverte par" value={userLabel(selected.openedBy)} />
+                <DetailLine label="Date d’ouverture" value={formatDateTime(selected.openedAt)} />
+                <DetailLine
+                  label="Fermée par"
+                  value={selected.closedAt ? userLabel(selected.closedBy) : '—'}
+                />
+                <DetailLine
+                  label="Date de fermeture"
+                  value={selected.closedAt ? formatDateTime(selected.closedAt) : 'En cours'}
+                />
+                {selected.status === 'CLOSED' ? (
+                  <SoldArticlesBlock session={selected} />
+                ) : null}
+              </ScrollView>
+            </View>
           ) : null
         }
         footer={
@@ -254,6 +378,71 @@ function DetailLine({ label, value }: { label: string; value: string }) {
     <View style={styles.detailLine}>
       <Text style={styles.detailLabel}>{label}</Text>
       <Text style={styles.detailValue}>{value}</Text>
+    </View>
+  );
+}
+
+function CardCashCell({
+  label,
+  value,
+  warning = false,
+}: {
+  label: string;
+  value: string | number | null;
+  warning?: boolean;
+}) {
+  const amount = value == null ? null : Number(value);
+  const isWarning = warning && amount != null && amount !== 0;
+  return (
+    <View style={styles.cardCashCell}>
+      <Text style={styles.cashLabel}>{label}</Text>
+      <MoneyText
+        value={amount}
+        style={[styles.cashValue, isWarning && styles.cashValueWarning]}
+      />
+    </View>
+  );
+}
+
+function SoldArticlesBlock({ session }: { session: RegisterSessionDetail }) {
+  const rows = soldArticleRows(session);
+  const totalSold = rows.reduce((sum, row) => sum + Math.max(0, row.sold ?? 0), 0);
+  return (
+    <View style={styles.soldBlock}>
+      <Text style={styles.detailSection}>Articles écoulés</Text>
+      {rows.length === 0 ? (
+        <Text style={styles.soldEmpty}>Aucun article écoulé</Text>
+      ) : (
+        <>
+          <View style={styles.soldHead}>
+            <Text style={[styles.soldColName, styles.soldHeadText]}>Article</Text>
+            <Text style={[styles.soldColQty, styles.soldHeadText]}>Ouvert</Text>
+            <Text style={[styles.soldColQty, styles.soldHeadText]}>Fermé</Text>
+            <Text style={[styles.soldColQty, styles.soldHeadText]}>Écoulé</Text>
+          </View>
+          {rows.map((row) => (
+            <View key={row.productId} style={styles.soldRow}>
+              <Text style={styles.soldColName} numberOfLines={2}>
+                {row.name}
+              </Text>
+              <Text style={styles.soldColQty}>{row.opened == null ? '—' : formatQuantity(row.opened)}</Text>
+              <Text style={styles.soldColQty}>{row.closed == null ? '—' : formatQuantity(row.closed)}</Text>
+              <Text
+                style={[
+                  styles.soldColQty,
+                  styles.soldQty,
+                  (row.sold ?? 0) < 0 && styles.cashValueWarning,
+                ]}>
+                {row.sold == null ? '—' : formatQuantity(row.sold)}
+              </Text>
+            </View>
+          ))}
+          <View style={styles.soldTotal}>
+            <Text style={styles.soldTotalLabel}>Total écoulé</Text>
+            <Text style={styles.soldTotalValue}>{formatQuantity(totalSold)}</Text>
+          </View>
+        </>
+      )}
     </View>
   );
 }
@@ -354,6 +543,15 @@ const styles = StyleSheet.create({
   chipText: { color: BrandColors.text, fontSize: 12, fontWeight: '600' },
   chipTextActive: { color: '#fff' },
   loader: { marginVertical: Spacing.four },
+  loadMore: {
+    borderWidth: 1,
+    borderColor: BrandColors.primary,
+    borderRadius: 12,
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  loadMoreDisabled: { opacity: 0.55 },
+  loadMoreText: { color: BrandColors.primary, fontWeight: '800' },
   error: { color: BrandColors.danger, fontWeight: '600' },
   empty: { color: BrandColors.textMuted, paddingVertical: Spacing.four, textAlign: 'center' },
   card: {
@@ -386,15 +584,16 @@ const styles = StyleSheet.create({
   timeBlock: { flex: 1 },
   timeLabel: { color: BrandColors.textMuted, fontSize: 10, textTransform: 'uppercase' },
   timeValue: { color: BrandColors.text, fontSize: 12, fontWeight: '600', marginTop: 2 },
-  cashRow: {
+  cardCashGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     borderTopWidth: 1,
     borderTopColor: BrandColors.border,
     paddingTop: Spacing.two,
+    gap: Spacing.two,
   },
-  cashLabel: { color: BrandColors.textMuted, fontSize: 12 },
-  cashValue: { color: BrandColors.ok, fontWeight: '800' },
+  cardCashCell: { flex: 1, gap: 2 },
+  cashLabel: { color: BrandColors.textMuted, fontSize: 11 },
+  cashValue: { color: BrandColors.text, fontWeight: '800', fontSize: 13 },
   cashValueWarning: { color: BrandColors.danger },
   modalHeader: {
     flexDirection: 'row',
@@ -407,7 +606,19 @@ const styles = StyleSheet.create({
   },
   modalEyebrow: { color: BrandColors.textMuted, fontSize: 10, fontWeight: '800' },
   modalTitle: { color: BrandColors.text, fontSize: 20, fontWeight: '800', marginTop: 2 },
-  detailBody: { padding: Spacing.four, gap: Spacing.three },
+  detailRoot: { flex: 1 },
+  cashPinned: {
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.three,
+    gap: Spacing.two,
+    borderBottomWidth: 1,
+    borderBottomColor: BrandColors.border,
+    backgroundColor: BrandColors.surfaceSoft,
+  },
+  cashPinnedTitle: { color: BrandColors.text, fontSize: 15, fontWeight: '800' },
+  detailScroll: { flex: 1 },
+  detailBody: { padding: Spacing.four, gap: Spacing.three, paddingBottom: Spacing.five },
   detailStatusRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   detailDepartment: { color: BrandColors.text, fontWeight: '700', flex: 1 },
   detailLine: {
@@ -420,11 +631,12 @@ const styles = StyleSheet.create({
   },
   detailLabel: { color: BrandColors.textMuted, fontSize: 12 },
   detailValue: { color: BrandColors.text, fontSize: 12, fontWeight: '700', textAlign: 'right', flex: 1 },
-  detailSection: { color: BrandColors.text, fontSize: 15, fontWeight: '800', marginTop: Spacing.two },
+  detailSection: { color: BrandColors.text, fontSize: 15, fontWeight: '800' },
   amountGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   amountCell: {
-    width: '48%',
+    width: '47%',
     flexGrow: 1,
+    flexBasis: '47%',
     backgroundColor: BrandColors.surface,
     borderWidth: 1,
     borderColor: BrandColors.border,
@@ -432,8 +644,31 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
     gap: 4,
   },
-  amountLabel: { color: BrandColors.textMuted, fontSize: 11 },
-  amountValue: { color: BrandColors.text, fontSize: 17, fontWeight: '800' },
+  amountLabel: { color: BrandColors.textMuted, fontSize: 11, fontWeight: '700' },
+  amountValue: { color: BrandColors.text, fontSize: 20, fontWeight: '800' },
+  soldBlock: { gap: Spacing.two, marginTop: Spacing.two },
+  soldEmpty: { color: BrandColors.textMuted, fontSize: 13 },
+  soldHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  soldHeadText: { color: BrandColors.textMuted, fontSize: 10, fontWeight: '800' },
+  soldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: BrandColors.border,
+  },
+  soldColName: { flex: 1.4, color: BrandColors.text, fontSize: 13, fontWeight: '600' },
+  soldColQty: { flex: 0.8, textAlign: 'right', color: BrandColors.textMuted, fontSize: 12 },
+  soldQty: { color: BrandColors.text, fontWeight: '800' },
+  soldTotal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: Spacing.two,
+  },
+  soldTotalLabel: { color: BrandColors.textMuted, fontSize: 12, fontWeight: '700' },
+  soldTotalValue: { color: BrandColors.text, fontSize: 16, fontWeight: '800' },
   detailFooter: { padding: Spacing.three, backgroundColor: BrandColors.bg },
   closeButton: {
     backgroundColor: BrandColors.primary,

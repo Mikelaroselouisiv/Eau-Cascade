@@ -235,6 +235,8 @@ export interface RegisterSessionDetail {
   department: { id: number; name: string; company: { id: number; name: string } };
   openedBy?: UserAttribution | null;
   closedBy?: UserAttribution | null;
+  openingInventorySession?: InventorySessionDetail;
+  closingInventorySession?: InventorySessionDetail | null;
 }
 
 export interface RegisterSessionContext {
@@ -332,6 +334,7 @@ export interface SalePaymentRow {
   reference?: string | null;
   bankAccountId?: number | null;
   createdAt?: string;
+  deletedAt?: string | null;
 }
 
 export interface SaleCashGapRow {
@@ -374,6 +377,8 @@ export interface Sale {
   changeSettledAt?: string | null;
   cashBalanceSettledAt?: string | null;
   userId?: number | null;
+  registerId?: number | null;
+  creditCustomerId?: number | null;
   user?: {
     id: number;
     fullName?: string | null;

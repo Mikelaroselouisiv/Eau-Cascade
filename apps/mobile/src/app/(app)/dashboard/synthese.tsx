@@ -9,16 +9,17 @@ import { KpiCard } from '@/components/monitor/KpiCard';
 import { DashboardDateFilter } from '@/components/monitor/DashboardDateFilter';
 import { RegisterSessionsPanel } from '@/components/monitor/RegisterSessionsPanel';
 import { ProductionSessionsPanel } from '@/components/monitor/ProductionSessionsPanel';
-import { TopProductsDonut } from '@/components/monitor/TopProductsDonut';
+import { RevenueTrendChart } from '@/components/monitor/RevenueTrendChart';
 import { RefreshableScroll } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useCompanyScope } from '@/hooks/useCompanyScope';
-import { getDashboardSalesByProduct, getDashboardSummaryRange } from '@/services/api';
-import type { DashboardBalanceSnapshot, DashboardSalesByProductRow } from '@/types/api';
-import { dashboardPresetRange } from '@/utils/datetime';
+import { getDashboardSummaryRange } from '@/services/api';
+import type { DashboardBalanceSnapshot } from '@/types/api';
+import { loadDashboardSalesSeries, type SalesSeriesPoint } from '@/utils/dashboard-series';
+import { dashboardPresetRange, type DashboardSeriesGrain } from '@/utils/datetime';
 
 export default function SyntheseScreen() {
   const { can, canPerm } = useAuth();
@@ -26,8 +27,10 @@ export default function SyntheseScreen() {
     can(['ADMIN']) || canPerm('dashboard.synthesis') || canPerm('reports.view');
   const { companyId, companies, setCompanyId, ready, lockedToSession } = useCompanyScope();
   const [range, setRange] = useState(() => dashboardPresetRange('week'));
+  const [grain, setGrain] = useState<DashboardSeriesGrain>('day');
   const [snapshot, setSnapshot] = useState<DashboardBalanceSnapshot | null>(null);
-  const [topProducts, setTopProducts] = useState<DashboardSalesByProductRow[]>([]);
+  const [series, setSeries] = useState<SalesSeriesPoint[]>([]);
+  const [seriesGrain, setSeriesGrain] = useState<DashboardSeriesGrain>('day');
   const [refreshing, setRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -38,22 +41,19 @@ export default function SyntheseScreen() {
     const { dateFrom, dateTo } = range;
     try {
       setError(null);
-      const [snap, products] = await Promise.all([
+      const [snap, points] = await Promise.all([
         getDashboardSummaryRange({ companyId, dateFrom, dateTo }),
-        getDashboardSalesByProduct({ companyId, dateFrom, dateTo }),
+        loadDashboardSalesSeries({ companyId, dateFrom, dateTo, grain }),
       ]);
       setSnapshot(snap);
-      setTopProducts(
-        [...products]
-          .sort((a, b) => Number(b.quantity) - Number(a.quantity))
-          .slice(0, 8),
-      );
+      setSeries(points);
+      setSeriesGrain(grain);
     } catch {
       setError('Impossible de charger la synthèse');
       setSnapshot(null);
-      setTopProducts([]);
+      setSeries([]);
     }
-  }, [canSeeSynthesis, companyId, range]);
+  }, [canSeeSynthesis, companyId, grain, range]);
 
   useEffect(() => {
     if (!ready || view !== 'overview') return;
@@ -163,8 +163,27 @@ export default function SyntheseScreen() {
               <Text style={styles.empty}>Chargement…</Text>
             ) : null}
 
-            <Text style={styles.section}>Top articles · unités vendues</Text>
-            <TopProductsDonut rows={topProducts} />
+            {snapshot ? (
+              <>
+                <ChipScroll>
+                  <Pressable
+                    onPress={() => setGrain('day')}
+                    style={[styles.grainChip, grain === 'day' && styles.grainChipActive]}>
+                    <Text style={[styles.grainText, grain === 'day' && styles.grainTextActive]}>
+                      Jour
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setGrain('month')}
+                    style={[styles.grainChip, grain === 'month' && styles.grainChipActive]}>
+                    <Text style={[styles.grainText, grain === 'month' && styles.grainTextActive]}>
+                      Mois
+                    </Text>
+                  </Pressable>
+                </ChipScroll>
+                <RevenueTrendChart rows={series} grain={seriesGrain} />
+              </>
+            ) : null}
           </>
         ) : null}
 
@@ -238,8 +257,18 @@ const styles = StyleSheet.create({
   companyChipTextActive: { color: '#fff' },
   error: { color: BrandColors.danger, fontWeight: '600' },
   kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  section: { marginTop: Spacing.two, fontSize: 15, fontWeight: '700', color: BrandColors.text },
   empty: { color: BrandColors.textMuted },
+  grainChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    backgroundColor: BrandColors.surface,
+  },
+  grainChipActive: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
+  grainText: { fontSize: 13, fontWeight: '600', color: BrandColors.text },
+  grainTextActive: { color: '#fff' },
   viewSwitch: {
     gap: 4,
     padding: 4,

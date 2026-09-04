@@ -19,6 +19,7 @@ import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { resolvedDepartmentIds } from '@/utils/user-scope';
+import { posPaymentOptions, type PosCollectMethod } from '@/utils/posCollect';
 import { useCompanyScope } from '@/hooks/useCompanyScope';
 import {
   createCreditCustomer,
@@ -83,6 +84,10 @@ export function CreditCustomersScreen({ mode }: Props) {
   const allowed = canPerm('credit.view');
   const canManage = canPerm('credit.manage');
   const defaultDeptId = resolvedDepartmentIds(user)[0];
+  const paymentChoices = useMemo(
+    () => posPaymentOptions(user),
+    [user?.role, user?.productionDepartmentIds],
+  );
 
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
@@ -93,7 +98,7 @@ export function CreditCustomersScreen({ mode }: Props) {
 
   const [detail, setDetail] = useState<CreditCustomerDetail | null>(null);
   const [payAmount, setPayAmount] = useState('');
-  const [payMethod, setPayMethod] = useState<'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK'>('CASH');
+  const [payMethod, setPayMethod] = useState<PosCollectMethod>('CASH');
   const [payBankId, setPayBankId] = useState<number | ''>('');
   const [payBankAccountId, setPayBankAccountId] = useState<number | ''>('');
   const [banks, setBanks] = useState<BankRow[]>([]);
@@ -213,9 +218,15 @@ export function CreditCustomersScreen({ mode }: Props) {
       setPayStatus('Montant invalide');
       return;
     }
-    if (payMethod === 'BANK' && (payBankId === '' || payBankAccountId === '')) {
-      setPayStatus('Choisissez la banque et le compte');
-      return;
+    if (payMethod === 'BANK') {
+      if (!paymentChoices.some((opt) => opt.method === 'BANK')) {
+        setPayStatus('Encaissement espèces uniquement');
+        return;
+      }
+      if (payBankId === '' || payBankAccountId === '') {
+        setPayStatus('Choisissez la banque et le compte');
+        return;
+      }
     }
     const methodSnapshot = payMethod;
     setPaying(true);
@@ -531,29 +542,26 @@ export function CreditCustomersScreen({ mode }: Props) {
                         onChangeText={setPayAmount}
                       />
                       <View style={styles.methodRow}>
-                        {(['CASH', 'CARD', 'MOBILE_MONEY', 'BANK'] as const).map((m) => (
+                        {paymentChoices.map((opt) => (
                           <Pressable
-                            key={m}
+                            key={opt.method}
                             onPress={() => {
-                              setPayMethod(m);
-                              if (m !== 'BANK') {
+                              setPayMethod(opt.method);
+                              if (opt.method !== 'BANK') {
                                 setPayBankId('');
                                 setPayBankAccountId('');
                               }
                             }}
-                            style={[styles.methodChip, payMethod === m && styles.methodChipActive]}>
+                            style={[
+                              styles.methodChip,
+                              payMethod === opt.method && styles.methodChipActive,
+                            ]}>
                             <Text
                               style={[
                                 styles.methodChipText,
-                                payMethod === m && styles.methodChipTextActive,
+                                payMethod === opt.method && styles.methodChipTextActive,
                               ]}>
-                              {m === 'CASH'
-                                ? 'Espèces'
-                                : m === 'CARD'
-                                  ? 'Carte'
-                                  : m === 'BANK'
-                                    ? 'Banque'
-                                    : 'Mobile'}
+                              {opt.label}
                             </Text>
                           </Pressable>
                         ))}

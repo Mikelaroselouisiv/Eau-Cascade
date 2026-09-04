@@ -112,7 +112,16 @@ function localApkUri(): string {
 }
 
 export function getInstalledAppVersion() {
-  const version = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? '0.0.0';
+  const configVersion = Constants.expoConfig?.version ?? '0.0.0';
+  const configCode = Number(Constants.expoConfig?.android?.versionCode ?? 0);
+  const fromConfig = {
+    version: configVersion,
+    versionCode: Number.isInteger(configCode) ? configCode : 0,
+  };
+  // Metro / Expo : le JS suit app.json. Le binaire installé via « a » peut rester ancien.
+  if (__DEV__) return fromConfig;
+
+  const version = Constants.nativeAppVersion ?? configVersion;
   const rawVersionCode =
     Constants.nativeBuildVersion ?? Constants.expoConfig?.android?.versionCode ?? '0';
   const versionCode = Number(rawVersionCode);

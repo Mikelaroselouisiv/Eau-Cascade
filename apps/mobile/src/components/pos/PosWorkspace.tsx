@@ -75,12 +75,13 @@ import {
   isProductionKind,
   resolvedDepartmentIds,
 } from '@/utils/user-scope';
+import { posPaymentOptions, type PosCollectMethod } from '@/utils/posCollect';
 
 const DANGER = BrandColors.danger;
 const WARNING = '#B45309';
 const WARNING_BG = '#FEF3C7';
 
-type PaymentMethod = 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'SPLIT' | 'BANK';
+type PaymentMethod = PosCollectMethod;
 
 type SaleDraft = {
   id: string;
@@ -110,18 +111,6 @@ function emptyDraft(id = `d${Date.now()}`): SaleDraft {
   };
 }
 
-const PAYMENT_OPTIONS: {
-  method: PaymentMethod;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-}[] = [
-  { method: 'CASH', label: 'Espèces', icon: 'cash-outline' },
-  { method: 'CARD', label: 'Carte', icon: 'card-outline' },
-  { method: 'MOBILE_MONEY', label: 'Mobile', icon: 'phone-portrait-outline' },
-  { method: 'SPLIT', label: 'Mixte', icon: 'git-merge-outline' },
-  { method: 'BANK', label: 'Banque', icon: 'business-outline' },
-];
-
 type PosPane = 'products' | 'cart' | 'change';
 
 type PosWorkspaceProps = {
@@ -137,6 +126,10 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const canUsePos = canPerm('pos.use');
   const canSpecial = canPerm('sales.special_price');
   const canSell = canPerm('sales.create') || canUsePos;
+  const paymentChoices = useMemo(
+    () => posPaymentOptions(user),
+    [user?.role, user?.productionDepartmentIds],
+  );
 
   const [products, setProducts] = useState<Product[]>([]);
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
@@ -189,6 +182,17 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     );
   }, [canSellHome]);
 
+  useEffect(() => {
+    const allowed = new Set(paymentChoices.map((opt) => opt.method));
+    setDrafts((prev) =>
+      prev.map((d) =>
+        allowed.has(d.paymentMethod)
+          ? d
+          : { ...d, paymentMethod: 'CASH', bankId: '', bankAccountId: '' },
+      ),
+    );
+  }, [paymentChoices]);
+
   const activeDraft = useMemo(
     () => drafts.find((d) => d.id === activeDraftId) ?? drafts[0],
     [drafts, activeDraftId],
@@ -205,7 +209,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     (typeof selectedBankId === 'number' && typeof selectedBankAccountId === 'number');
 
   const pendingCount = usePendingSalesCount();
-  const showTenderField = paymentMethod === 'CASH' || paymentMethod === 'SPLIT';
+  const showTenderField = paymentMethod === 'CASH';
   const salesEnabled = registerSession != null;
 
   const loadProducts = useCallback(async () => {
@@ -647,6 +651,10 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     }
 
     if (paymentMethod === 'BANK') {
+      if (!paymentChoices.some((opt) => opt.method === 'BANK')) {
+        setStatus('Encaissement espèces uniquement');
+        return;
+      }
       if (selectedBankId === '' || selectedBankAccountId === '') {
         setStatus('Choisissez la banque et le compte');
         return;
@@ -1312,7 +1320,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
               </>
             ) : null}
             <View style={styles.paymentRow}>
-              {PAYMENT_OPTIONS.map(({ method, label, icon }) => {
+              {paymentChoices.map(({ method, label, icon }) => {
                 const active = paymentMethod === method;
                 return (
                   <Pressable
