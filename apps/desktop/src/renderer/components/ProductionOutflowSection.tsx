@@ -87,6 +87,7 @@ export function ProductionOutflowSection({
     void (dest === 'HOME'
       ? listDeliveries({
           ...(companyId != null ? { companyId } : {}),
+          departmentId,
           fulfillmentType: 'HOME',
           take: 100,
         })

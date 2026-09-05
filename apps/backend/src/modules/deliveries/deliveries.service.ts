@@ -13,6 +13,17 @@ import {
   resolvedDepartmentIds,
 } from '../../common/user-scope';
 import { canManageDeliveryFulfillment } from '../../common/permissions';
+import {
+  cashierCanAccessDelivery,
+  cashierListWhere,
+  chefCanAccessDelivery,
+  departmentListClause,
+  isCashierRole,
+  isChefProductionRole,
+  resolveDeliveryScope,
+  seesHomeDeliveryPool,
+  type DeliveryScopeUser,
+} from './deliveries-scope';
 import { AuditService } from '../audit/audit.service';
 import { RolesService } from '../roles/roles.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -20,13 +31,7 @@ import { ProductionSessionsService } from '../production-sessions/production-ses
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { CreateDeliveryDropDto } from './dto/create-delivery-drop.dto';
 
-type ScopeUser = {
-  id?: number;
-  role?: string;
-  companyId?: number | null;
-  departmentId?: number | null;
-  departmentIds?: number[] | null;
-};
+type ScopeUser = DeliveryScopeUser;
 
 const deliveryInclude = {
   company: { select: { id: true, name: true } },
@@ -253,29 +258,29 @@ export class DeliveriesService {
     const take = Math.min(Math.max(filters.take ?? 100, 1), 100);
     const skip = Math.max(filters.skip ?? 0, 0);
     const q = filters.q?.trim() ?? '';
-    const seesHomePool = this.seesHomeDeliveryPool(user);
-    const cashierOwnSales = user.role === 'CASHIER' && user.id != null;
-
-    if (fulfillmentType === FulfillmentType.HOME && !seesHomePool && !cashierOwnSales) {
+    const seesHomePool = seesHomeDeliveryPool(user);
+    const cashierWhere = cashierListWhere(user);
+    if (cashierWhere === 'deny') {
       return { items: [], total: 0, skip, take };
     }
+    const visibility: Prisma.DeliveryWhereInput = isCashierRole(user)
+      ? cashierWhere
+      : departmentListClause(scope, seesHomePool);
 
     const where: Prisma.DeliveryWhereInput = {
-      deletedAt: null,
-      sale: {
-        status: 'COMPLETED',
-        deletedAt: null,
-        ...(cashierOwnSales ? { userId: user.id } : {}),
-      },
-      ...(scope.companyId != null ? { companyId: scope.companyId } : {}),
-      // Caissier : fiches de ses ventes. Autres rôles : département ± pool HOME entreprise.
-      ...(cashierOwnSales
-        ? {}
-        : fulfillmentType === FulfillmentType.HOME && filters.departmentId == null
-          ? {}
-          : this.departmentListClause(scope, seesHomePool)),
-      ...(status ? { status } : {}),
-      ...(fulfillmentType ? { fulfillmentType } : {}),
+      AND: [
+        {
+          deletedAt: null,
+          sale: {
+            status: 'COMPLETED',
+            deletedAt: null,
+          },
+          ...(scope.companyId != null ? { companyId: scope.companyId } : {}),
+          ...(status ? { status } : {}),
+          ...(fulfillmentType ? { fulfillmentType } : {}),
+        },
+        visibility,
+      ],
     };
 
     if (q) {
@@ -913,36 +918,6 @@ export class DeliveriesService {
     }
   }
 
-  private seesHomeDeliveryPool(user: ScopeUser): boolean {
-    return user.role !== 'CASHIER';
-  }
-
-  private departmentListClause(
-    scope: {
-      departmentId?: number;
-      departmentIds?: number[];
-    },
-    includeHomePool: boolean,
-  ): Prisma.DeliveryWhereInput {
-    const homePending: Prisma.DeliveryWhereInput | null = includeHomePool
-      ? {
-          fulfillmentType: FulfillmentType.HOME,
-          departmentId: null,
-        }
-      : null;
-    if (scope.departmentId != null) {
-      return homePending
-        ? { OR: [{ departmentId: scope.departmentId }, homePending] }
-        : { departmentId: scope.departmentId };
-    }
-    if (scope.departmentIds?.length) {
-      return homePending
-        ? { OR: [{ departmentId: { in: scope.departmentIds } }, homePending] }
-        : { departmentId: { in: scope.departmentIds } };
-    }
-    return {};
-  }
-
   /** Magasin DISTRIBUTION : la vente clôture la fiche (stock déjà sorti à l’encaissement). */
   private async shouldAutoCompleteShopOnSite(
     tx: Prisma.TransactionClient | PrismaService,
@@ -1091,31 +1066,20 @@ export class DeliveriesService {
     filters: { companyId?: number; departmentId?: number },
   ): { companyId?: number; departmentId?: number; departmentIds?: number[] } {
     const role = user.role ?? '';
-    if (role === 'ADMIN') {
-      return {
-        companyId: filters.companyId,
-        departmentId: filters.departmentId,
-      };
-    }
-
-    if (user.companyId == null) {
-      throw new ForbiddenException('Affectation entreprise manquante');
-    }
-    const companyId = filters.companyId ?? user.companyId;
-    if (companyId !== user.companyId) {
-      throw new ForbiddenException('Entreprise hors périmètre');
-    }
-    const allowed = resolvedDepartmentIds(user);
-    if (filters.departmentId != null) {
-      if (allowed.length && !allowed.includes(filters.departmentId)) {
+    if (role !== 'ADMIN') {
+      if (user.companyId == null) {
+        throw new ForbiddenException('Affectation entreprise manquante');
+      }
+      const companyId = filters.companyId ?? user.companyId;
+      if (companyId !== user.companyId) {
+        throw new ForbiddenException('Entreprise hors périmètre');
+      }
+      const allowed = resolvedDepartmentIds(user);
+      if (filters.departmentId != null && allowed.length && !allowed.includes(filters.departmentId)) {
         throw new ForbiddenException('Département hors périmètre');
       }
-      return { companyId, departmentId: filters.departmentId };
     }
-    return {
-      companyId,
-      departmentIds: allowed.length ? allowed : undefined,
-    };
+    return resolveDeliveryScope(user, filters);
   }
 
   private assertCanAccess(
@@ -1131,14 +1095,15 @@ export class DeliveriesService {
     if (user.companyId != null && user.companyId !== companyId) {
       throw new ForbiddenException('Accès refusé');
     }
-    if (fulfillmentType === FulfillmentType.HOME || fulfillmentType === 'HOME') {
-      if (user.role === 'CASHIER') {
-        if (user.id != null && saleUserId === user.id) return;
-        throw new ForbiddenException('Accès refusé');
-      }
-      return;
+    if (isCashierRole(user)) {
+      if (cashierCanAccessDelivery(user, { fulfillmentType, departmentId, saleUserId })) return;
+      throw new ForbiddenException('Accès refusé');
     }
-    if (user.role === 'CASHIER' && user.id != null && saleUserId === user.id) return;
+    if (isChefProductionRole(user)) {
+      if (chefCanAccessDelivery(user, { fulfillmentType, departmentId })) return;
+      throw new ForbiddenException('Accès refusé');
+    }
+    if (fulfillmentType === FulfillmentType.HOME || fulfillmentType === 'HOME') return;
     if (!canAccessAssignedDepartment(user, departmentId)) {
       throw new ForbiddenException('Accès refusé');
     }

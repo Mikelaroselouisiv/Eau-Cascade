@@ -256,13 +256,17 @@ export function DeliveryExecuteModal({
             contentContainerStyle={styles.detailList}
             ListHeaderComponent={
               <View style={styles.detailHeader}>
-                <Text style={styles.detailTitle}>Vente #{deliverySaleRef(detail)}</Text>
-                <Text style={styles.client}>{detail.sale?.clientName?.trim() || 'Client'}</Text>
-                <Text style={styles.meta}>
+                <Text style={styles.detailTitle} numberOfLines={1}>
+                  Vente #{deliverySaleRef(detail)}
+                </Text>
+                <Text style={styles.client} numberOfLines={1}>
+                  {detail.sale?.clientName?.trim() || 'Client'}
+                </Text>
+                <Text style={styles.meta} numberOfLines={2}>
                   {isHomeDelivery(detail) ? 'À domicile' : 'Sur place'} ·{' '}
                   {DELIVERY_STATUS_LABEL[detail.status]} · {formatMoney(detail.sale?.total)}
                 </Text>
-                <Text style={styles.meta}>
+                <Text style={styles.meta} numberOfLines={1}>
                   {isHomeDelivery(detail)
                     ? [
                         detail.company?.name,
@@ -281,7 +285,7 @@ export function DeliveryExecuteModal({
                     ? [{ id: 0, address: detail.sale.clientAddress.trim(), quantity: 0 }]
                     : []
                 ).map((st) => (
-                  <Text key={st.id || st.address} style={styles.meta}>
+                  <Text key={st.id || st.address} style={styles.meta} numberOfLines={2}>
                     {st.address}
                     {Number(st.quantity) > 0
                       ? ` · ${formatQuantity(Number(st.quantityDelivered ?? 0))} / ${formatQuantity(Number(st.quantity))}`
@@ -531,6 +535,8 @@ const styles = StyleSheet.create({
   footerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   secondaryBtn: {
     flexGrow: 1,
+    flexBasis: '40%',
+    minWidth: 120,
     borderWidth: 1,
     borderColor: BrandColors.borderStrong,
     borderRadius: 12,
@@ -541,6 +547,8 @@ const styles = StyleSheet.create({
   secondaryBtnText: { fontWeight: '700', color: BrandColors.text },
   primaryBtn: {
     flexGrow: 1,
+    flexBasis: '40%',
+    minWidth: 120,
     backgroundColor: BrandColors.primary,
     borderRadius: 12,
     paddingVertical: 12,
@@ -559,6 +567,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: 8,
     backgroundColor: BrandColors.surface,
+    maxWidth: '100%',
   },
   deptChipActive: {
     backgroundColor: BrandColors.primary,

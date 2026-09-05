@@ -138,6 +138,7 @@ export function ProductionWorkspace() {
         nextDest === 'HOME'
           ? await listDeliveries({
               ...(user?.companyId != null ? { companyId: user.companyId } : {}),
+              departmentId: deptId,
               fulfillmentType: 'HOME',
               take: 100,
             })
@@ -645,9 +646,6 @@ const styles = StyleSheet.create({
   submitText: { color: '#fff', fontWeight: '700' },
   meta: { color: BrandColors.textMuted, fontSize: 13 },
   ficheGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
     gap: Spacing.two,
   },
   countList: { padding: Spacing.three, gap: Spacing.two },

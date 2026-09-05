@@ -32,10 +32,8 @@ export function DeliveryFicheCard({
           <span className="delivery-card-ref">Vente #{deliverySaleRef(d)}</span>
           <span className="delivery-card-badge">{DELIVERY_STATUS_LABEL[d.status]}</span>
         </div>
-        <div className="delivery-card-client">
-          {d.sale?.clientName?.trim() || 'Client'}
-          {isHomeDelivery(d) ? <span className="delivery-card-home"> · À domicile</span> : null}
-        </div>
+        <div className="delivery-card-client">{d.sale?.clientName?.trim() || 'Client'}</div>
+        {isHomeDelivery(d) ? <span className="delivery-card-home">À domicile</span> : null}
         {isHomeDelivery(d) && d.sale?.clientPhone?.trim() ? (
           <div className="delivery-card-meta">{d.sale.clientPhone.trim()}</div>
         ) : null}

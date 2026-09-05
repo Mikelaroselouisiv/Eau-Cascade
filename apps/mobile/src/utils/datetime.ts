@@ -18,6 +18,21 @@ export function formatDateTime(value: Date | string | number | null | undefined)
   return `${get('day')}/${get('month')}/${get('year')} ${get('hour')}:${get('minute')}`;
 }
 
+/** Affichage court livraison : 12 janv. 14:30 (Port-au-Prince). */
+export function formatDateTimeShort(value: Date | string | number | null | undefined): string {
+  if (value == null || value === '') return '—';
+  const d = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('fr-HT', {
+    timeZone: APP_TIMEZONE,
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
+}
+
 export const CURRENCY_CODE = 'HTG';
 
 /** Montant numérique seul (sans devise). */

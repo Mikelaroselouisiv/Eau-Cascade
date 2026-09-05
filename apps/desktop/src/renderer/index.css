@@ -3323,6 +3323,10 @@ button.password-field__toggle:focus-visible {
   font-weight: 700;
   color: #64748b;
   letter-spacing: 0.02em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .delivery-card-badge {
@@ -3359,11 +3363,17 @@ button.password-field__toggle:focus-visible {
   font-weight: 700;
   color: #0f172a;
   line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .delivery-card-meta {
   font-size: 0.78rem;
   color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .delivery-card-foot {
@@ -3427,8 +3437,14 @@ button.password-field__toggle:focus-visible {
 }
 
 .delivery-card-home {
+  display: inline-block;
   font-weight: 600;
+  font-size: 0.72rem;
   color: #1d4ed8;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .delivery-lines {

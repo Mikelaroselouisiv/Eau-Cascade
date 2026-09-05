@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -194,12 +195,16 @@ export function DeliveriesListScreen({ status }: Props) {
           <Text style={styles.searchBtnText}>OK</Text>
         </Pressable>
       </View>
-      <View style={styles.filterRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterRow}
+        keyboardShouldPersistTaps="handled">
         {(
           [
             { id: '', label: 'Toutes' },
             { id: 'ON_SITE', label: 'Sur place' },
-            { id: 'HOME', label: 'À domicile' },
+            { id: 'HOME', label: 'Domicile' },
           ] as const
         ).map((opt) => (
           <Pressable
@@ -215,11 +220,15 @@ export function DeliveriesListScreen({ status }: Props) {
             </Text>
           </Pressable>
         ))}
-      </View>
+      </ScrollView>
       {canFilter ? (
         <>
           {companies.length > 1 ? (
-            <View style={styles.filterRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRow}
+              keyboardShouldPersistTaps="handled">
               <Pressable
                 style={[styles.filterChip, filterCompanyId === '' && styles.filterChipActive]}
                 onPress={() => {
@@ -252,10 +261,14 @@ export function DeliveriesListScreen({ status }: Props) {
                   </Text>
                 </Pressable>
               ))}
-            </View>
+            </ScrollView>
           ) : null}
           {departments.length > 0 ? (
-            <View style={styles.filterRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRow}
+              keyboardShouldPersistTaps="handled">
               <Pressable
                 style={[styles.filterChip, filterDepartmentId === '' && styles.filterChipActive]}
                 onPress={() => setFilterDepartmentId('')}>
@@ -285,26 +298,24 @@ export function DeliveriesListScreen({ status }: Props) {
                   </Text>
                 </Pressable>
               ))}
-            </View>
+            </ScrollView>
           ) : null}
         </>
       ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Text style={styles.count}>{total} livraison(s)</Text>
+      <Text style={styles.count}>{total} fiche{total > 1 ? 's' : ''}</Text>
 
       <FlatList
         data={items}
-        numColumns={2}
         keyExtractor={(d) => String(d.id)}
         contentContainerStyle={styles.list}
-        columnWrapperStyle={styles.cardRow}
         refreshing={refreshing}
         onRefresh={() => void onRefresh()}
         alwaysBounceVertical
         onEndReached={() => void onEndReached()}
         onEndReachedThreshold={0.4}
         keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={<Text style={styles.empty}>Aucune livraison</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>Aucune fiche</Text>}
         ListFooterComponent={
           loadingMore ? <ActivityIndicator color={BrandColors.primary} style={{ margin: 12 }} /> : null
         }
@@ -343,7 +354,7 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: Spacing.two,
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,
@@ -392,6 +403,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   list: { paddingHorizontal: Spacing.three, paddingBottom: Spacing.six, gap: Spacing.two },
-  cardRow: { justifyContent: 'space-between', gap: Spacing.two },
   empty: { textAlign: 'center', color: BrandColors.textMuted, marginTop: Spacing.five },
 });

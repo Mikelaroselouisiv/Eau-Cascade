@@ -23,6 +23,7 @@ type AuthUser = {
   companyId?: number | null;
   departmentId?: number | null;
   departmentIds?: number[] | null;
+  productionDepartmentIds?: number[] | null;
 };
 
 @Controller('deliveries')

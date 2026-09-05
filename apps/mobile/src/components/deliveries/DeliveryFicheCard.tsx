@@ -4,7 +4,7 @@ import { MoneyText } from '@/components/MoneyText';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import type { Delivery } from '@/types/api';
-import { formatDateTime } from '@/utils/datetime';
+import { formatDateTimeShort } from '@/utils/datetime';
 import {
   DELIVERY_STATUS_COLOR,
   DELIVERY_STATUS_LABEL,
@@ -29,42 +29,70 @@ export function DeliveryFicheCard({
   onOpen,
   onPrint,
 }: Props) {
+  const home = isHomeDelivery(item);
+  const statusColor = DELIVERY_STATUS_COLOR[item.status];
+  const place = home
+    ? item.department?.name
+      ? `Depuis ${item.department.name}`
+      : item.company?.name ?? ''
+    : [item.department?.name, item.company?.name].filter(Boolean).join(' · ');
+
   return (
     <View style={styles.card}>
-      <Pressable onPress={() => onOpen(item)}>
-        <View style={styles.cardTop}>
-          <Text style={styles.cardRef}>Vente #{deliverySaleRef(item)}</Text>
-          <View style={[styles.badge, { backgroundColor: `${DELIVERY_STATUS_COLOR[item.status]}22` }]}>
-            <Text style={[styles.badgeText, { color: DELIVERY_STATUS_COLOR[item.status] }]}>
-              {DELIVERY_STATUS_LABEL[item.status]}
-            </Text>
+      <View style={[styles.rail, { backgroundColor: statusColor }]} />
+      <Pressable style={styles.body} onPress={() => onOpen(item)}>
+        <View style={styles.top}>
+          <Text style={styles.ref} numberOfLines={1}>
+            #{deliverySaleRef(item)}
+          </Text>
+          <View style={styles.chips}>
+            <View style={[styles.chip, { backgroundColor: `${statusColor}22` }]}>
+              <Text style={[styles.chipText, { color: statusColor }]} numberOfLines={1}>
+                {DELIVERY_STATUS_LABEL[item.status]}
+              </Text>
+            </View>
+            <View style={[styles.chip, home ? styles.chipHome : styles.chipOnSite]}>
+              <Text style={[styles.chipText, home ? styles.chipHomeText : styles.chipOnSiteText]} numberOfLines={1}>
+                {home ? 'Domicile' : 'Sur place'}
+              </Text>
+            </View>
           </View>
         </View>
-        <Text style={styles.client} numberOfLines={2}>
+        <Text style={styles.client} numberOfLines={1}>
           {item.sale?.clientName?.trim() || 'Client'}
-          {isHomeDelivery(item) ? ' · À domicile' : ''}
         </Text>
-        <Text style={styles.meta} numberOfLines={2}>
-          {isHomeDelivery(item)
-            ? [item.company?.name, item.department?.name ? `Livré depuis ${item.department.name}` : null]
-                .filter(Boolean)
-                .join(' · ') || '—'
-            : [item.company?.name, item.department?.name].filter(Boolean).join(' · ') || '—'}
-        </Text>
-        <View style={styles.cardFoot}>
-          <Text style={styles.meta}>{formatDateTime(item.sale?.createdAt ?? item.createdAt)}</Text>
-          <MoneyText value={item.sale?.total} style={styles.total} />
+        {place ? (
+          <Text style={styles.meta} numberOfLines={1}>
+            {place}
+          </Text>
+        ) : null}
+        {home && item.sale?.clientPhone?.trim() ? (
+          <Text style={styles.meta} numberOfLines={1}>
+            {item.sale.clientPhone.trim()}
+          </Text>
+        ) : null}
+        <View style={styles.foot}>
+          <Text style={styles.when} numberOfLines={1}>
+            {formatDateTimeShort(item.sale?.createdAt ?? item.createdAt)}
+          </Text>
+          <MoneyText value={item.sale?.total} style={styles.total} numberOfLines={1} />
         </View>
+        {home && item.executorName?.trim() ? (
+          <Text style={styles.executor} numberOfLines={1}>
+            {item.executorName.trim()}
+          </Text>
+        ) : null}
       </Pressable>
       {canPrint && onPrint ? (
         <Pressable
-          style={[styles.cardPrintBtn, (printing || printBusy) && styles.disabled]}
+          style={[styles.printBtn, (printing || printBusy) && styles.disabled]}
           disabled={printing || printBusy}
-          onPress={() => onPrint(item)}>
+          onPress={() => onPrint(item)}
+          hitSlop={8}>
           {printing ? (
             <ActivityIndicator color={BrandColors.primary} />
           ) : (
-            <Text style={styles.cardPrintText}>Imprimer</Text>
+            <Text style={styles.printText}>Imprimer</Text>
           )}
         </Pressable>
       ) : null}
@@ -74,31 +102,74 @@ export function DeliveryFicheCard({
 
 const styles = StyleSheet.create({
   card: {
-    width: '48.5%',
+    flexDirection: 'row',
+    alignItems: 'stretch',
     backgroundColor: BrandColors.surface,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: BrandColors.border,
-    padding: Spacing.three,
-    gap: 6,
+    overflow: 'hidden',
   },
-  cardPrintBtn: {
-    marginTop: 4,
-    borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-    borderRadius: 10,
-    paddingVertical: 8,
+  rail: { width: 4 },
+  body: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 3,
+  },
+  top: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+  },
+  ref: {
+    flexShrink: 1,
+    minWidth: 0,
+    fontSize: 12,
+    fontWeight: '700',
+    color: BrandColors.textMuted,
+  },
+  chips: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 'auto',
+    flexShrink: 0,
+  },
+  chip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  chipText: { fontSize: 11, fontWeight: '700' },
+  chipHome: { backgroundColor: BrandColors.primarySoft },
+  chipHomeText: { color: BrandColors.primary },
+  chipOnSite: { backgroundColor: BrandColors.surfaceSoft },
+  chipOnSiteText: { color: BrandColors.textMuted },
+  client: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: BrandColors.text,
+  },
+  meta: { fontSize: 12, color: BrandColors.textMuted },
+  foot: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 4,
+  },
+  when: { flex: 1, minWidth: 0, fontSize: 12, color: BrandColors.textMuted },
+  total: { flexShrink: 0, fontWeight: '700', color: BrandColors.text },
+  executor: { fontSize: 12, fontWeight: '600', color: BrandColors.text },
+  printBtn: {
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    borderLeftWidth: 1,
+    borderLeftColor: BrandColors.border,
     backgroundColor: BrandColors.surfaceSoft,
   },
-  cardPrintText: { fontWeight: '700', color: BrandColors.text },
-  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardRef: { fontSize: 16, fontWeight: '700', color: BrandColors.text },
-  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  badgeText: { fontSize: 12, fontWeight: '700' },
-  client: { fontSize: 15, fontWeight: '600', color: BrandColors.text },
-  meta: { fontSize: 12, color: BrandColors.textMuted },
-  cardFoot: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  total: { fontWeight: '700', color: BrandColors.text },
+  printText: { fontSize: 11, fontWeight: '700', color: BrandColors.primary },
   disabled: { opacity: 0.55 },
 });
