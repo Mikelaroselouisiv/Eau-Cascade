@@ -115,7 +115,10 @@ export function DashboardDateFilter({
   return (
     <View style={styles.root}>
       <ChipScroll>
-        {PRESETS.map((opt) => {
+        {PRESETS.filter((opt) => {
+          if (!minYmd) return true;
+          return dashboardPresetRange(opt.key).dateFrom >= minYmd;
+        }).map((opt) => {
           const active = opt.key === activePreset;
           return (
             <Pressable

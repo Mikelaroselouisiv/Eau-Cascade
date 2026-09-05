@@ -19,14 +19,27 @@ import { useCompanyScope } from '@/hooks/useCompanyScope';
 import { getDashboardSummaryRange } from '@/services/api';
 import type { DashboardBalanceSnapshot } from '@/types/api';
 import { loadDashboardSalesSeries, type SalesSeriesPoint } from '@/utils/dashboard-series';
-import { dashboardPresetRange, type DashboardSeriesGrain } from '@/utils/datetime';
+import {
+  addDaysYmd,
+  businessTodayYmd,
+  dashboardPresetRange,
+  type DashboardSeriesGrain,
+} from '@/utils/datetime';
 
 export default function SyntheseScreen() {
   const { can, canPerm } = useAuth();
+  const canSeeUnlimitedRange = can(['ADMIN']) || canPerm('reports.view');
   const canSeeSynthesis =
-    can(['ADMIN']) || canPerm('dashboard.synthesis') || canPerm('reports.view');
+    canSeeUnlimitedRange ||
+    canPerm('dashboard.synthesis') ||
+    canPerm('sales.recent_totals');
+  const salesRecentMinYmd = canSeeUnlimitedRange ? null : addDaysYmd(businessTodayYmd(), -1);
   const { companyId, companies, setCompanyId, ready, lockedToSession } = useCompanyScope();
-  const [range, setRange] = useState(() => dashboardPresetRange('week'));
+  const [range, setRange] = useState(() =>
+    salesRecentMinYmd
+      ? { dateFrom: salesRecentMinYmd, dateTo: businessTodayYmd() }
+      : dashboardPresetRange('week'),
+  );
   const [grain, setGrain] = useState<DashboardSeriesGrain>('day');
   const [snapshot, setSnapshot] = useState<DashboardBalanceSnapshot | null>(null);
   const [series, setSeries] = useState<SalesSeriesPoint[]>([]);
@@ -35,25 +48,30 @@ export default function SyntheseScreen() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<'overview' | 'caisse' | 'production' | 'audit'>('overview');
+  const todayYmd = businessTodayYmd();
+  const dateFrom =
+    salesRecentMinYmd && range.dateFrom < salesRecentMinYmd
+      ? salesRecentMinYmd
+      : range.dateFrom;
+  const dateTo = salesRecentMinYmd && range.dateTo > todayYmd ? todayYmd : range.dateTo;
 
   const load = useCallback(async () => {
     if (!canSeeSynthesis || companyId == null) return;
-    const { dateFrom, dateTo } = range;
     try {
       setError(null);
       const [snap, points] = await Promise.all([
         getDashboardSummaryRange({ companyId, dateFrom, dateTo }),
-        loadDashboardSalesSeries({ companyId, dateFrom, dateTo, grain }),
+        loadDashboardSalesSeries({ companyId, dateFrom, dateTo, grain: salesRecentMinYmd ? 'day' : grain }),
       ]);
       setSnapshot(snap);
       setSeries(points);
-      setSeriesGrain(grain);
+      setSeriesGrain(salesRecentMinYmd ? 'day' : grain);
     } catch {
       setError('Impossible de charger la synthèse');
       setSnapshot(null);
       setSeries([]);
     }
-  }, [canSeeSynthesis, companyId, grain, range]);
+  }, [canSeeSynthesis, companyId, dateFrom, dateTo, grain, salesRecentMinYmd]);
 
   useEffect(() => {
     if (!ready || view !== 'overview') return;
@@ -77,9 +95,7 @@ export default function SyntheseScreen() {
     return (
       <Screen>
         <View style={styles.blocked}>
-          <Text style={styles.blockedText}>
-            Synthèse réservée aux comptes avec dashboard.synthesis ou reports.view.
-          </Text>
+          <Text style={styles.blockedText}>Accès refusé.</Text>
         </View>
       </Screen>
     );
@@ -109,9 +125,10 @@ export default function SyntheseScreen() {
         ) : null}
 
         <DashboardDateFilter
-          dateFrom={range.dateFrom}
-          dateTo={range.dateTo}
-          onChange={(dateFrom, dateTo) => setRange({ dateFrom, dateTo })}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onChange={(nextFrom, nextTo) => setRange({ dateFrom: nextFrom, dateTo: nextTo })}
+          minYmd={salesRecentMinYmd}
         />
         <ChipScroll contentStyle={styles.viewSwitch}>
           <ViewSwitchButton
@@ -165,22 +182,24 @@ export default function SyntheseScreen() {
 
             {snapshot ? (
               <>
-                <ChipScroll>
-                  <Pressable
-                    onPress={() => setGrain('day')}
-                    style={[styles.grainChip, grain === 'day' && styles.grainChipActive]}>
-                    <Text style={[styles.grainText, grain === 'day' && styles.grainTextActive]}>
-                      Jour
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setGrain('month')}
-                    style={[styles.grainChip, grain === 'month' && styles.grainChipActive]}>
-                    <Text style={[styles.grainText, grain === 'month' && styles.grainTextActive]}>
-                      Mois
-                    </Text>
-                  </Pressable>
-                </ChipScroll>
+                {salesRecentMinYmd ? null : (
+                  <ChipScroll>
+                    <Pressable
+                      onPress={() => setGrain('day')}
+                      style={[styles.grainChip, grain === 'day' && styles.grainChipActive]}>
+                      <Text style={[styles.grainText, grain === 'day' && styles.grainTextActive]}>
+                        Jour
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setGrain('month')}
+                      style={[styles.grainChip, grain === 'month' && styles.grainChipActive]}>
+                      <Text style={[styles.grainText, grain === 'month' && styles.grainTextActive]}>
+                        Mois
+                      </Text>
+                    </Pressable>
+                  </ChipScroll>
+                )}
                 <RevenueTrendChart rows={series} grain={seriesGrain} />
               </>
             ) : null}
@@ -190,8 +209,8 @@ export default function SyntheseScreen() {
         {companyId != null && view === 'caisse' ? (
           <RegisterSessionsPanel
             companyId={companyId}
-            dateFrom={range.dateFrom}
-            dateTo={range.dateTo}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
             refreshKey={refreshKey}
           />
         ) : null}
@@ -199,8 +218,8 @@ export default function SyntheseScreen() {
         {companyId != null && view === 'production' ? (
           <ProductionSessionsPanel
             companyId={companyId}
-            dateFrom={range.dateFrom}
-            dateTo={range.dateTo}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
             refreshKey={refreshKey}
           />
         ) : null}
@@ -208,8 +227,8 @@ export default function SyntheseScreen() {
         {companyId != null && view === 'audit' ? (
           <AuditJournalPanel
             companyId={companyId}
-            dateFrom={range.dateFrom}
-            dateTo={range.dateTo}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
             refreshKey={refreshKey}
           />
         ) : null}

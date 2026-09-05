@@ -4,13 +4,13 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 
+import { ChipScroll } from '@/components/ChipScroll';
 import { Screen } from '@/components/Screen';
 import { DeliveryExecuteModal } from '@/components/deliveries/DeliveryExecuteModal';
 import { DeliveryFicheCard } from '@/components/deliveries/DeliveryFicheCard';
@@ -195,11 +195,7 @@ export function DeliveriesListScreen({ status }: Props) {
           <Text style={styles.searchBtnText}>OK</Text>
         </Pressable>
       </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterRow}
-        keyboardShouldPersistTaps="handled">
+      <ChipScroll contentStyle={styles.filterRow}>
         {(
           [
             { id: '', label: 'Toutes' },
@@ -220,15 +216,11 @@ export function DeliveriesListScreen({ status }: Props) {
             </Text>
           </Pressable>
         ))}
-      </ScrollView>
+      </ChipScroll>
       {canFilter ? (
         <>
           {companies.length > 1 ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterRow}
-              keyboardShouldPersistTaps="handled">
+            <ChipScroll contentStyle={styles.filterRow}>
               <Pressable
                 style={[styles.filterChip, filterCompanyId === '' && styles.filterChipActive]}
                 onPress={() => {
@@ -261,14 +253,10 @@ export function DeliveriesListScreen({ status }: Props) {
                   </Text>
                 </Pressable>
               ))}
-            </ScrollView>
+            </ChipScroll>
           ) : null}
           {departments.length > 0 ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterRow}
-              keyboardShouldPersistTaps="handled">
+            <ChipScroll contentStyle={styles.filterRow}>
               <Pressable
                 style={[styles.filterChip, filterDepartmentId === '' && styles.filterChipActive]}
                 onPress={() => setFilterDepartmentId('')}>
@@ -298,7 +286,7 @@ export function DeliveriesListScreen({ status }: Props) {
                   </Text>
                 </Pressable>
               ))}
-            </ScrollView>
+            </ChipScroll>
           ) : null}
         </>
       ) : null}
@@ -353,25 +341,29 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.two,
   },
   filterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
     paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.two,
+    paddingVertical: 6,
   },
   filterChip: {
     borderWidth: 1,
     borderColor: BrandColors.borderStrong,
     borderRadius: 999,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 8,
     backgroundColor: BrandColors.surface,
+    justifyContent: 'center',
   },
   filterChipActive: {
     backgroundColor: BrandColors.primary,
     borderColor: BrandColors.primary,
   },
-  filterChipText: { fontWeight: '700', color: BrandColors.text, fontSize: 13 },
+  filterChipText: {
+    fontWeight: '700',
+    color: BrandColors.text,
+    fontSize: 13,
+    lineHeight: 18,
+    includeFontPadding: false,
+  },
   filterChipTextActive: { color: '#fff' },
   search: {
     flex: 1,

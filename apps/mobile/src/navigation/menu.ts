@@ -145,7 +145,7 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
       title: 'Synthèse',
       icon: 'pie-chart-outline',
       permission: 'dashboard.synthesis',
-      roles: ['ADMIN'],
+      roles: ['ADMIN', 'MANAGER'],
     },
     { name: 'ventes', title: 'Ventes', icon: 'receipt-outline', permission: 'sales.view' },
     {
@@ -382,7 +382,11 @@ export function filterMenuItems(items: MenuItem[], access: AccessFns): MenuItem[
 
 export function canAccessTab(tab: SectionTab, access: AccessFns): boolean {
   if (tab.name === 'synthese') {
-    return access.canPerm('dashboard.synthesis') || access.canPerm('reports.view');
+    return (
+      access.canPerm('dashboard.synthesis') ||
+      access.canPerm('reports.view') ||
+      access.canPerm('sales.recent_totals')
+    );
   }
   if (tab.name === 'stock' && tab.title === 'Stock') {
     return access.canPerm('stock.global') || access.canPerm('reports.view');
