@@ -14,6 +14,7 @@ import {
   nowBusinessYmd,
   shiftBusinessYmd,
 } from '../../common/utils/business-timezone';
+import { clampToRecentTotalsRange, mustClampRecentTotals } from '../../common/utils/recent-range';
 import { RolesService } from '../roles/roles.service';
 import { ReportsService } from './reports.service';
 
@@ -129,24 +130,29 @@ export class ReportsController {
   }
 
   @Get('dashboard-summary-range')
-  @Permissions('reports.view')
-  dashboardSummaryRange(
+  @PermissionsAny('reports.view', 'sales.recent_totals', 'dashboard.view')
+  async dashboardSummaryRange(
     @Query('dateFrom') dateFrom: string,
     @Query('dateTo') dateTo: string,
     @Query('companyId') companyIdRaw?: string,
     @Query('companyIds') companyIdsRaw?: string,
     @Query('departmentId') departmentIdRaw?: string,
+    @GetUser() user?: { role?: string },
   ) {
     if (!dateFrom?.trim() || !dateTo?.trim()) {
       throw new BadRequestException('dateFrom et dateTo sont requis (YYYY-MM-DD)');
     }
+    const perms = user?.role ? await this.rolesService.getPermissionsForUserRole(user.role) : [];
+    const range = mustClampRecentTotals(perms)
+      ? clampToRecentTotalsRange(dateFrom, dateTo)
+      : { dateFrom: dateFrom.trim(), dateTo: dateTo.trim() };
     const companyIds = this.reportsService.parseCompanyIdsQuery(companyIdsRaw, companyIdRaw);
     const departmentIdN = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : NaN;
     const departmentId =
       Number.isFinite(departmentIdN) && (departmentIdN as number) > 0 ? (departmentIdN as number) : undefined;
     return this.reportsService.dashboardSummaryRange(
-      dateFrom.trim(),
-      dateTo.trim(),
+      range.dateFrom,
+      range.dateTo,
       companyIds,
       departmentId,
     );

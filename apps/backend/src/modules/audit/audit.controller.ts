@@ -1,17 +1,23 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { Permissions } from '../../common/decorators/permissions.decorator';
+import { GetUser } from '../../common/decorators/get-user.decorator';
+import { PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { clampToRecentTotalsRange, mustClampRecentTotals } from '../../common/utils/recent-range';
+import { RolesService } from '../roles/roles.service';
 import { AuditService } from './audit.service';
 
 @Controller('audit')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AuditController {
-  constructor(private readonly auditService: AuditService) {}
+  constructor(
+    private readonly auditService: AuditService,
+    private readonly rolesService: RolesService,
+  ) {}
 
   @Get()
-  @Permissions('audit.view')
-  list(
+  @PermissionsAny('audit.view', 'dashboard.view', 'sales.recent_totals')
+  async list(
     @Query('skip') skipRaw?: string,
     @Query('take') takeRaw?: string,
     @Query('entity') entity?: string,
@@ -21,12 +27,17 @@ export class AuditController {
     @Query('companyId') companyIdRaw?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
+    @GetUser() user?: { role?: string },
   ) {
     const skip = skipRaw ? Number.parseInt(skipRaw, 10) : 0;
     const take = takeRaw ? Number.parseInt(takeRaw, 10) : 50;
     const userId = userIdRaw ? Number.parseInt(userIdRaw, 10) : undefined;
     const departmentId = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : undefined;
     const companyId = companyIdRaw ? Number.parseInt(companyIdRaw, 10) : undefined;
+    const perms = user?.role ? await this.rolesService.getPermissionsForUserRole(user.role) : [];
+    const range = mustClampRecentTotals(perms)
+      ? clampToRecentTotalsRange(dateFrom, dateTo)
+      : { dateFrom, dateTo };
     return this.auditService.list({
       skip: Number.isFinite(skip) ? skip : 0,
       take: Number.isFinite(take) ? take : 50,
@@ -36,8 +47,8 @@ export class AuditController {
       departmentId:
         departmentId != null && Number.isFinite(departmentId) ? departmentId : undefined,
       companyId: companyId != null && Number.isFinite(companyId) ? companyId : undefined,
-      dateFrom,
-      dateTo,
+      dateFrom: range.dateFrom,
+      dateTo: range.dateTo,
     });
   }
 }

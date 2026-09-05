@@ -20,12 +20,17 @@ import {
   CreateRegisterDto,
   OpenRegisterSessionDto,
 } from './dto/register-session.dto';
+import { clampToRecentTotalsRange, mustClampRecentTotals } from '../../common/utils/recent-range';
+import { RolesService } from '../roles/roles.service';
 import { RegisterSessionsService } from './register-sessions.service';
 
 @Controller('register-sessions')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RegisterSessionsController {
-  constructor(private readonly registerSessionsService: RegisterSessionsService) {}
+  constructor(
+    private readonly registerSessionsService: RegisterSessionsService,
+    private readonly rolesService: RolesService,
+  ) {}
 
   @Get('registers')
   @Permissions('pos.use')
@@ -91,8 +96,8 @@ export class RegisterSessionsController {
   }
 
   @Get()
-  @Permissions('stores.manage')
-  list(
+  @PermissionsAny('stores.manage', 'dashboard.view', 'dashboard.synthesis')
+  async list(
     @Query('companyId') companyIdRaw?: string,
     @Query('departmentId') departmentIdRaw?: string,
     @Query('registerId') registerIdRaw?: string,
@@ -103,6 +108,7 @@ export class RegisterSessionsController {
     @Query('sortBy') sortByRaw?: string,
     @Query('sortDir') sortDirRaw?: string,
     @Query('take') takeRaw?: string,
+    @GetUser() user?: { role?: string },
   ) {
     const companyId = companyIdRaw ? Number.parseInt(companyIdRaw, 10) : undefined;
     const departmentId = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : undefined;
@@ -115,6 +121,10 @@ export class RegisterSessionsController {
         : undefined;
     const sortBy = sortByRaw === 'userName' ? 'userName' : 'openedAt';
     const sortDir = sortDirRaw === 'asc' ? 'asc' : 'desc';
+    const perms = user?.role ? await this.rolesService.getPermissionsForUserRole(user.role) : [];
+    const range = mustClampRecentTotals(perms)
+      ? clampToRecentTotalsRange(dateFrom, dateTo)
+      : { dateFrom, dateTo };
 
     return this.registerSessionsService.listSessions({
       companyId: Number.isFinite(companyId) && companyId! > 0 ? companyId : undefined,
@@ -123,8 +133,8 @@ export class RegisterSessionsController {
       registerId: Number.isFinite(registerId) && registerId! > 0 ? registerId : undefined,
       openedById: Number.isFinite(openedById) && openedById! > 0 ? openedById : undefined,
       status,
-      dateFrom,
-      dateTo,
+      dateFrom: range.dateFrom,
+      dateTo: range.dateTo,
       sortBy,
       sortDir,
       take,

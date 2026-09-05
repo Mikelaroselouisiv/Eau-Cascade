@@ -18,6 +18,8 @@ import {
   ClaimProductionSessionDto,
   OpenProductionSessionDto,
 } from './dto/production-session.dto';
+import { clampToRecentTotalsRange, mustClampRecentTotals } from '../../common/utils/recent-range';
+import { RolesService } from '../roles/roles.service';
 import { ProductionSessionsService } from './production-sessions.service';
 
 type SessionUser = {
@@ -30,7 +32,10 @@ type SessionUser = {
 @Controller('production-sessions')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ProductionSessionsController {
-  constructor(private readonly productionSessionsService: ProductionSessionsService) {}
+  constructor(
+    private readonly productionSessionsService: ProductionSessionsService,
+    private readonly rolesService: RolesService,
+  ) {}
 
   @Get('context')
   @Permissions('production.use')
@@ -72,7 +77,7 @@ export class ProductionSessionsController {
 
   @Get()
   @PermissionsAny('stores.manage', 'dashboard.view', 'dashboard.synthesis')
-  list(
+  async list(
     @Query('companyId') companyIdRaw?: string,
     @Query('departmentId') departmentIdRaw?: string,
     @Query('openedById') openedByIdRaw?: string,
@@ -82,6 +87,7 @@ export class ProductionSessionsController {
     @Query('sortBy') sortByRaw?: string,
     @Query('sortDir') sortDirRaw?: string,
     @Query('take') takeRaw?: string,
+    @GetUser() user?: { role?: string },
   ) {
     const companyId = companyIdRaw ? Number.parseInt(companyIdRaw, 10) : undefined;
     const departmentId = departmentIdRaw ? Number.parseInt(departmentIdRaw, 10) : undefined;
@@ -93,14 +99,18 @@ export class ProductionSessionsController {
         : undefined;
     const sortBy = sortByRaw === 'userName' ? 'userName' : 'openedAt';
     const sortDir = sortDirRaw === 'asc' ? 'asc' : 'desc';
+    const perms = user?.role ? await this.rolesService.getPermissionsForUserRole(user.role) : [];
+    const range = mustClampRecentTotals(perms)
+      ? clampToRecentTotalsRange(dateFrom, dateTo)
+      : { dateFrom, dateTo };
     return this.productionSessionsService.listSessions({
       companyId: Number.isFinite(companyId) && companyId! > 0 ? companyId : undefined,
       departmentId:
         Number.isFinite(departmentId) && departmentId! > 0 ? departmentId : undefined,
       openedById: Number.isFinite(openedById) && openedById! > 0 ? openedById : undefined,
       status,
-      dateFrom,
-      dateTo,
+      dateFrom: range.dateFrom,
+      dateTo: range.dateTo,
       sortBy,
       sortDir,
       take: Number.isFinite(take) && take! > 0 ? take : undefined,
