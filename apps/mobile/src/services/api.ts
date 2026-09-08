@@ -68,6 +68,11 @@ import type {
   ProductionCountSheet,
   ProductionSessionContext,
   ProductionSessionDetail,
+  ProductionWorkerRow,
+  ProductionWorkerOutputRow,
+  ProductionWorkerFiche,
+  CarrierRow,
+  CarrierFiche,
   InternalTransferRow,
   Sale,
   SaleCashGaps,
@@ -998,6 +1003,126 @@ export async function listProductionSessions(params?: {
   return data;
 }
 
+export async function listProductionWorkers(
+  departmentId: number,
+): Promise<ProductionWorkerRow[]> {
+  const { data } = await api.get<ProductionWorkerRow[]>('/production-workers', {
+    params: { departmentId },
+  });
+  return data;
+}
+
+export async function createProductionWorker(payload: {
+  departmentId: number;
+  name: string;
+  phone: string;
+  payrollCoefficient: number;
+}): Promise<ProductionWorkerRow> {
+  const { data } = await api.post<ProductionWorkerRow>('/production-workers', payload);
+  return data;
+}
+
+export async function getProductionWorker(
+  id: number,
+  params?: { dateFrom?: string; dateTo?: string },
+): Promise<ProductionWorkerFiche> {
+  const { data } = await api.get<ProductionWorkerFiche>(`/production-workers/${id}`, { params });
+  return data;
+}
+
+export async function updateProductionWorker(
+  id: number,
+  payload: {
+    name?: string;
+    phone?: string;
+    payrollCoefficient?: number;
+    isActive?: boolean;
+  },
+): Promise<ProductionWorkerRow> {
+  const { data } = await api.patch<ProductionWorkerRow>(`/production-workers/${id}`, payload);
+  return data;
+}
+
+export async function listCarriers(departmentId: number): Promise<CarrierRow[]> {
+  const { data } = await api.get<CarrierRow[]>('/carriers', { params: { departmentId } });
+  return data;
+}
+
+export async function getCarrier(
+  id: number,
+  params?: { dateFrom?: string; dateTo?: string },
+): Promise<CarrierFiche> {
+  const { data } = await api.get<CarrierFiche>(`/carriers/${id}`, { params });
+  return data;
+}
+
+export async function createCarrier(payload: {
+  departmentId: number;
+  name: string;
+  phone: string;
+  rates: Array<{ productId: number; coefficient: number }>;
+}): Promise<CarrierRow> {
+  const { data } = await api.post<CarrierRow>('/carriers', payload);
+  return data;
+}
+
+export async function updateCarrier(
+  id: number,
+  payload: {
+    name?: string;
+    phone?: string;
+    isActive?: boolean;
+    rates?: Array<{ productId: number; coefficient: number }>;
+  },
+): Promise<CarrierRow> {
+  const { data } = await api.patch<CarrierRow>(`/carriers/${id}`, payload);
+  return data;
+}
+
+export async function listProductionWorkerOutputs(params: {
+  departmentId: number;
+  workerId?: number;
+}): Promise<ProductionWorkerOutputRow[]> {
+  const { data } = await api.get<ProductionWorkerOutputRow[]>('/production-workers/outputs', {
+    params,
+  });
+  return data;
+}
+
+export async function declareProductionWorkerOutput(payload: {
+  workerId: number;
+  departmentId: number;
+  items: Array<{ productId: number; quantity: number }>;
+}): Promise<ProductionWorkerOutputRow[]> {
+  const { data } = await api.post<ProductionWorkerOutputRow[]>(
+    '/production-workers/outputs',
+    payload,
+  );
+  return data;
+}
+
+export async function listProductionWorkerIssues(params: {
+  departmentId: number;
+  workerId?: number;
+}): Promise<ProductionWorkerOutputRow[]> {
+  const { data } = await api.get<ProductionWorkerOutputRow[]>('/production-workers/issues', {
+    params,
+  });
+  return data;
+}
+
+export async function declareProductionWorkerIssue(payload: {
+  workerId: number;
+  departmentId: number;
+  items: Array<{ productId: number; quantity: number }>;
+}): Promise<ProductionWorkerOutputRow[]> {
+  const { data } = await api.post<ProductionWorkerOutputRow[]>(
+    '/production-workers/issues',
+    payload,
+  );
+  return data;
+}
+
 export async function listInternalTransfers(params?: {
   companyId?: number;
   fromDepartmentId?: number;
@@ -1012,6 +1137,7 @@ export async function listInternalTransfers(params?: {
 export async function createInternalTransfer(payload: {
   fromDepartmentId: number;
   toDepartmentId: number;
+  carrierId: number;
   items: Array<{ productId: number; quantity: number }>;
   note?: string;
 }): Promise<InternalTransferRow> {
@@ -1301,6 +1427,7 @@ export async function addDeliveryDrop(
     quantity: number;
     departmentId: number;
     executorName?: string | null;
+    carrierId?: number | null;
     stopId?: number | null;
   },
 ): Promise<Delivery> {
@@ -1315,6 +1442,7 @@ export async function updateDelivery(
     markDelivered?: boolean;
     note?: string | null;
     executorName?: string | null;
+    carrierId?: number | null;
     stockDepartmentId?: number;
     stopId?: number;
   },

@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
@@ -11,6 +11,12 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+
+function optionalPositiveInt(value: unknown): number | undefined {
+  if (value == null || value === '') return undefined;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 ? n : undefined;
+}
 
 export class DeliveryItemUpdateDto {
   @IsNumber()
@@ -44,6 +50,12 @@ export class UpdateDeliveryDto {
   @IsString()
   @MaxLength(120)
   executorName?: string | null;
+
+  @IsOptional()
+  @Transform(({ value }) => optionalPositiveInt(value))
+  @IsInt()
+  @Min(1)
+  carrierId?: number | null;
 
   /** Département source du stock (obligatoire pour valider une livraison à domicile). */
   @IsOptional()

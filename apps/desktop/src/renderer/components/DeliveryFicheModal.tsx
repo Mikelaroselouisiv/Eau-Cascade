@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { addDeliveryDrop, getCompanyById, getDeliveryById, getPrinterSettings, getSaleById, updateDelivery } from '../services/api';
-import type { Delivery, Department } from '../types/api';
+import { addDeliveryDrop, getCompanyById, getDeliveryById, getPrinterSettings, getSaleById, listCarriers, updateDelivery } from '../services/api';
+import type { CarrierRow, Delivery, Department } from '../types/api';
 import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
 import { buildReceiptPayloadFromSale } from '../utils/receiptPayload';
@@ -57,6 +57,8 @@ export function DeliveryFicheModal({
   const [dropQty, setDropQty] = useState('');
   const [dropDeptId, setDropDeptId] = useState<number | ''>('');
   const [dropExecutor, setDropExecutor] = useState('');
+  const [dropCarrierId, setDropCarrierId] = useState<number | ''>('');
+  const [carriers, setCarriers] = useState<CarrierRow[]>([]);
   const [dropStopId, setDropStopId] = useState<number | ''>('');
   const [saving, setSaving] = useState(false);
   const [printingId, setPrintingId] = useState<number | null>(null);
@@ -91,6 +93,7 @@ export function DeliveryFicheModal({
     const locked = lockDepartmentId ?? d.departmentId ?? dropDepartments[0]?.id;
     setDropDeptId(locked ?? '');
     setDropExecutor(d.executorName?.trim() || executorDefault);
+    setDropCarrierId(d.carrierId ?? '');
     const stops = d.sale?.deliveryStops ?? [];
     const remainingStop = stops.find((s) => Number(s.quantityRemaining ?? s.quantity) > 0.0001);
     setDropStopId(remainingStop?.id ?? stops[0]?.id ?? '');
@@ -111,6 +114,24 @@ export function DeliveryFicheModal({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-init when the opened fiche changes
   }, [delivery.id, lockDepartmentId, executorDefault]);
+
+  useEffect(() => {
+    if (!home || dropDeptId === '') {
+      setCarriers([]);
+      return;
+    }
+    let cancelled = false;
+    void listCarriers(dropDeptId)
+      .then((list) => {
+        if (!cancelled) setCarriers(list);
+      })
+      .catch(() => {
+        if (!cancelled) setCarriers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [home, dropDeptId]);
 
   function guardExecute() {
     if (executeEnabled) return true;
@@ -133,8 +154,8 @@ export function DeliveryFicheModal({
       onMessage('Choisissez le département');
       return;
     }
-    if (home && !dropExecutor.trim()) {
-      onMessage('Indiquez le livreur');
+    if (home && dropCarrierId === '') {
+      onMessage('Choisissez le transporteur');
       return;
     }
     setSaving(true);
@@ -145,7 +166,7 @@ export function DeliveryFicheModal({
         departmentId: dropDeptId,
         ...(home
           ? {
-              executorName: dropExecutor.trim(),
+              carrierId: dropCarrierId === '' ? null : dropCarrierId,
               stopId: dropStopId === '' ? null : dropStopId,
             }
           : { executorName: dropExecutor.trim() || null }),
@@ -166,8 +187,8 @@ export function DeliveryFicheModal({
       onMessage('Choisissez le département');
       return;
     }
-    if (home && !dropExecutor.trim()) {
-      onMessage('Indiquez le livreur');
+    if (home && dropCarrierId === '') {
+      onMessage('Choisissez le transporteur');
       return;
     }
     setSaving(true);
@@ -177,7 +198,7 @@ export function DeliveryFicheModal({
         stockDepartmentId: dropDeptId,
         ...(home
           ? {
-              executorName: dropExecutor.trim(),
+              carrierId: dropCarrierId === '' ? null : dropCarrierId,
               stopId: dropStopId === '' ? undefined : dropStopId,
             }
           : {}),
@@ -371,6 +392,23 @@ export function DeliveryFicheModal({
                 </select>
               </label>
             ) : null}
+            {home ? (
+            <label>
+              Transporteur *
+              <select
+                value={dropCarrierId === '' ? '' : String(dropCarrierId)}
+                onChange={(e) => setDropCarrierId(e.target.value ? Number(e.target.value) : '')}
+                disabled={saving}
+              >
+                <option value="">—</option>
+                {carriers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            ) : (
             <label>
               Livreur
               <input
@@ -381,6 +419,7 @@ export function DeliveryFicheModal({
                 disabled={saving}
               />
             </label>
+            )}
             {home && (selected.sale?.deliveryStops?.length ?? 0) > 0 ? (
               <label>
                 Adresse

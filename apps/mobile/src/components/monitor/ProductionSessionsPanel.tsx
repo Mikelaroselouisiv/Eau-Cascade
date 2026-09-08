@@ -102,13 +102,19 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
       ) : null}
 
       {sessions.map((session) => {
-        const used =
-          session.status === 'CLOSED' && session.usage?.length
-            ? session.usage.reduce((sum, row) => sum + row.usedQty, 0)
-            : null;
-        const flowed = session.outflow?.length
+        const issued = session.rawIssued?.length
+          ? session.rawIssued.reduce((sum, row) => sum + row.issuedQty, 0)
+          : 0;
+        const remis = session.outflow?.length
           ? session.outflow.reduce((sum, row) => sum + row.produced, 0)
-          : null;
+          : 0;
+        const shipped = session.outflow?.length
+          ? session.outflow.reduce(
+              (sum, row) =>
+                sum + (row.shipped ?? row.toClients + row.toDepartments + (row.toDonations ?? 0)),
+              0,
+            )
+          : 0;
         return (
           <Pressable key={session.id} style={styles.card} onPress={() => setSelected(session)}>
             <View style={styles.cardTop}>
@@ -118,11 +124,14 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
             <Text style={styles.meta}>
               {userLabel(session.openedBy)} · {formatDateTime(session.openedAt)}
             </Text>
-            {used != null ? (
-              <Text style={styles.meta}>MP utilisée : {formatQuantity(used)}</Text>
+            {issued > 0.0001 ? (
+              <Text style={styles.meta}>MP : {formatQuantity(issued)}</Text>
             ) : null}
-            {flowed != null ? (
-              <Text style={styles.meta}>Écoulé : {formatQuantity(flowed)}</Text>
+            {remis > 0.0001 ? (
+              <Text style={styles.meta}>Remis : {formatQuantity(remis)}</Text>
+            ) : null}
+            {shipped > 0.0001 ? (
+              <Text style={styles.meta}>Écoulé : {formatQuantity(shipped)}</Text>
             ) : null}
           </Pressable>
         );
@@ -157,26 +166,25 @@ export function ProductionSessionsPanel({ companyId, dateFrom, dateTo, refreshKe
                   ? `${formatDateTime(selected.closedAt)} — ${userLabel(selected.closedBy)}`
                   : '—'}
               </Text>
+              {(selected.rawIssued ?? []).map((row) => (
+                <View key={`mp-${row.productId}`} style={styles.usageRow}>
+                  <Text style={styles.usageName}>{row.name}</Text>
+                  <Text style={styles.meta}>MP écoulée {formatQuantity(row.issuedQty)}</Text>
+                </View>
+              ))}
               {(selected.outflow ?? []).map((row) => (
                 <View key={`out-${row.productId}`} style={styles.usageRow}>
                   <Text style={styles.usageName}>{row.name}</Text>
                   <Text style={styles.meta}>
-                    Clients {formatQuantity(row.toClients)} · transferts {formatQuantity(row.toDepartments)}
+                    Remis {formatQuantity(row.produced)} · clients {formatQuantity(row.toClients)} ·
+                    transferts {formatQuantity(row.toDepartments)}
                     {(row.toDonations ?? 0) > 0.0001
                       ? ` · dons ${formatQuantity(row.toDonations)}`
                       : ''}{' '}
-                    · écoule {formatQuantity(row.produced)}
-                  </Text>
-                </View>
-              ))}
-              {(selected.usage ?? []).map((row) => (
-                <View key={row.productId} style={styles.usageRow}>
-                  <Text style={styles.usageName}>{row.name}</Text>
-                  <Text style={styles.meta}>
-                    Ouvert {formatQuantity(row.openedQty)}
-                    {selected.status === 'CLOSED'
-                      ? ` · utilisé ${formatQuantity(row.usedQty)} · restant ${formatQuantity(row.remainingQty)}`
-                      : ''}
+                    · écoulé{' '}
+                    {formatQuantity(
+                      row.shipped ?? row.toClients + row.toDepartments + (row.toDonations ?? 0),
+                    )}
                   </Text>
                 </View>
               ))}

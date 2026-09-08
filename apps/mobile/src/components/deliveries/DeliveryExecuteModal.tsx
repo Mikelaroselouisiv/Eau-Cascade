@@ -18,12 +18,13 @@ import {
   getDeliveryById,
   getDepartments,
   getSaleById,
+  listCarriers,
   updateDelivery,
 } from '@/services/api';
 import { formatApiError } from '@/services/api-errors';
 import { printReceipt } from '@/services/bluetooth-printer';
 import { buildSaleReceiptDataFromSale } from '@/services/receipt';
-import type { Delivery, Department } from '@/types/api';
+import type { CarrierRow, Delivery, Department } from '@/types/api';
 import { formatMoney } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
 import { departmentsForUser } from '@/utils/user-scope';
@@ -60,6 +61,8 @@ export function DeliveryExecuteModal({
   const [dropSaleItemId, setDropSaleItemId] = useState<number | ''>('');
   const [dropStopId, setDropStopId] = useState<number | ''>('');
   const [executorDraft, setExecutorDraft] = useState('');
+  const [dropCarrierId, setDropCarrierId] = useState<number | ''>('');
+  const [carriers, setCarriers] = useState<CarrierRow[]>([]);
   const [stockDeptId, setStockDeptId] = useState<number | ''>('');
   const [dropDeptChoices, setDropDeptChoices] = useState<Department[]>([]);
   const [saving, setSaving] = useState(false);
@@ -87,6 +90,7 @@ export function DeliveryExecuteModal({
         : '',
     );
     setExecutorDraft(d.executorName?.trim() || executorDefault);
+    setDropCarrierId(d.carrierId ?? '');
     const locked = lockDepartmentId ?? d.departmentId;
     const depts = deptChoices ?? dropDeptChoices;
     setStockDeptId(locked ?? depts[0]?.id ?? '');
@@ -136,6 +140,27 @@ export function DeliveryExecuteModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deliveryId, lockDepartmentId]);
 
+  useEffect(() => {
+    const home = detail != null && isHomeDelivery(detail);
+    const deptId =
+      lockDepartmentId ?? (typeof stockDeptId === 'number' ? stockDeptId : null);
+    if (!home || deptId == null) {
+      setCarriers([]);
+      return;
+    }
+    let cancelled = false;
+    void listCarriers(deptId)
+      .then((list) => {
+        if (!cancelled) setCarriers(list);
+      })
+      .catch(() => {
+        if (!cancelled) setCarriers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.id, detail?.fulfillmentType, lockDepartmentId, stockDeptId]);
+
   function guardExecute() {
     if (executeEnabled) return true;
     onDisabledAction?.();
@@ -178,8 +203,8 @@ export function DeliveryExecuteModal({
       );
       return;
     }
-    if (home && !executorDraft.trim()) {
-      setDetailError('Indiquez le livreur');
+    if (home && dropCarrierId === '') {
+      setDetailError('Choisissez le transporteur');
       return;
     }
     if (!markAll) {
@@ -198,7 +223,7 @@ export function DeliveryExecuteModal({
             stockDepartmentId: deptId,
             ...(home
               ? {
-                  executorName: executorDraft.trim(),
+                  carrierId: dropCarrierId === '' ? null : dropCarrierId,
                   stopId: dropStopId === '' ? undefined : dropStopId,
                 }
               : {}),
@@ -210,7 +235,7 @@ export function DeliveryExecuteModal({
             departmentId: deptId,
             ...(home
               ? {
-                  executorName: executorDraft.trim(),
+                  carrierId: dropCarrierId === '' ? null : dropCarrierId,
                   stopId: dropStopId === '' ? null : dropStopId,
                 }
               : { executorName: executorDraft.trim() || null }),
@@ -232,9 +257,10 @@ export function DeliveryExecuteModal({
     setDetailError(null);
     try {
       const updated = await updateDelivery(detail.id, {
-        executorName: executorDraft.trim() || null,
+        carrierId: dropCarrierId === '' ? null : dropCarrierId,
       });
       setDetail(updated);
+      setDropCarrierId(updated.carrierId ?? '');
       setExecutorDraft(updated.executorName?.trim() ?? '');
       onUpdated(updated);
     } catch (e) {
@@ -329,13 +355,44 @@ export function DeliveryExecuteModal({
                       editable={!saving}
                       onChangeText={setDropQty}
                     />
-                    <Text style={styles.meta}>Livreur</Text>
-                    <TextInput
-                      style={styles.executorInput}
-                      value={executorDraft}
-                      editable={!saving}
-                      onChangeText={setExecutorDraft}
-                    />
+                    {isHomeDelivery(detail) ? (
+                      <>
+                        <Text style={styles.meta}>Transporteur *</Text>
+                        {carriers.length ? (
+                          <View style={styles.chipWrap}>
+                            {carriers.map((c) => (
+                              <Pressable
+                                key={c.id}
+                                onPress={() => setDropCarrierId(c.id)}
+                                style={[
+                                  styles.deptChip,
+                                  dropCarrierId === c.id && styles.deptChipActive,
+                                ]}>
+                                <Text
+                                  style={[
+                                    styles.deptChipText,
+                                    dropCarrierId === c.id && styles.deptChipTextActive,
+                                  ]}>
+                                  {c.name}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        ) : (
+                          <Text style={styles.meta}>Aucun transporteur</Text>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.meta}>Livreur</Text>
+                        <TextInput
+                          style={styles.executorInput}
+                          value={executorDraft}
+                          editable={!saving}
+                          onChangeText={setExecutorDraft}
+                        />
+                      </>
+                    )}
                     {isHomeDelivery(detail) && (detail.sale?.deliveryStops?.length ?? 0) > 0 ? (
                       <>
                         <Text style={styles.meta}>Adresse</Text>
@@ -363,15 +420,32 @@ export function DeliveryExecuteModal({
                 ) : isHomeDelivery(detail) &&
                   (canChangeExecutor || detail.executorName?.trim()) ? (
                   <View style={styles.executorBlock}>
-                    <Text style={styles.meta}>Livreur</Text>
-                    <TextInput
-                      style={styles.executorInput}
-                      value={executorDraft}
-                      editable={
-                        !(Boolean(detail.executorName?.trim()) && !canChangeExecutor) && !saving
-                      }
-                      onChangeText={setExecutorDraft}
-                    />
+                    <Text style={styles.meta}>Transporteur</Text>
+                    {canChangeExecutor && carriers.length ? (
+                      <View style={styles.chipWrap}>
+                        {carriers.map((c) => (
+                          <Pressable
+                            key={c.id}
+                            onPress={() => setDropCarrierId(c.id)}
+                            style={[
+                              styles.deptChip,
+                              dropCarrierId === c.id && styles.deptChipActive,
+                            ]}>
+                            <Text
+                              style={[
+                                styles.deptChipText,
+                                dropCarrierId === c.id && styles.deptChipTextActive,
+                              ]}>
+                              {c.name}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    ) : (
+                      <Text style={styles.meta}>
+                        {detail.carrier?.name?.trim() || detail.executorName?.trim() || '—'}
+                      </Text>
+                    )}
                   </View>
                 ) : null}
               </View>
@@ -478,7 +552,7 @@ export function DeliveryExecuteModal({
                   style={[styles.secondaryBtn, saving && styles.disabled]}
                   disabled={saving}
                   onPress={() => void saveExecutorOnly()}>
-                  <Text style={styles.secondaryBtnText}>Enregistrer le nom</Text>
+                  <Text style={styles.secondaryBtnText}>Enregistrer</Text>
                 </Pressable>
               ) : null}
             </View>

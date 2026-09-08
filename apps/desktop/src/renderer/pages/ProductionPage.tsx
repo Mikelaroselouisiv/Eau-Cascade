@@ -22,6 +22,8 @@ import { getPosDeviceId, getPosDeviceName } from '../services/pos-device';
 import { departmentsForUser } from '../utils/user-scope';
 import { RegisterStockCountForm } from '../components/RegisterStockCountForm';
 import { ProductionOutflowSection } from '../components/ProductionOutflowSection';
+import { ProductionWorkersSection } from '../components/ProductionWorkersSection';
+import { CarriersSection } from '../components/CarriersSection';
 
 function errMsg(err: unknown, fallback: string) {
   if (axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object') {
@@ -56,6 +58,9 @@ export function ProductionPage() {
   const canTransfer = canPerm('transfers.manage');
   const canManageDeliveries = canPerm('deliveries.manage');
   const canPrintFiche = canPerm('deliveries.print');
+  const canManageWorkers = canPerm('workers.manage');
+  const canManageCarriers = canPerm('carriers.manage');
+  const [pane, setPane] = useState<'outflow' | 'workers' | 'carriers'>('outflow');
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -72,6 +77,7 @@ export function ProductionPage() {
   const [message, setMessage] = useState('');
   const [showClosedAlert, setShowClosedAlert] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
+  const [rawMaterials, setRawMaterials] = useState<Product[]>([]);
 
   const productionEnabled = session != null;
   const plants = useMemo(
@@ -133,8 +139,14 @@ export function ProductionPage() {
     }
     void loadSession(departmentId).catch((e) => setMessage(errMsg(e, 'Chargement impossible.')));
     void getProducts(departmentId)
-      .then((rows) => setProducts(rows.filter((p) => p.nature !== 'RAW_MATERIAL')))
-      .catch(() => setProducts([]));
+      .then((rows) => {
+        setProducts(rows.filter((p) => p.nature !== 'RAW_MATERIAL'));
+        setRawMaterials(rows.filter((p) => p.nature === 'RAW_MATERIAL'));
+      })
+      .catch(() => {
+        setProducts([]);
+        setRawMaterials([]);
+      });
   }, [departmentId]);
 
   async function openPanel(mode: 'open' | 'close') {
@@ -356,20 +368,64 @@ export function ProductionPage() {
       ) : null}
 
       {departmentId !== '' && currentPlant ? (
-        <ProductionOutflowSection
-          departmentId={departmentId}
-          companyId={companyId === '' ? undefined : companyId}
-          productionEnabled={productionEnabled}
-          products={products}
-          scopedDepts={allDepartments}
-          canTransfer={canTransfer}
-          canManageDeliveries={canManageDeliveries}
-          canPrint={canPrintFiche}
-          listCompanyOutgoing={user?.role === 'MANAGER' || user?.role === 'ADMIN'}
-          executorDefault={user?.fullName?.trim() || user?.phone || ''}
-          onRefuseClosed={refuseClosedProduction}
-          onMessage={setMessage}
-        />
+        <>
+          <div className="pos-sale-mode" style={{ marginBottom: 12 }} role="tablist">
+            <button
+              type="button"
+              className={`pos-sale-mode-btn${pane === 'outflow' ? ' active' : ''}`}
+              onClick={() => setPane('outflow')}
+            >
+              Écoulement
+            </button>
+            <button
+              type="button"
+              className={`pos-sale-mode-btn${pane === 'workers' ? ' active' : ''}`}
+              onClick={() => setPane('workers')}
+            >
+              Ouvriers
+            </button>
+            <button
+              type="button"
+              className={`pos-sale-mode-btn${pane === 'carriers' ? ' active' : ''}`}
+              onClick={() => setPane('carriers')}
+            >
+              Transporteurs
+            </button>
+          </div>
+          {pane === 'workers' ? (
+            <ProductionWorkersSection
+              departmentId={departmentId}
+              productionEnabled={productionEnabled}
+              finishedGoods={products}
+              rawMaterials={rawMaterials}
+              canManageWorkers={canManageWorkers}
+              onRefuseClosed={refuseClosedProduction}
+              onMessage={setMessage}
+            />
+          ) : pane === 'carriers' ? (
+            <CarriersSection
+              departmentId={departmentId}
+              finishedGoods={products}
+              canManage={canManageCarriers}
+              onMessage={setMessage}
+            />
+          ) : (
+            <ProductionOutflowSection
+              departmentId={departmentId}
+              companyId={companyId === '' ? undefined : companyId}
+              productionEnabled={productionEnabled}
+              products={products}
+              scopedDepts={allDepartments}
+              canTransfer={canTransfer}
+              canManageDeliveries={canManageDeliveries}
+              canPrint={canPrintFiche}
+              listCompanyOutgoing={user?.role === 'MANAGER' || user?.role === 'ADMIN'}
+              executorDefault={user?.fullName?.trim() || user?.phone || ''}
+              onRefuseClosed={refuseClosedProduction}
+              onMessage={setMessage}
+            />
+          )}
+        </>
       ) : null}
 
       {showClosedAlert ? (

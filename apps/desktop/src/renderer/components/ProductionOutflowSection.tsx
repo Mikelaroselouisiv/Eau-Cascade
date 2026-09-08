@@ -3,10 +3,11 @@ import axios from 'axios';
 import {
   createInternalTransfer,
   getDeliveryById,
+  listCarriers,
   listDeliveries,
   listInternalTransfers,
 } from '../services/api';
-import type { Delivery, Department, InternalTransferRow, Product } from '../types/api';
+import type { CarrierRow, Delivery, Department, InternalTransferRow, Product } from '../types/api';
 import { formatDateTimeShort } from '../utils/datetime';
 import { DeliveryFicheCard } from './DeliveryFicheCard';
 import { DeliveryFicheModal } from './DeliveryFicheModal';
@@ -64,6 +65,8 @@ export function ProductionOutflowSection({
   const [fiches, setFiches] = useState<Delivery[]>([]);
   const [selected, setSelected] = useState<Delivery | null>(null);
   const [toDepartmentId, setToDepartmentId] = useState<number | ''>('');
+  const [transferCarrierId, setTransferCarrierId] = useState<number | ''>('');
+  const [carriers, setCarriers] = useState<CarrierRow[]>([]);
   const [transferQty, setTransferQty] = useState<Record<number, string>>({});
   const [outgoing, setOutgoing] = useState<InternalTransferRow[]>([]);
   const [busy, setBusy] = useState(false);
@@ -82,6 +85,9 @@ export function ProductionOutflowSection({
       void listInternalTransfers(outgoingParams())
         .then(setOutgoing)
         .catch(() => setOutgoing([]));
+      void listCarriers(departmentId)
+        .then(setCarriers)
+        .catch(() => setCarriers([]));
       return;
     }
     void (dest === 'HOME'
@@ -122,6 +128,10 @@ export function ProductionOutflowSection({
       return;
     }
     if (toDepartmentId === '') return;
+    if (transferCarrierId === '') {
+      onMessage('Choisissez le transporteur');
+      return;
+    }
     const items = products
       .map((p) => ({ productId: p.id, quantity: Number(transferQty[p.id] ?? 0) }))
       .filter((i) => i.quantity > 0);
@@ -134,6 +144,7 @@ export function ProductionOutflowSection({
       await createInternalTransfer({
         fromDepartmentId: departmentId,
         toDepartmentId,
+        carrierId: transferCarrierId,
         items,
       });
       setTransferQty({});
@@ -183,7 +194,7 @@ export function ProductionOutflowSection({
         {dest === 'TRANSFER' && canTransfer ? (
           <>
             <label>
-              Destinataire
+              Destination
               <select
                 value={toDepartmentId}
                 onChange={(e) => setToDepartmentId(e.target.value ? Number(e.target.value) : '')}
@@ -197,6 +208,20 @@ export function ProductionOutflowSection({
                       {d.kind === 'PRODUCTION_DISTRIBUTION' ? ' · production' : ''}
                     </option>
                   ))}
+              </select>
+            </label>
+            <label>
+              Transporteur *
+              <select
+                value={transferCarrierId === '' ? '' : String(transferCarrierId)}
+                onChange={(e) => setTransferCarrierId(e.target.value ? Number(e.target.value) : '')}
+              >
+                <option value="">—</option>
+                {carriers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
               </select>
             </label>
             {products.map((p) => (
@@ -214,7 +239,7 @@ export function ProductionOutflowSection({
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || toDepartmentId === ''}
+              disabled={busy || toDepartmentId === '' || transferCarrierId === ''}
               onClick={() => void sendTransfer()}
             >
               Envoyer
@@ -223,8 +248,9 @@ export function ProductionOutflowSection({
               <thead>
                 <tr>
                   <th>Date</th>
-                  {listCompanyOutgoing ? <th>Expéditeur</th> : null}
-                  <th>Destinataire</th>
+                  <th>Expéditeur</th>
+                  <th>Destination</th>
+                  <th>Transporteur</th>
                   <th>Statut</th>
                 </tr>
               </thead>
@@ -232,8 +258,9 @@ export function ProductionOutflowSection({
                 {outgoing.map((t) => (
                   <tr key={t.id}>
                     <td>{formatDateTimeShort(t.createdAt)}</td>
-                    {listCompanyOutgoing ? <td>{t.fromDepartment.name}</td> : null}
+                    <td>{t.fromDepartment.name}</td>
                     <td>{t.toDepartment.name}</td>
+                    <td>{t.carrier?.name ?? '—'}</td>
                     <td>
                       {t.status === 'PENDING'
                         ? 'En attente'
@@ -268,7 +295,7 @@ export function ProductionOutflowSection({
           lockDepartmentId={departmentId}
           canManage={canManageDeliveries}
           canPrint={canPrint}
-          executeEnabled={productionEnabled}
+          executeEnabled={productionEnabled || dest === 'HOME'}
           executorDefault={executorDefault}
           onDisabledAction={onRefuseClosed}
           onClose={() => setSelected(null)}

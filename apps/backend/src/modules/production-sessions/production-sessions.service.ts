@@ -42,6 +42,9 @@ const SESSION_INCLUDE = {
     include: { product: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'asc' as const },
   },
+  workerIssues: {
+    include: { product: { select: { id: true, name: true } } },
+  },
 } as const;
 
 @Injectable()
@@ -152,6 +155,7 @@ export class ProductionSessionsService {
       internalTransferId?: number | null;
       donationId?: number | null;
       deliveryId?: number | null;
+      workerOutputId?: number | null;
     },
   ) {
     const qty = Number(data.quantity);
@@ -166,6 +170,7 @@ export class ProductionSessionsService {
         internalTransferId: data.internalTransferId ?? null,
         donationId: data.donationId ?? null,
         deliveryId: data.deliveryId ?? null,
+        workerOutputId: data.workerOutputId ?? null,
         createdById: data.userId ?? null,
       },
     });
@@ -216,19 +221,29 @@ export class ProductionSessionsService {
   }) {
     const byProduct = new Map<
       number,
-      { productId: number; name: string; toClients: number; toDepartments: number; toDonations: number; received: number }
+      {
+        productId: number;
+        name: string;
+        produced: number;
+        toClients: number;
+        toDepartments: number;
+        toDonations: number;
+        received: number;
+      }
     >();
     for (const flow of session.flows ?? []) {
       const row = byProduct.get(flow.product.id) ?? {
         productId: flow.product.id,
         name: flow.product.name,
+        produced: 0,
         toClients: 0,
         toDepartments: 0,
         toDonations: 0,
         received: 0,
       };
       const qty = Number(flow.quantity);
-      if (flow.kind === ProductionFlowKind.FLOW_CLIENT) row.toClients += qty;
+      if (flow.kind === ProductionFlowKind.PRODUCED) row.produced += qty;
+      else if (flow.kind === ProductionFlowKind.FLOW_CLIENT) row.toClients += qty;
       else if (flow.kind === ProductionFlowKind.FLOW_TRANSFER_OUT) row.toDepartments += qty;
       else if (flow.kind === ProductionFlowKind.FLOW_DONATION) row.toDonations += qty;
       else if (flow.kind === ProductionFlowKind.TRANSFER_IN) row.received += qty;
@@ -237,18 +252,44 @@ export class ProductionSessionsService {
     return [...byProduct.values()]
       .map((row) => ({
         ...row,
-        produced: row.toClients + row.toDepartments + row.toDonations,
+        shipped: row.toClients + row.toDepartments + row.toDonations,
       }))
-      .filter((row) => row.produced > 0.0001 || row.received > 0.0001)
+      .filter(
+        (row) =>
+          row.produced > 0.0001 || row.shipped > 0.0001 || row.received > 0.0001,
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+  }
+
+  private rawIssuedFromWorkers(session: {
+    workerIssues?: Array<{
+      quantity: Prisma.Decimal | number;
+      product: { id: number; name: string };
+    }>;
+  }) {
+    const byProduct = new Map<number, { productId: number; name: string; issuedQty: number }>();
+    for (const row of session.workerIssues ?? []) {
+      const cur = byProduct.get(row.product.id) ?? {
+        productId: row.product.id,
+        name: row.product.name,
+        issuedQty: 0,
+      };
+      cur.issuedQty += Number(row.quantity);
+      byProduct.set(row.product.id, cur);
+    }
+    return [...byProduct.values()]
+      .filter((r) => r.issuedQty > 0.0001)
       .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
   }
 
   private withUsage<T extends Parameters<ProductionSessionsService['usageFromInventory']>[0] &
-    Parameters<ProductionSessionsService['outflowFromFlows']>[0]>(session: T) {
+    Parameters<ProductionSessionsService['outflowFromFlows']>[0] &
+    Parameters<ProductionSessionsService['rawIssuedFromWorkers']>[0]>(session: T) {
     return {
       ...session,
       usage: this.usageFromInventory(session),
       outflow: this.outflowFromFlows(session),
+      rawIssued: this.rawIssuedFromWorkers(session),
     };
   }
 

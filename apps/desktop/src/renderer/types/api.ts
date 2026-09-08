@@ -508,6 +508,8 @@ export interface DeliveryDrop {
   quantity: number | string;
   departmentId: number;
   executorName?: string | null;
+  carrierId?: number | null;
+  carrier?: { id: number; name: string; phone?: string; departmentId?: number } | null;
   stopId?: number | null;
   createdAt: string;
   department?: { id: number; name: string } | null;
@@ -542,6 +544,8 @@ export interface Delivery {
   status: DeliveryStatus;
   note?: string | null;
   executorName?: string | null;
+  carrierId?: number | null;
+  carrier?: { id: number; name: string; phone?: string; departmentId?: number } | null;
   deliveredAt?: string | null;
   createdAt: string;
   company?: { id: number; name: string } | null;
@@ -1126,13 +1130,95 @@ export interface ProductionSessionDetail {
   outflow?: Array<{
     productId: number;
     name: string;
+    produced: number;
     toClients: number;
     toDepartments: number;
     toDonations: number;
     received: number;
-    produced: number;
+    shipped?: number;
   }>;
   flows?: ProductionFlowRow[];
+  rawIssued?: Array<{
+    productId: number;
+    name: string;
+    issuedQty: number;
+  }>;
+}
+
+export interface ProductionWorkerRow {
+  id: number;
+  uuid: string;
+  companyId: number;
+  departmentId: number;
+  name: string;
+  phone: string;
+  payrollCoefficient: number;
+  startedAt: string;
+  isActive: boolean;
+  department?: { id: number; name: string; kind?: DepartmentKind };
+  sessionIssuedQty?: number;
+  sessionQuantity?: number;
+  sessionPayroll?: number;
+}
+
+export interface ProductionWorkerMovementRow {
+  id: number;
+  workerId: number;
+  departmentId: number;
+  productId: number;
+  quantity: number;
+  payrollAmount?: number;
+  productionSessionId?: number | null;
+  createdAt: string;
+  worker: { id: number; name: string; phone: string; payrollCoefficient: number | string };
+  product: { id: number; name: string; nature?: string };
+  createdBy?: UserAttribution | null;
+}
+
+export interface ProductionWorkerFiche {
+  id: number;
+  name: string;
+  phone: string;
+  payrollCoefficient: number;
+  startedAt: string;
+  isActive: boolean;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  issuedQty: number;
+  finishedQty: number;
+  payrollAmount: number;
+  issuedByProduct: Array<{ productId: number; name: string; quantity: number }>;
+  finishedByProduct: Array<{ productId: number; name: string; quantity: number }>;
+  issues: ProductionWorkerMovementRow[];
+  outputs: ProductionWorkerMovementRow[];
+}
+
+export interface CarrierRateRow {
+  productId: number;
+  name: string;
+  coefficient: number;
+}
+
+export interface CarrierRow {
+  id: number;
+  uuid: string;
+  companyId: number;
+  departmentId: number;
+  name: string;
+  phone: string;
+  startedAt: string;
+  isActive: boolean;
+  rates: CarrierRateRow[];
+  deliveredQty?: number;
+  payrollAmount?: number;
+}
+
+export interface CarrierFiche extends CarrierRow {
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  deliveredQty: number;
+  payrollAmount: number;
+  deliveredByProduct: Array<{ productId: number; name: string; quantity: number; payrollAmount: number }>;
 }
 
 export interface ProductionSessionContext {
@@ -1166,5 +1252,7 @@ export interface InternalTransferRow {
   toDepartment: { id: number; name: string; kind?: DepartmentKind };
   createdBy?: UserAttribution | null;
   confirmedBy?: UserAttribution | null;
+  carrierId?: number | null;
+  carrier?: { id: number; name: string; phone?: string; departmentId?: number } | null;
   items: InternalTransferItemRow[];
 }

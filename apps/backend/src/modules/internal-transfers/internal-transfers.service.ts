@@ -24,6 +24,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { ProductionSessionsService } from '../production-sessions/production-sessions.service';
+import { CarriersService } from '../carriers/carriers.service';
 import type { CreateInternalTransferDto } from './dto/internal-transfer.dto';
 
 const TRANSFER_INCLUDE = {
@@ -31,6 +32,7 @@ const TRANSFER_INCLUDE = {
   toDepartment: { select: { id: true, name: true, kind: true, companyId: true } },
   createdBy: { select: USER_ATTRIBUTION_SELECT },
   confirmedBy: { select: USER_ATTRIBUTION_SELECT },
+  carrier: { select: { id: true, name: true, phone: true, departmentId: true } },
   items: {
     include: { product: { select: { id: true, name: true, sku: true } } },
     orderBy: { id: 'asc' as const },
@@ -51,6 +53,7 @@ export class InternalTransfersService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly productionSessions: ProductionSessionsService,
+    private readonly carriersService: CarriersService,
   ) {}
 
   async list(
@@ -205,6 +208,11 @@ export class InternalTransfersService {
     const destIsPlant = isProductionDepartment(toDept.kind);
     const created = await this.prisma.$transaction(async (tx) => {
       const session = await this.productionSessions.requireOpenSessionTx(tx, dto.fromDepartmentId);
+      const carrier = await this.carriersService.requireForHomeDrop(tx, {
+        carrierId: dto.carrierId,
+        departmentId: dto.fromDepartmentId,
+        companyId: fromDept.companyId,
+      });
 
       const row = await tx.internalTransfer.create({
         data: {
@@ -213,6 +221,7 @@ export class InternalTransfersService {
           toDepartmentId: dto.toDepartmentId,
           note: dto.note?.trim() || null,
           createdById: user.id,
+          carrierId: carrier.id,
           status: destIsPlant ? InternalTransferStatus.CONFIRMED : InternalTransferStatus.PENDING,
           ...(destIsPlant
             ? { confirmedById: user.id, confirmedAt: new Date() }
@@ -237,6 +246,14 @@ export class InternalTransfersService {
           userId: user.id,
           productionSessionId: session.id,
           internalTransferId: row.id,
+        });
+        await this.carriersService.recordTripTx(tx, {
+          carrierId: carrier.id,
+          departmentId: dto.fromDepartmentId,
+          internalTransferId: row.id,
+          productId: item.productId,
+          quantity: qty,
+          userId: user.id,
         });
         if (destIsPlant) {
           const destProductId = await resolveProductInDepartment(tx, byId.get(item.productId)!, dto.toDepartmentId);

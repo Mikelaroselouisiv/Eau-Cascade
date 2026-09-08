@@ -1116,6 +1116,8 @@ function EditProductModal({
   );
   const [families, setFamilies] = useState<ProductFamily[]>([]);
 
+  const showRecipe = isService;
+
   const mpChoices = useMemo(
     () =>
       products
@@ -1136,7 +1138,7 @@ function EditProductModal({
   );
 
   useEffect(() => {
-    if (!isService) return;
+    if (!showRecipe) return;
     setRecipeMsg('');
     void getRecipeByProduct(product.id)
       .then((r) => {
@@ -1152,7 +1154,7 @@ function EditProductModal({
         }
       })
       .catch(() => setRecipeLines([{ componentProductId: '', qty: '' }]));
-  }, [product.id, isService]);
+  }, [product.id, showRecipe]);
 
   useEffect(() => {
     if (!companyId) return;
@@ -1478,7 +1480,7 @@ function EditProductModal({
             Suivre le stock
           </label>
           ) : null}
-          {isService ? (
+          {showRecipe ? (
             <div className="volume-tiers-block" style={{ gridColumn: '1 / -1' }}>
               {recipeLines.map((row, idx) => (
                 <div key={idx} className="volume-tier-row">

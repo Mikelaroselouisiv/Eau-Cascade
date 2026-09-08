@@ -10,14 +10,24 @@ type Props = {
   onSelect: (session: ProductionSessionDetail) => void;
 };
 
-function usedTotal(session: ProductionSessionDetail) {
-  if (session.status !== 'CLOSED' || !session.usage?.length) return null;
-  return session.usage.reduce((sum, row) => sum + row.usedQty, 0);
+function issuedTotal(session: ProductionSessionDetail) {
+  if (!session.rawIssued?.length) return null;
+  const sum = session.rawIssued.reduce((acc, row) => acc + row.issuedQty, 0);
+  return sum > 0.0001 ? sum : null;
 }
 
-function outflowTotal(session: ProductionSessionDetail) {
+function remisTotal(session: ProductionSessionDetail) {
   if (!session.outflow?.length) return null;
   const sum = session.outflow.reduce((acc, row) => acc + row.produced, 0);
+  return sum > 0.0001 ? sum : null;
+}
+
+function shippedTotal(session: ProductionSessionDetail) {
+  if (!session.outflow?.length) return null;
+  const sum = session.outflow.reduce(
+    (acc, row) => acc + (row.shipped ?? row.toClients + row.toDepartments + (row.toDonations ?? 0)),
+    0,
+  );
   return sum > 0.0001 ? sum : null;
 }
 
@@ -146,23 +156,25 @@ export function ProductionSessionsPanel({ companyId, onSelect }: Props) {
               <th>Ouverture</th>
               <th>Fermeture</th>
               <th>Statut</th>
+              <th>MP</th>
+              <th>Remis</th>
               <th>Écoulé</th>
-              <th>MP utilisée</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7}>…</td>
+                <td colSpan={8}>…</td>
               </tr>
             ) : sessions.length === 0 ? (
               <tr>
-                <td colSpan={7}>Aucune session pour ces filtres.</td>
+                <td colSpan={8}>Aucune session pour ces filtres.</td>
               </tr>
             ) : (
               sessions.map((s) => {
-                const used = usedTotal(s);
-                const flowed = outflowTotal(s);
+                const issued = issuedTotal(s);
+                const remis = remisTotal(s);
+                const shipped = shippedTotal(s);
                 return (
                   <tr
                     key={s.id}
@@ -183,8 +195,9 @@ export function ProductionSessionsPanel({ companyId, onSelect }: Props) {
                     <td>{formatDateTime(s.openedAt)}</td>
                     <td>{s.closedAt ? formatDateTime(s.closedAt) : '—'}</td>
                     <td>{s.status === 'OPEN' ? 'Ouverte' : 'Fermée'}</td>
-                    <td className="journal-amt">{flowed != null ? formatQuantity(flowed) : '—'}</td>
-                    <td className="journal-amt">{used != null ? formatQuantity(used) : '—'}</td>
+                    <td className="journal-amt">{issued != null ? formatQuantity(issued) : '—'}</td>
+                    <td className="journal-amt">{remis != null ? formatQuantity(remis) : '—'}</td>
+                    <td className="journal-amt">{shipped != null ? formatQuantity(shipped) : '—'}</td>
                   </tr>
                 );
               })

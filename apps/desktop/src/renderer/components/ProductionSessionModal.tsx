@@ -19,9 +19,9 @@ const FLOW_LABEL: Record<ProductionFlowRow['kind'], string> = {
 export function ProductionSessionModal({ session, onClose }: Props) {
   if (!session) return null;
 
-  const usage = session.usage ?? [];
   const outflow = session.outflow ?? [];
   const flows = session.flows ?? [];
+  const rawIssued = session.rawIssued ?? [];
   const closed = session.status === 'CLOSED';
 
   return (
@@ -59,14 +59,43 @@ export function ProductionSessionModal({ session, onClose }: Props) {
           </dd>
         </dl>
 
-        {outflow.length > 0 ? (
+        {rawIssued.length > 0 ? (
           <>
-            <h3 style={{ fontSize: '1rem', margin: '0 0 0.5rem' }}>Écoulement</h3>
+            <h3 style={{ fontSize: '1rem', margin: '0 0 0.5rem' }}>Matières premières</h3>
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
                     <th>Produit</th>
+                    <th>Écoulée</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rawIssued.map((row) => (
+                    <tr key={row.productId}>
+                      <td>{row.name}</td>
+                      <td className="journal-amt">{formatQuantity(row.issuedQty)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="dept-hint" style={{ marginTop: 0 }}>
+            Aucune matière première écoulée.
+          </p>
+        )}
+
+        {outflow.length > 0 ? (
+          <>
+            <h3 style={{ fontSize: '1rem', margin: '0.75rem 0 0.5rem' }}>Produits finis</h3>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Produit</th>
+                    <th>Remis</th>
                     <th>Clients</th>
                     <th>Transferts</th>
                     <th>Dons</th>
@@ -77,10 +106,13 @@ export function ProductionSessionModal({ session, onClose }: Props) {
                   {outflow.map((row) => (
                     <tr key={row.productId}>
                       <td>{row.name}</td>
+                      <td className="journal-amt">{formatQuantity(row.produced)}</td>
                       <td className="journal-amt">{formatQuantity(row.toClients)}</td>
                       <td className="journal-amt">{formatQuantity(row.toDepartments)}</td>
                       <td className="journal-amt">{formatQuantity(row.toDonations ?? 0)}</td>
-                      <td className="journal-amt">{formatQuantity(row.produced)}</td>
+                      <td className="journal-amt">
+                        {formatQuantity(row.shipped ?? row.toClients + row.toDepartments + (row.toDonations ?? 0))}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -88,46 +120,6 @@ export function ProductionSessionModal({ session, onClose }: Props) {
             </div>
           </>
         ) : null}
-
-        <h3 style={{ fontSize: '1rem', margin: outflow.length ? '0.75rem 0 0.5rem' : '0 0 0.5rem' }}>
-          Matières premières
-        </h3>
-        {usage.length === 0 ? (
-          <p className="dept-hint" style={{ marginTop: 0 }}>
-            Aucune matière première.
-          </p>
-        ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Produit</th>
-                  <th>Ouvert</th>
-                  {closed ? (
-                    <>
-                      <th>Utilisé</th>
-                      <th>Restant</th>
-                    </>
-                  ) : null}
-                </tr>
-              </thead>
-              <tbody>
-                {usage.map((row) => (
-                  <tr key={row.productId}>
-                    <td>{row.name}</td>
-                    <td className="journal-amt">{formatQuantity(row.openedQty)}</td>
-                    {closed ? (
-                      <>
-                        <td className="journal-amt">{formatQuantity(row.usedQty)}</td>
-                        <td className="journal-amt">{formatQuantity(row.remainingQty)}</td>
-                      </>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
 
         {closed && flows.length > 0 ? (
           <>

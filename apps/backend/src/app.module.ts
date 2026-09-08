@@ -22,6 +22,8 @@ import { ProductFamiliesModule } from './modules/product-families/product-famili
 import { ReportsModule } from './modules/reports/reports.module';
 import { RegisterSessionsModule } from './modules/register-sessions/register-sessions.module';
 import { ProductionSessionsModule } from './modules/production-sessions/production-sessions.module';
+import { ProductionWorkersModule } from './modules/production-workers/production-workers.module';
+import { CarriersModule } from './modules/carriers/carriers.module';
 import { InternalTransfersModule } from './modules/internal-transfers/internal-transfers.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { SalesModule } from './modules/sales/sales.module';
@@ -55,6 +57,8 @@ import { PrismaModule } from './prisma/prisma.module';
     ReportsModule,
     RegisterSessionsModule,
     ProductionSessionsModule,
+    ProductionWorkersModule,
+    CarriersModule,
     InternalTransfersModule,
     DepartmentsModule,
     StoresModule,

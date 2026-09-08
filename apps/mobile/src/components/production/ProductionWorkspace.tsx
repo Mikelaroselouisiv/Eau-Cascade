@@ -16,6 +16,8 @@ import { makeRefreshControl } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
 import { DeliveryExecuteModal } from '@/components/deliveries/DeliveryExecuteModal';
 import { DeliveryFicheCard } from '@/components/deliveries/DeliveryFicheCard';
+import { ProductionWorkersPanel } from '@/components/production/ProductionWorkersPanel';
+import { CarriersPanel } from '@/components/production/CarriersPanel';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
@@ -28,6 +30,7 @@ import {
   getProductionCountSheet,
   getProductionSessionContext,
   getProducts,
+  listCarriers,
   listDeliveries,
   listInternalTransfers,
   openProductionSession,
@@ -35,6 +38,7 @@ import {
 import { formatApiError } from '@/services/api-errors';
 import { getPosDeviceId, getPosDeviceName } from '@/services/pos-device';
 import type {
+  CarrierRow,
   Delivery,
   Department,
   InternalTransferRow,
@@ -78,6 +82,8 @@ export function ProductionWorkspace() {
   const canManageDeliveries = canPerm('deliveries.manage');
   const listCompanyOutgoing = user?.role === 'MANAGER' || user?.role === 'ADMIN';
   const canPrintFiche = canPerm('deliveries.print');
+  const canManageWorkers = canPerm('workers.manage');
+  const canManageCarriers = canPerm('carriers.manage');
   const canChangeExecutor = canEditDeliveryExecutor(user?.role);
 
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -95,10 +101,14 @@ export function ProductionWorkspace() {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
+  const [rawMaterials, setRawMaterials] = useState<Product[]>([]);
   const [toDepartmentId, setToDepartmentId] = useState<number | ''>('');
+  const [transferCarrierId, setTransferCarrierId] = useState<number | ''>('');
+  const [carriers, setCarriers] = useState<CarrierRow[]>([]);
   const [transferQty, setTransferQty] = useState<Record<number, string>>({});
   const [outgoing, setOutgoing] = useState<InternalTransferRow[]>([]);
   const [dest, setDest] = useState<Dest>(canManageDeliveries ? 'ON_SITE' : 'TRANSFER');
+  const [pane, setPane] = useState<'outflow' | 'workers' | 'carriers'>('outflow');
   const [fiches, setFiches] = useState<Delivery[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [pullRefreshing, setPullRefreshing] = useState(false);
@@ -202,11 +212,20 @@ export function ProductionWorkspace() {
     if (departmentId === '') return;
     void refresh(departmentId).catch((e) => setStatus(formatApiError(e, 'Chargement impossible')));
     void getProducts(departmentId)
-      .then((rows) => setProducts(rows.filter((p) => p.nature !== 'RAW_MATERIAL')))
-      .catch(() => setProducts([]));
+      .then((rows) => {
+        setProducts(rows.filter((p) => p.nature !== 'RAW_MATERIAL'));
+        setRawMaterials(rows.filter((p) => p.nature === 'RAW_MATERIAL'));
+      })
+      .catch(() => {
+        setProducts([]);
+        setRawMaterials([]);
+      });
     void listInternalTransfers(outgoingQuery(departmentId))
       .then(setOutgoing)
       .catch(() => setOutgoing([]));
+    void listCarriers(departmentId)
+      .then(setCarriers)
+      .catch(() => setCarriers([]));
   }, [departmentId, refresh, outgoingQuery]);
 
   useEffect(() => {
@@ -313,6 +332,10 @@ export function ProductionWorkspace() {
       return;
     }
     if (departmentId === '' || toDepartmentId === '') return;
+    if (transferCarrierId === '') {
+      setStatus('Choisissez le transporteur');
+      return;
+    }
     const items = products
       .map((p) => ({ productId: p.id, quantity: Number(transferQty[p.id] ?? 0) }))
       .filter((i) => i.quantity > 0);
@@ -325,6 +348,7 @@ export function ProductionWorkspace() {
       await createInternalTransfer({
         fromDepartmentId: departmentId,
         toDepartmentId,
+        carrierId: transferCarrierId,
         items,
       });
       setTransferQty({});
@@ -398,8 +422,54 @@ export function ProductionWorkspace() {
           ) : null}
         </View>
 
-        {departmentId !== '' && (canTransfer || canManageDeliveries) ? (
+        {departmentId !== '' ? (
           <View style={styles.card}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+              <Pressable
+                onPress={() => setPane('outflow')}
+                style={[styles.chip, pane === 'outflow' && styles.chipActive]}>
+                <Text style={[styles.chipText, pane === 'outflow' && styles.chipTextActive]}>
+                  Écoulement
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setPane('workers')}
+                style={[styles.chip, pane === 'workers' && styles.chipActive]}>
+                <Text style={[styles.chipText, pane === 'workers' && styles.chipTextActive]}>
+                  Ouvriers
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setPane('carriers')}
+                style={[styles.chip, pane === 'carriers' && styles.chipActive]}>
+                <Text style={[styles.chipText, pane === 'carriers' && styles.chipTextActive]}>
+                  Transporteurs
+                </Text>
+              </Pressable>
+            </ScrollView>
+            {pane === 'workers' ? (
+              <ProductionWorkersPanel
+                departmentId={departmentId}
+                productionEnabled={productionEnabled}
+                finishedGoods={products}
+                rawMaterials={rawMaterials}
+                canManageWorkers={canManageWorkers}
+                styles={styles}
+                onRefuseClosed={() =>
+                  Alert.alert('Production fermée', 'Ouvrez la production d’abord.')
+                }
+                onMessage={setStatus}
+              />
+            ) : pane === 'carriers' ? (
+              <CarriersPanel
+                departmentId={departmentId}
+                finishedGoods={products}
+                canManage={canManageCarriers}
+                styles={styles}
+                onMessage={setStatus}
+              />
+            ) : (
+              <>
             <Text style={styles.cardTitle}>Écoulement</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
               {canManageDeliveries ? (
@@ -433,6 +503,7 @@ export function ProductionWorkspace() {
 
             {dest === 'TRANSFER' && canTransfer ? (
               <>
+                <Text style={styles.meta}>Destination</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
                   {scopedDepts
                     .filter((d) => d.id !== departmentId)
@@ -447,6 +518,27 @@ export function ProductionWorkspace() {
                       </Pressable>
                     ))}
                 </ScrollView>
+                <Text style={styles.meta}>Transporteur *</Text>
+                {carriers.length ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+                    {carriers.map((c) => (
+                      <Pressable
+                        key={c.id}
+                        onPress={() => setTransferCarrierId(c.id)}
+                        style={[styles.chip, transferCarrierId === c.id && styles.chipActive]}>
+                        <Text
+                          style={[
+                            styles.chipText,
+                            transferCarrierId === c.id && styles.chipTextActive,
+                          ]}>
+                          {c.name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                ) : (
+                  <Text style={styles.meta}>Aucun transporteur</Text>
+                )}
                 {products.map((p) => (
                   <View key={p.id} style={styles.qtyRow}>
                     <Text style={styles.qtyName}>{p.name}</Text>
@@ -464,8 +556,8 @@ export function ProductionWorkspace() {
                 </Pressable>
                 {outgoing.map((t) => (
                   <Text key={t.id} style={styles.meta}>
-                    {listCompanyOutgoing ? `${t.fromDepartment.name} → ` : ''}
-                    {t.toDepartment.name} ·{' '}
+                    {t.fromDepartment.name} → {t.toDepartment.name} ·{' '}
+                    {t.carrier?.name ? `${t.carrier.name} · ` : ''}
                     {t.status === 'PENDING'
                       ? 'En attente'
                       : t.status === 'CONFIRMED'
@@ -475,10 +567,12 @@ export function ProductionWorkspace() {
                 ))}
               </>
             ) : null}
+              </>
+            )}
           </View>
         ) : null}
 
-        {departmentId !== '' && dest !== 'TRANSFER' && canManageDeliveries ? (
+        {departmentId !== '' && pane === 'outflow' && dest !== 'TRANSFER' && canManageDeliveries ? (
           fiches.length === 0 ? (
             <Text style={styles.meta}>Aucune fiche</Text>
           ) : (
@@ -501,7 +595,7 @@ export function ProductionWorkspace() {
         canPrint={canPrintFiche}
         canChangeExecutor={canChangeExecutor}
         lockDepartmentId={departmentId === '' ? undefined : departmentId}
-        executeEnabled={productionEnabled}
+        executeEnabled={productionEnabled || dest === 'HOME'}
         executorDefault={user?.fullName?.trim() || user?.phone || ''}
         onDisabledAction={() =>
           Alert.alert('Production fermée', 'Ouvrez la production d’abord.')

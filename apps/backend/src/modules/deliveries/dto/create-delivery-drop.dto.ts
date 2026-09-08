@@ -1,5 +1,11 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { IsInt, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+
+function optionalPositiveInt(value: unknown): number | undefined {
+  if (value == null || value === '') return undefined;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 ? n : undefined;
+}
 
 export class CreateDeliveryDropDto {
   @Type(() => Number)
@@ -21,6 +27,12 @@ export class CreateDeliveryDropDto {
   @IsString()
   @MaxLength(120)
   executorName?: string | null;
+
+  @IsOptional()
+  @Transform(({ value }) => optionalPositiveInt(value))
+  @IsInt()
+  @Min(1)
+  carrierId?: number | null;
 
   /** Arrêt à domicile (adresse) concerné par cette ligne. */
   @IsOptional()

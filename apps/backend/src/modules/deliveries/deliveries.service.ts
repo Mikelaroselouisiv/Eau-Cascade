@@ -4,7 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DeliveryStatus, FulfillmentType, MovementType, Prisma, ProductionFlowKind } from '@prisma/client';
+import {
+  DeliveryStatus,
+  FulfillmentType,
+  MovementType,
+  Prisma,
+  ProductionFlowKind,
+  ProductionSessionStatus,
+} from '@prisma/client';
 import { isProductionDepartment } from '../../common/department-kind';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -28,6 +35,7 @@ import { AuditService } from '../audit/audit.service';
 import { RolesService } from '../roles/roles.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { ProductionSessionsService } from '../production-sessions/production-sessions.service';
+import { CarriersService } from '../carriers/carriers.service';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { CreateDeliveryDropDto } from './dto/create-delivery-drop.dto';
 
@@ -37,6 +45,7 @@ const deliveryInclude = {
   company: { select: { id: true, name: true } },
   department: { select: { id: true, name: true } },
   deliveredBy: { select: { id: true, fullName: true, phone: true } },
+  carrier: { select: { id: true, name: true, phone: true, departmentId: true } },
   sale: {
     select: {
       id: true,
@@ -75,6 +84,7 @@ const deliveryInclude = {
     include: {
       department: { select: { id: true, name: true } },
       stop: { select: { id: true, address: true, quantity: true } },
+      carrier: { select: { id: true, name: true, phone: true } },
     },
     orderBy: { createdAt: 'asc' as const },
   },
@@ -94,6 +104,7 @@ export class DeliveriesService {
     private readonly inventoryService: InventoryService,
     private readonly productionSessions: ProductionSessionsService,
     private readonly rolesService: RolesService,
+    private readonly carriersService: CarriersService,
   ) {}
 
   /** Crée la fiche livraison liée à une vente (même transaction). */
@@ -421,6 +432,7 @@ export class DeliveriesService {
           quantity: dto.quantity,
           departmentId: dto.departmentId,
           executorName: dto.executorName,
+          carrierId: dto.carrierId ?? null,
           stopId: dto.stopId ?? null,
         },
       ],
@@ -448,6 +460,16 @@ export class DeliveriesService {
 
     const isHome = delivery.fulfillmentType === FulfillmentType.HOME;
 
+    if (isHome && dto.carrierId !== undefined) {
+      const prevCarrier = delivery.carrierId ?? null;
+      const nextCarrier = dto.carrierId ?? null;
+      if (prevCarrier && nextCarrier !== prevCarrier && !canEditDeliveryExecutor(user.role)) {
+        throw new ForbiddenException(
+          'Seul un administrateur ou un gérant peut modifier le transporteur.',
+        );
+      }
+    }
+
     if (isHome && dto.executorName !== undefined) {
       const nextName = dto.executorName?.trim() || null;
       const prevName = delivery.executorName?.trim() || null;
@@ -463,6 +485,7 @@ export class DeliveriesService {
       quantity: number;
       departmentId: number;
       executorName?: string | null;
+      carrierId?: number | null;
       stopId?: number | null;
     }> = [];
 
@@ -479,6 +502,7 @@ export class DeliveriesService {
             quantity: remaining,
             departmentId: deptForDrop,
             executorName: dto.executorName,
+            carrierId: dto.carrierId ?? null,
             stopId: dto.stopId ?? null,
           });
         }
@@ -513,6 +537,7 @@ export class DeliveriesService {
             quantity: delta,
             departmentId: deptForDrop,
             executorName: dto.executorName,
+            carrierId: dto.carrierId ?? null,
             stopId: dto.stopId ?? null,
           });
         }
@@ -523,7 +548,22 @@ export class DeliveriesService {
       return this.applyDropsAndReload(id, planned, user, {
         note: dto.note,
         executorName: isHome ? dto.executorName : undefined,
+        carrierId: isHome ? dto.carrierId : undefined,
       });
+    }
+
+    let carrierName: string | undefined;
+    if (isHome && dto.carrierId != null) {
+      const deptId = dto.stockDepartmentId ?? delivery.departmentId;
+      if (deptId == null) {
+        throw new BadRequestException('Choisissez le département de cette livraison.');
+      }
+      const carrier = await this.carriersService.requireForHomeDrop(this.prisma, {
+        carrierId: dto.carrierId,
+        departmentId: deptId,
+        companyId: delivery.companyId,
+      });
+      carrierName = carrier.name;
     }
 
     const updated = await this.prisma.delivery.update({
@@ -533,6 +573,8 @@ export class DeliveriesService {
         ...(isHome && dto.executorName !== undefined
           ? { executorName: dto.executorName?.trim() || null }
           : {}),
+        ...(isHome && dto.carrierId !== undefined ? { carrierId: dto.carrierId } : {}),
+        ...(carrierName ? { executorName: carrierName } : {}),
       },
       include: deliveryInclude,
     });
@@ -546,10 +588,11 @@ export class DeliveriesService {
       quantity: number;
       departmentId: number;
       executorName?: string | null;
+      carrierId?: number | null;
       stopId?: number | null;
     }>,
     user: ScopeUser,
-    extras?: { note?: string | null; executorName?: string | null },
+    extras?: { note?: string | null; executorName?: string | null; carrierId?: number | null },
   ) {
     const delivery = await this.prisma.delivery.findFirst({
       where: { id, deletedAt: null },
@@ -589,6 +632,7 @@ export class DeliveriesService {
             quantity: drop.quantity,
             departmentId: drop.departmentId,
             executorName: drop.executorName,
+            carrierId: drop.carrierId ?? null,
             stopId: drop.stopId ?? null,
             user,
           });
@@ -597,7 +641,22 @@ export class DeliveriesService {
         const items = await tx.deliveryItem.findMany({ where: { deliveryId: id } });
         const status = this.computeStatus(items);
         const lastExecutor = [...drops].reverse().find((d) => d.executorName?.trim())?.executorName?.trim();
+        const lastCarrier =
+          extras?.carrierId !== undefined
+            ? extras.carrierId
+            : ([...drops].reverse().find((d) => d.carrierId != null)?.carrierId ?? null);
         const lastDept = drops[drops.length - 1]?.departmentId;
+        let executorName =
+          extras?.executorName !== undefined
+            ? extras.executorName?.trim() || null
+            : lastExecutor ?? delivery.executorName;
+        if (isHome && lastCarrier != null) {
+          const carrier = await tx.carrier.findFirst({
+            where: { id: lastCarrier },
+            select: { name: true },
+          });
+          executorName = carrier?.name ?? executorName;
+        }
         const updated = await tx.delivery.update({
           where: { id },
           data: {
@@ -607,14 +666,10 @@ export class DeliveriesService {
             ...(lastDept != null && delivery.departmentId == null
               ? { departmentId: lastDept }
               : {}),
-            ...(isHome && (extras?.executorName !== undefined || lastExecutor)
-              ? {
-                  executorName:
-                    extras?.executorName !== undefined
-                      ? extras.executorName?.trim() || null
-                      : lastExecutor ?? delivery.executorName,
-                }
+            ...(isHome && executorName
+              ? { executorName }
               : {}),
+            ...(isHome && lastCarrier != null ? { carrierId: lastCarrier } : {}),
           },
           include: deliveryInclude,
         });
@@ -653,6 +708,7 @@ export class DeliveriesService {
       quantity: number;
       departmentId: number;
       executorName?: string | null;
+      carrierId?: number | null;
       stopId?: number | null;
       user: ScopeUser;
     },
@@ -674,16 +730,23 @@ export class DeliveriesService {
 
     const isHome = opts.delivery.fulfillmentType === FulfillmentType.HOME;
     let departmentId = opts.departmentId;
+    let executorName = opts.executorName?.trim() || null;
+    let carrierId: number | null = opts.carrierId ?? null;
     if (isHome) {
       departmentId = await this.assertHomeStockDepartment(
         departmentId,
         opts.delivery.companyId,
         opts.user,
       );
-      const executor = opts.executorName?.trim();
-      if (!executor) {
-        throw new BadRequestException('Indiquez le livreur pour cette ligne.');
+      if (carrierId == null) {
+        throw new BadRequestException('Choisissez le transporteur.');
       }
+      const carrier = await this.carriersService.requireForHomeDrop(tx, {
+        carrierId,
+        departmentId,
+        companyId: opts.delivery.companyId,
+      });
+      executorName = carrier.name;
     } else {
       const dept = await tx.department.findFirst({
         where: { id: departmentId, companyId: opts.delivery.companyId, deletedAt: null },
@@ -693,6 +756,7 @@ export class DeliveriesService {
       if (!canAccessAssignedDepartment(opts.user, dept.id)) {
         throw new ForbiddenException('Département hors périmètre');
       }
+      carrierId = null;
     }
 
     let stopId = opts.stopId ?? null;
@@ -715,18 +779,37 @@ export class DeliveriesService {
       stopId = null;
     }
 
-    await tx.deliveryDrop.create({
+    const drop = await tx.deliveryDrop.create({
       data: {
         deliveryId: opts.delivery.id,
         saleItemId: opts.saleItemId,
         quantity: qty,
         departmentId,
-        executorName: opts.executorName?.trim() || null,
+        executorName,
+        carrierId,
         deliveredById: opts.user.id ?? null,
         createdById: opts.user.id ?? null,
         stopId,
       },
     });
+
+    if (isHome && carrierId != null) {
+      const saleItem = await tx.saleItem.findUnique({
+        where: { id: opts.saleItemId },
+        select: { productId: true },
+      });
+      if (saleItem) {
+        await this.carriersService.recordTripTx(tx, {
+          carrierId,
+          departmentId,
+          deliveryId: opts.delivery.id,
+          deliveryDropId: drop.id,
+          productId: saleItem.productId,
+          quantity: qty,
+          userId: opts.user.id,
+        });
+      }
+    }
 
     const nextDelivered = Number(item.quantityDelivered) + qty;
     await tx.deliveryItem.updateMany({
@@ -801,7 +884,19 @@ export class DeliveriesService {
         select: { kind: true },
       });
       if (isProductionDepartment(stockDept?.kind) && product.nature !== 'RAW_MATERIAL') {
-        const session = await this.productionSessions.requireOpenSessionTx(tx, stockDeptId);
+        // À domicile : la commission chauffeur ne doit pas dépendre d’une session ouverte.
+        // Sur place usine : l’écoulement reste bloqué tant que la production est fermée.
+        const session =
+          opts.fulfillmentType === FulfillmentType.HOME
+            ? await tx.productionSession.findFirst({
+                where: {
+                  departmentId: stockDeptId,
+                  status: ProductionSessionStatus.OPEN,
+                  deletedAt: null,
+                },
+                select: { id: true },
+              })
+            : await this.productionSessions.requireOpenSessionTx(tx, stockDeptId);
         const delivery = await tx.delivery.findUnique({
           where: { saleId: opts.saleId },
           select: { id: true },
@@ -817,7 +912,7 @@ export class DeliveriesService {
             kind: ProductionFlowKind.FLOW_CLIENT,
             quantity: baseDelta,
             userId: opts.userId,
-            productionSessionId: session.id,
+            productionSessionId: session?.id ?? null,
             deliveryId: delivery?.id ?? null,
           });
         }

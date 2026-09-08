@@ -175,6 +175,8 @@ model Company {
   creditCustomers  CreditCustomer[]
   donationBeneficiaries DonationBeneficiary[]
   donations        Donation[]
+  productionWorkers ProductionWorker[]
+  carriers         Carrier[]
   banks            Bank[]
   bankAccounts     BankAccount[]
   accounts         Account[]
@@ -233,6 +235,11 @@ model Department {
   transfersFrom      InternalTransfer[]     @relation("TransferFromDept")
   transfersTo        InternalTransfer[]     @relation("TransferToDept")
   productionFlows    ProductionFlow[]
+  productionWorkers  ProductionWorker[]
+  workerOutputs      ProductionWorkerOutput[]
+  workerIssues       ProductionWorkerIssue[]
+  carriers           Carrier[]
+  carrierTrips       CarrierTrip[]
   createdAt      DateTime                  @default(now())
   updatedAt      DateTime                  @updatedAt
   deletedAt      DateTime?
@@ -350,6 +357,8 @@ model ProductionSession {
   closingInventorySessionId Int?                      @unique
   closingInventorySession   InventorySession?         @relation("ProductionClosingInventory", fields: [closingInventorySessionId], references: [id], onDelete: SetNull)
   flows                     ProductionFlow[]
+  workerOutputs             ProductionWorkerOutput[]
+  workerIssues              ProductionWorkerIssue[]
   createdAt                 DateTime                  @default(now())
   updatedAt                 DateTime                  @updatedAt
   deletedAt                 DateTime?
@@ -394,6 +403,10 @@ model Product {
   productionFlows    ProductionFlow[]
   transferItems      InternalTransferItem[]
   donationItems      DonationItem[]
+  workerOutputs      ProductionWorkerOutput[]
+  workerIssues       ProductionWorkerIssue[]
+  carrierRates       CarrierRate[]
+  carrierTrips       CarrierTrip[]
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   deletedAt    DateTime?
@@ -557,18 +570,22 @@ model Delivery {
   note          String?
   /// Nom saisi manuellement de la personne qui a exécuté la livraison.
   executorName  String?
+  carrierId     Int?
+  carrier       Carrier?       @relation(fields: [carrierId], references: [id], onDelete: SetNull)
   deliveredAt   DateTime?
   deliveredById Int?
   deliveredBy   User?          @relation("DeliveryDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
   items         DeliveryItem[]
   drops         DeliveryDrop[]
   productionFlows ProductionFlow[]
+  carrierTrips  CarrierTrip[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   deletedAt     DateTime?
 
   @@index([companyId, departmentId, status])
   @@index([status, createdAt])
+  @@index([carrierId])
 }
 
 model DeliveryItem {
@@ -614,12 +631,15 @@ model DeliveryDrop {
   departmentId   Int
   department     Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   executorName   String?
+  carrierId      Int?
+  carrier        Carrier? @relation("DeliveryDropCarrier", fields: [carrierId], references: [id], onDelete: SetNull)
   deliveredById  Int?
   deliveredBy    User?    @relation("DeliveryDropDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
   stopId         Int?
   stop           SaleDeliveryStop? @relation(fields: [stopId], references: [id], onDelete: SetNull)
   createdById    Int?
   createdBy      User?    @relation("DeliveryDropCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  trips          CarrierTrip[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -627,6 +647,7 @@ model DeliveryDrop {
   @@index([saleItemId])
   @@index([departmentId])
   @@index([stopId])
+  @@index([carrierId])
 }
 
 model Payment {
@@ -829,8 +850,11 @@ model InternalTransfer {
   confirmedBy     User?                  @relation("InternalTransferConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
   confirmedAt     DateTime?
   rejectedAt      DateTime?
+  carrierId       Int?
+  carrier         Carrier?               @relation(fields: [carrierId], references: [id], onDelete: SetNull)
   items           InternalTransferItem[]
   flows           ProductionFlow[]
+  carrierTrips    CarrierTrip[]
   createdAt       DateTime               @default(now())
   updatedAt       DateTime               @updatedAt
   deletedAt       DateTime?
@@ -838,6 +862,7 @@ model InternalTransfer {
   @@index([toDepartmentId, status])
   @@index([fromDepartmentId, status])
   @@index([companyId, createdAt])
+  @@index([carrierId])
 }
 
 model InternalTransferItem {
@@ -873,6 +898,8 @@ model ProductionFlow {
   donation             Donation?           @relation(fields: [donationId], references: [id], onDelete: SetNull)
   deliveryId           Int?
   delivery             Delivery?           @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  workerOutputId       Int?
+  workerOutput         ProductionWorkerOutput? @relation(fields: [workerOutputId], references: [id], onDelete: SetNull)
   createdById          Int?
   createdBy            User?               @relation("ProductionFlowCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt            DateTime            @default(now())
@@ -881,6 +908,157 @@ model ProductionFlow {
   @@index([departmentId, kind, createdAt])
   @@index([productId, createdAt])
   @@index([donationId])
+  @@index([workerOutputId])
+}
+
+/// Ouvrier d’usine (pas un utilisateur POS) : paie à la pièce via le coefficient.
+model ProductionWorker {
+  id                  Int                      @id @default(autoincrement())
+  uuid                String                   @unique @default(uuid())
+  companyId           Int
+  company             Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  departmentId        Int
+  department          Department               @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  name                String
+  phone               String
+  /// HTG versés par unité de produit fini déclarée.
+  payrollCoefficient  Decimal                  @db.Decimal(12, 4)
+  startedAt           DateTime                 @default(now())
+  isActive            Boolean                  @default(true)
+  createdById         Int?
+  createdBy           User?                    @relation("ProductionWorkerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  outputs             ProductionWorkerOutput[]
+  issues              ProductionWorkerIssue[]
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  deletedAt           DateTime?
+
+  @@index([departmentId, isActive])
+  @@index([companyId, name])
+}
+
+/// Produits finis remis par l’ouvrier — base de la paie à la pièce (pas de conso MP).
+model ProductionWorkerOutput {
+  id                  Int                 @id @default(autoincrement())
+  uuid                String              @unique @default(uuid())
+  workerId            Int
+  worker              ProductionWorker    @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  departmentId        Int
+  department          Department          @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  productId           Int
+  product             Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity            Decimal             @db.Decimal(12, 4)
+  payrollAmount       Decimal             @db.Decimal(12, 2)
+  productionSessionId Int?
+  productionSession   ProductionSession?  @relation(fields: [productionSessionId], references: [id], onDelete: SetNull)
+  createdById         Int?
+  createdBy           User?               @relation("ProductionWorkerOutputCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  flows               ProductionFlow[]
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@index([workerId, createdAt])
+  @@index([departmentId, createdAt])
+  @@index([productionSessionId])
+  @@index([productId])
+}
+
+/// MP (emballage, etc.) confiée à un ouvrier — écoulement du stock usine.
+model ProductionWorkerIssue {
+  id                  Int                 @id @default(autoincrement())
+  uuid                String              @unique @default(uuid())
+  workerId            Int
+  worker              ProductionWorker    @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  departmentId        Int
+  department          Department          @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  productId           Int
+  product             Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity            Decimal             @db.Decimal(12, 4)
+  productionSessionId Int?
+  productionSession   ProductionSession?  @relation(fields: [productionSessionId], references: [id], onDelete: SetNull)
+  createdById         Int?
+  createdBy           User?               @relation("ProductionWorkerIssueCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@index([workerId, createdAt])
+  @@index([departmentId, createdAt])
+  @@index([productionSessionId])
+  @@index([productId])
+}
+
+/// Chauffeur à la commission (livraisons à domicile uniquement), rattaché à une usine.
+model Carrier {
+  id          Int           @id @default(autoincrement())
+  uuid        String        @unique @default(uuid())
+  companyId   Int
+  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  departmentId Int
+  department  Department    @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  name        String
+  phone       String
+  startedAt   DateTime      @default(now())
+  isActive    Boolean       @default(true)
+  createdById Int?
+  createdBy   User?         @relation("CarrierCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  rates       CarrierRate[]
+  trips       CarrierTrip[]
+  deliveries  Delivery[]
+  drops       DeliveryDrop[] @relation("DeliveryDropCarrier")
+  transfers   InternalTransfer[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+
+  @@index([departmentId, isActive])
+  @@index([companyId, name])
+}
+
+/// Commission HTG par unité de produit fini livrée (contenu).
+model CarrierRate {
+  id           Int      @id @default(autoincrement())
+  uuid         String   @unique @default(uuid())
+  carrierId    Int
+  carrier      Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  productId    Int
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  coefficient  Decimal  @db.Decimal(12, 4)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([carrierId, productId])
+  @@index([productId])
+}
+
+/// Unités livrées (domicile ou transfert interne) — base de la commission (snapshot).
+model CarrierTrip {
+  id              Int           @id @default(autoincrement())
+  uuid            String        @unique @default(uuid())
+  carrierId       Int
+  carrier         Carrier       @relation(fields: [carrierId], references: [id], onDelete: Restrict)
+  departmentId    Int
+  department      Department    @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  deliveryId      Int?
+  delivery        Delivery?     @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  deliveryDropId  Int?
+  deliveryDrop    DeliveryDrop? @relation(fields: [deliveryDropId], references: [id], onDelete: Cascade)
+  internalTransferId Int?
+  internalTransfer   InternalTransfer? @relation(fields: [internalTransferId], references: [id], onDelete: Cascade)
+  productId       Int
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity        Decimal       @db.Decimal(12, 4)
+  coefficient     Decimal       @db.Decimal(12, 4)
+  payrollAmount   Decimal       @db.Decimal(12, 2)
+  createdById     Int?
+  createdBy       User?         @relation("CarrierTripCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([carrierId, createdAt])
+  @@index([departmentId, createdAt])
+  @@index([deliveryDropId])
+  @@index([internalTransferId])
+  @@index([productId])
 }
 
 model ExpenseCategory {
@@ -1164,6 +1342,11 @@ model User {
   transfersCreated InternalTransfer[] @relation("InternalTransferCreatedBy")
   transfersConfirmed InternalTransfer[] @relation("InternalTransferConfirmedBy")
   productionFlowsCreated ProductionFlow[] @relation("ProductionFlowCreatedBy")
+  productionWorkersCreated ProductionWorker[] @relation("ProductionWorkerCreatedBy")
+  workerOutputsCreated ProductionWorkerOutput[] @relation("ProductionWorkerOutputCreatedBy")
+  workerIssuesCreated ProductionWorkerIssue[] @relation("ProductionWorkerIssueCreatedBy")
+  carriersCreated Carrier[] @relation("CarrierCreatedBy")
+  carrierTripsCreated CarrierTrip[] @relation("CarrierTripCreatedBy")
   deliveriesDelivered Delivery[] @relation("DeliveryDeliveredBy")
   deliveryDropsDelivered DeliveryDrop[] @relation("DeliveryDropDeliveredBy")
   deliveryDropsCreated DeliveryDrop[] @relation("DeliveryDropCreatedBy")

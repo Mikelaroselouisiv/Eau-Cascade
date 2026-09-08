@@ -61,6 +61,8 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ id: string; label: string; codes
       'deliveries.manage_home',
       'deliveries.print',
       'production.use',
+      'workers.manage',
+      'carriers.manage',
       'transfers.manage',
       'transfers.confirm',
       'donation.view',

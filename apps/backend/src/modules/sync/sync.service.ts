@@ -26,6 +26,10 @@ const NO_DELETED_AT = new Set<SyncEntityName>([
   'SaleDeliveryStop',
   'DeliveryDrop',
   'ProductionFlow',
+  'ProductionWorkerOutput',
+  'ProductionWorkerIssue',
+  'CarrierRate',
+  'CarrierTrip',
 ]);
 
 /** Modèles sans updatedAt : curseur pull sur createdAt. */
@@ -881,6 +885,12 @@ export class SyncService {
       InventoryLine: this.prisma.inventoryLine as unknown as Delegate,
       RegisterSession: this.prisma.registerSession as unknown as Delegate,
       ProductionSession: this.prisma.productionSession as unknown as Delegate,
+      ProductionWorker: this.prisma.productionWorker as unknown as Delegate,
+      ProductionWorkerOutput: this.prisma.productionWorkerOutput as unknown as Delegate,
+      ProductionWorkerIssue: this.prisma.productionWorkerIssue as unknown as Delegate,
+      Carrier: this.prisma.carrier as unknown as Delegate,
+      CarrierRate: this.prisma.carrierRate as unknown as Delegate,
+      CarrierTrip: this.prisma.carrierTrip as unknown as Delegate,
       InternalTransfer: this.prisma.internalTransfer as unknown as Delegate,
       InternalTransferItem: this.prisma.internalTransferItem as unknown as Delegate,
       ProductionFlow: this.prisma.productionFlow as unknown as Delegate,
