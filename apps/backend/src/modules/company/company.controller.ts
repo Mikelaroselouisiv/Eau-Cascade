@@ -20,7 +20,7 @@ export class CompanyController {
   constructor(private readonly companyService: CompanyService) {}
 
   @Get()
-  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'finance.view')
+  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'finance.view', 'donation.view', 'production.use')
   profile() {
     return this.companyService.getProfile();
   }
@@ -32,7 +32,16 @@ export class CompanyController {
   }
 
   @Get('printer')
-  @PermissionsAny('config.view', 'pos.use', 'stock.view', 'deliveries.view', 'finance.view')
+  @PermissionsAny(
+    'config.view',
+    'pos.use',
+    'stock.view',
+    'deliveries.view',
+    'finance.view',
+    'donation.view',
+    'production.use',
+    'credit.view',
+  )
   printer(@Query('departmentId') departmentIdRaw?: string) {
     if (departmentIdRaw === undefined || departmentIdRaw === '') {
       return this.companyService.getPrinterSettings();

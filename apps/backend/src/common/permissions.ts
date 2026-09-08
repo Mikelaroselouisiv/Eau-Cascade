@@ -222,6 +222,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'transfers.confirm',
     'stock.raw_in',
     'deliveries.view',
+    'config.view',
+    'printer.manage',
   ],
   STOCK_MANAGER: [
     'stock.view',
@@ -264,6 +266,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'deliveries.manage_onsite',
     'deliveries.manage_home',
     'products.view',
+    'config.view',
+    'printer.manage',
   ],
 };
 

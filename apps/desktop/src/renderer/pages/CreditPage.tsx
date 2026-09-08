@@ -32,6 +32,10 @@ import type {
 } from '../types/api';
 import { formatMoney } from '../utils/currency';
 import { formatDateTime } from '../utils/datetime';
+import {
+  buildReceiptPayloadFromCreditFicheSale,
+  printThermalReceipt,
+} from '../utils/receiptPayload';
 
 function formatApiError(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -121,6 +125,7 @@ export function CreditPage() {
   const [saleNote, setSaleNote] = useState('');
   const [saleBusy, setSaleBusy] = useState(false);
   const [printTicket, setPrintTicket] = useState(true);
+  const [printingSaleId, setPrintingSaleId] = useState<number | null>(null);
 
   const [payAmount, setPayAmount] = useState('');
   const [paySaleId, setPaySaleId] = useState<number | ''>('');
@@ -339,6 +344,42 @@ export function CreditPage() {
     });
   }
 
+  function cashierLabel() {
+    return user?.fullName?.trim() || user?.phone || 'Caissier';
+  }
+
+  async function printCreditFicheSale(
+    customer: CreditCustomerDetail,
+    sale: CreditCustomerDetail['sales'][number],
+    overrides?: { amountPaid?: number; balanceDue?: number },
+  ) {
+    const company = await getCompanyById(customer.companyId).catch(() => null);
+    const deptId = customer.departmentId ?? undefined;
+    const printer =
+      typeof deptId === 'number' ? await getPrinterSettings(deptId).catch(() => null) : null;
+    return printThermalReceipt(
+      buildReceiptPayloadFromCreditFicheSale(sale, customer, company, printer, cashierLabel(), {
+        ...overrides,
+        departmentName: customer.department?.name ?? null,
+      }),
+    );
+  }
+
+  async function reprintCreditSale(sale: CreditCustomerDetail['sales'][number]) {
+    if (!detail) return;
+    setPrintingSaleId(sale.id);
+    try {
+      const ok = await printCreditFicheSale(detail, sale);
+      if (!ok) {
+        setMessage('Impression impossible', { persist: true });
+      }
+    } catch {
+      setMessage('Impression impossible', { persist: true });
+    } finally {
+      setPrintingSaleId(null);
+    }
+  }
+
   async function submitCreditSale(e: FormEvent) {
     e.preventDefault();
     if (!detail || !canManage || cart.length === 0) return;
@@ -369,22 +410,27 @@ export function CreditPage() {
           const deptId = detail.departmentId ?? undefined;
           const printer =
             typeof deptId === 'number' ? await getPrinterSettings(deptId).catch(() => null) : null;
-          const cashierLabel =
-            user?.fullName?.trim() || user?.phone || 'Caissier';
-          await window.desktopApp.printReceipt({
+          const ok = await printThermalReceipt({
             saleId: result.txnNumber ?? result.saleId,
+            ticketTitle: `Vente #${result.txnNumber ?? result.saleId}`,
             companyName: company?.name ?? 'Entreprise',
             companyPhone: company?.phone ?? null,
             address: [company?.address, company?.city].filter(Boolean).join(', ') || '',
-            cashier: cashierLabel,
+            cashier: cashierLabel(),
             dateTime: formatDateTime(new Date().toISOString()),
             receiptClientName: detail.name,
+            receiptClientPhone: detail.phone,
+            receiptClientAddress: detail.address,
+            fulfillmentLabel: 'Sur place',
+            departmentName: detail.department?.name ?? null,
             items: cart.map((l) => ({
                 name: `${l.productName} (${l.unitLabel})`,
                 qty: l.quantity,
                 price: creditLineUnitPrice(l),
               })),
             total: result.total,
+            amountReceived: result.amountPaid > 0.009 ? result.amountPaid : undefined,
+            balanceDue: result.balanceDue > 0.009 ? result.balanceDue : undefined,
             paymentMode: 'À crédit',
             paperWidth: printer?.paperWidth === 80 ? 80 : 58,
             printerName: printer?.deviceName ?? '',
@@ -394,6 +440,12 @@ export function CreditPage() {
             showLogoOnReceipt: printer?.showLogoOnReceipt ?? true,
             autoCut: printer?.autoCut ?? true,
           });
+          if (!ok) {
+            setMessage(
+              `Vente #${result.txnNumber ?? result.saleId} enregistrée, mais l’impression a échoué`,
+              { persist: true },
+            );
+          }
         } catch {
           setMessage(
             `Vente #${result.txnNumber ?? result.saleId} enregistrée, mais l’impression a échoué`,
@@ -445,6 +497,26 @@ export function CreditPage() {
           result.unused > 0.009 ? ` — surplus non affecté ${formatMoney(result.unused)}` : ''
         }`,
       );
+      if (printTicket) {
+        try {
+          for (const alloc of result.allocations ?? []) {
+            const sale = detail.sales.find((s) => s.id === alloc.saleId);
+            if (!sale) continue;
+            const amountPaid = Number(sale.amountPaid) + alloc.amount;
+            const balanceDue = Math.max(0, Math.round((Number(sale.total) - amountPaid) * 100) / 100);
+            const ok = await printCreditFicheSale(detail, sale, { amountPaid, balanceDue });
+            if (!ok) {
+              setMessage(
+                `Encaissement enregistré, mais l’impression a échoué (vente #${saleTxnNumber(sale)})`,
+                { persist: true },
+              );
+              break;
+            }
+          }
+        } catch {
+          setMessage('Encaissement enregistré, mais l’impression a échoué', { persist: true });
+        }
+      }
       setShowPayModal(false);
       setPayAmount('');
       setPaySaleId('');
@@ -843,6 +915,14 @@ export function CreditPage() {
                           </li>
                         ))}
                       </ul>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={printingSaleId === s.id}
+                        onClick={() => void reprintCreditSale(s)}
+                      >
+                        {printingSaleId === s.id ? 'Impression…' : 'Imprimer le ticket'}
+                      </button>
                     </details>
                   ))}
                 </section>
@@ -1099,6 +1179,14 @@ export function CreditPage() {
               <label>
                 Note
                 <input value={payNote} onChange={(e) => setPayNote(e.target.value)} />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={printTicket}
+                  onChange={(e) => setPrintTicket(e.target.checked)}
+                />
+                Imprimer le ticket
               </label>
               <p className="credit-hint">
                 {payMethod === 'BANK'

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { RefreshableScroll } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
@@ -9,16 +10,20 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useCompanyScope } from '@/hooks/useCompanyScope';
 import { listDonations } from '@/services/api';
+import { printReceipt } from '@/services/bluetooth-printer';
+import { buildDonationReceiptData } from '@/services/receipt';
 import type { DonationRow } from '@/types/api';
 import { formatDateTime } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
 
 export function DonationHistoryScreen() {
-  const { canPerm } = useAuth();
+  const { canPerm, user } = useAuth();
   const { companyId, ready } = useCompanyScope();
   const allowed = canPerm('donation.view');
   const [rows, setRows] = useState<DonationRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [printingId, setPrintingId] = useState<number | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!allowed || companyId == null) return;
@@ -35,6 +40,25 @@ export function DonationHistoryScreen() {
       void load();
     }, [load, ready]),
   );
+
+  async function reprint(donation: DonationRow) {
+    setPrintingId(donation.id);
+    setStatus(null);
+    try {
+      const data = await buildDonationReceiptData({
+        donation,
+        beneficiary: {
+          name: donation.beneficiary?.name ?? 'Bénéficiaire',
+        },
+        cashier: user?.fullName?.trim() || user?.phone || 'Caissier',
+      });
+      await printReceipt(data);
+    } catch {
+      setStatus('Impression impossible');
+    } finally {
+      setPrintingId(null);
+    }
+  }
 
   if (!allowed) {
     return (
@@ -56,12 +80,21 @@ export function DonationHistoryScreen() {
           setRefreshing(false);
         }}>
         <View style={styles.body}>
+          {status ? <Text style={styles.error}>{status}</Text> : null}
           {rows.length === 0 ? <Text style={styles.meta}>Aucun don</Text> : null}
           {rows.map((d) => (
             <View key={d.id} style={styles.card}>
-              <Text style={styles.title}>
-                {d.beneficiary?.name ?? 'Bénéficiaire'} · {d.department?.name}
-              </Text>
+              <View style={styles.cardHead}>
+                <Text style={styles.title}>
+                  {d.beneficiary?.name ?? 'Bénéficiaire'} · {d.department?.name}
+                </Text>
+                <Pressable
+                  onPress={() => void reprint(d)}
+                  disabled={printingId === d.id}
+                  hitSlop={8}>
+                  <Ionicons name="print-outline" size={20} color={BrandColors.primary} />
+                </Pressable>
+              </View>
               <Text style={styles.meta}>{formatDateTime(d.createdAt)}</Text>
               {d.items.map((it) => (
                 <Text key={it.id} style={styles.meta}>
@@ -88,6 +121,13 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
     gap: 4,
   },
-  title: { fontWeight: '700', color: BrandColors.text },
+  cardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  title: { flex: 1, fontWeight: '700', color: BrandColors.text },
   meta: { color: BrandColors.textMuted },
+  error: { color: BrandColors.danger, fontWeight: '600' },
 });

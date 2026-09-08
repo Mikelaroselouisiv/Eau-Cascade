@@ -731,6 +731,7 @@ export interface CreditCustomerDetail extends CreditCustomerListItem {
   availableCredit: number;
   sales: Array<{
     id: number;
+    txnNumber?: number | null;
     total: number;
     amountPaid: number;
     balanceDue: number;

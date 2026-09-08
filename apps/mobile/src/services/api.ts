@@ -1524,6 +1524,7 @@ export async function recordCreditPayment(payload: {
   applied: number;
   unused: number;
   financeEntryId?: number;
+  allocations: Array<{ saleId: number; amount: number }>;
 }> {
   const { data } = await api.post('/credit/payments', payload);
   return data;

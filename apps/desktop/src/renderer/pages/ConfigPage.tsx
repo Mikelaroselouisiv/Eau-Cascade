@@ -67,7 +67,16 @@ export function ConfigPage() {
   const canManageRoles = isAdmin || canPerm('roles.manage');
   const canManageUsers = isAdmin || canPerm('users.manage') || canPerm('users.view');
   const canSeeBanks = isAdmin || canPerm('banks.view') || canPerm('banks.manage');
-  const [tab, setTab] = useState<Tab>('company');
+  const canSeeCompanyTab =
+    canPerm('company.manage') || canPerm('config.manage') || canPerm('departments.manage');
+  const canSeePrinterTab = canPerm('printer.manage');
+  const canSeePackagingTab = canPerm('packaging.manage');
+  const [tab, setTab] = useState<Tab>(() => {
+    if (canSeeCompanyTab) return 'company';
+    if (canSeePrinterTab) return 'printer';
+    if (canSeePackagingTab) return 'packaging';
+    return 'company';
+  });
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [users, setUsers] = useState<SessionUser[]>([]);
@@ -100,10 +109,26 @@ export function ConfigPage() {
   }, [isAdmin, canManageUsers]);
 
   useEffect(() => {
-    if (tab === 'banques' && !canSeeBanks) setTab('company');
-    if (tab === 'users' && !canManageUsers) setTab('company');
-    if (tab === 'roles' && !canManageRoles) setTab('company');
-  }, [tab, canSeeBanks, canManageUsers, canManageRoles]);
+    const allowed: Tab[] = [
+      ...(canSeeCompanyTab ? (['company'] as const) : []),
+      ...(canSeePrinterTab ? (['printer'] as const) : []),
+      ...(canSeePackagingTab ? (['packaging'] as const) : []),
+      ...(canSeeBanks ? (['banques'] as const) : []),
+      ...(canManageUsers ? (['users'] as const) : []),
+      ...(canManageRoles ? (['roles'] as const) : []),
+    ];
+    if (allowed.length > 0 && !allowed.includes(tab)) {
+      setTab(allowed[0]);
+    }
+  }, [
+    tab,
+    canSeeCompanyTab,
+    canSeePrinterTab,
+    canSeePackagingTab,
+    canSeeBanks,
+    canManageUsers,
+    canManageRoles,
+  ]);
 
   // Rafraîchir les listes partagées (imprimantes / utilisateurs) à chaque changement d’onglet
   useEffect(() => {
@@ -358,9 +383,9 @@ export function ConfigPage() {
       <div className="config-tabs">
         {(
           [
-            ['company', 'Entreprise'],
-            ['printer', 'Imprimante'],
-            ['packaging', 'Conditionnement'],
+            ...(canSeeCompanyTab ? [['company', 'Entreprise'] as const] : []),
+            ...(canSeePrinterTab ? [['printer', 'Imprimante'] as const] : []),
+            ...(canSeePackagingTab ? [['packaging', 'Conditionnement'] as const] : []),
             ...(canSeeBanks ? [['banques', 'Banques'] as const] : []),
             ...(canManageUsers ? [['users', 'Utilisateurs'] as const] : []),
             ...(canManageRoles ? [['roles', 'Rôles & autorisations'] as const] : []),
@@ -379,7 +404,7 @@ export function ConfigPage() {
 
       {msg ? <p className="info-text">{msg}</p> : null}
 
-      {tab === 'company' && (
+      {tab === 'company' && canSeeCompanyTab && (
         <CompaniesSection
           onMessage={(m, o) => setMsg(m, o)}
           onCatalogChanged={() => load()}
@@ -442,7 +467,7 @@ export function ConfigPage() {
 
           {printerCompanyId !== '' && printerDepts.length === 0 ? (
             <p className="info-text" style={{ gridColumn: '1 / -1' }}>
-              Aucun département pour cette entreprise. Ajoutez-en dans l’onglet Entreprise.
+              Aucun département
             </p>
           ) : null}
 
@@ -739,7 +764,7 @@ export function ConfigPage() {
         </div>
       )}
 
-      {tab === 'packaging' && <PackagingSection />}
+      {tab === 'packaging' && canSeePackagingTab && <PackagingSection />}
 
       {tab === 'banques' && canSeeBanks && (
         <BanksConfigSection onMessage={(m, o) => setMsg(m, o)} />

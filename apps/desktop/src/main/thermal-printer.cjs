@@ -75,7 +75,10 @@ function buildTicketText(saleData, width = 58) {
   }
 
   lines.push(separator);
-  if (saleData.saleId != null && saleData.saleId !== '') {
+  const ticketTitle = String(saleData.ticketTitle ?? '').trim();
+  if (ticketTitle) {
+    lines.push(clipLine(ticketTitle, lineWidth));
+  } else if (saleData.saleId != null && saleData.saleId !== '') {
     // Même numéro que la carte « Livraisons » (sale.txnNumber métier).
     lines.push(clipLine(`Vente #${saleData.saleId}`, lineWidth));
   }

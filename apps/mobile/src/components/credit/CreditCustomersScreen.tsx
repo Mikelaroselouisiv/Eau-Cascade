@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import { Ionicons } from '@expo/vector-icons';
 import { MoneyText } from '@/components/MoneyText';
 import { KpiCard } from '@/components/monitor/KpiCard';
 import { ModalShell } from '@/components/ModalShell';
@@ -32,6 +33,8 @@ import {
   recordCreditPayment,
 } from '@/services/api';
 import { formatApiError } from '@/services/api-errors';
+import { printReceipt } from '@/services/bluetooth-printer';
+import { buildCreditFicheSaleReceiptData, buildSaleReceiptData } from '@/services/receipt';
 import type {
   BankRow,
   CreditCustomerDetail,
@@ -115,6 +118,8 @@ export function CreditCustomersScreen({ mode }: Props) {
   const [saleNote, setSaleNote] = useState('');
   const [saleBusy, setSaleBusy] = useState(false);
   const [saleStatus, setSaleStatus] = useState<string | null>(null);
+  const [printTicket, setPrintTicket] = useState(true);
+  const [printingSaleId, setPrintingSaleId] = useState<number | null>(null);
   const [createVisible, setCreateVisible] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -211,6 +216,38 @@ export function CreditCustomersScreen({ mode }: Props) {
     await load();
   }
 
+  function cashierLabel() {
+    return user?.fullName?.trim() || user?.phone || 'Caissier';
+  }
+
+  async function printFicheSale(
+    customer: CreditCustomerDetail,
+    sale: CreditCustomerDetail['sales'][number],
+    overrides?: { amountPaid?: number; balanceDue?: number },
+  ) {
+    const data = await buildCreditFicheSaleReceiptData({
+      sale,
+      customer,
+      cashier: cashierLabel(),
+      departmentId: customer.departmentId,
+      amountPaid: overrides?.amountPaid,
+      balanceDue: overrides?.balanceDue,
+    });
+    await printReceipt(data);
+  }
+
+  async function reprintFicheSale(sale: CreditCustomerDetail['sales'][number]) {
+    if (!detail) return;
+    setPrintingSaleId(sale.id);
+    try {
+      await printFicheSale(detail, sale);
+    } catch {
+      setPayStatus('Impression impossible');
+    } finally {
+      setPrintingSaleId(null);
+    }
+  }
+
   async function submitPayment() {
     if (!detail) return;
     const amount = Number(payAmount.replace(',', '.'));
@@ -253,6 +290,19 @@ export function CreditCustomersScreen({ mode }: Props) {
           methodSnapshot === 'BANK' ? ' (banque + finance entreprise)' : ' (finance entreprise)'
         }${res.unused > 0.009 ? ` — surplus non affecté ${formatMoney(res.unused)}` : ''}`,
       );
+      if (printTicket) {
+        try {
+          for (const alloc of res.allocations ?? []) {
+            const sale = detail.sales.find((s) => s.id === alloc.saleId);
+            if (!sale) continue;
+            const amountPaid = Number(sale.amountPaid) + alloc.amount;
+            const balanceDue = Math.max(0, Math.round((Number(sale.total) - amountPaid) * 100) / 100);
+            await printFicheSale(detail, sale, { amountPaid, balanceDue });
+          }
+        } catch {
+          setPayStatus('Encaissement enregistré, mais l’impression a échoué');
+        }
+      }
       await refreshDetail(detail.id);
     } catch {
       setPayStatus('Échec encaissement');
@@ -317,6 +367,38 @@ export function CreditCustomersScreen({ mode }: Props) {
       setPayStatus(
         `Vente #${result.txnNumber ?? result.saleId} — total ${formatMoney(result.total)}, reste ${formatMoney(result.balanceDue)}`,
       );
+      if (printTicket) {
+        try {
+          const receipt = await buildSaleReceiptData({
+            items: cart.map((line) => ({
+              name: line.label,
+              qty: line.quantity,
+              price:
+                line.manualUnitPrice != null && Number.isFinite(line.manualUnitPrice)
+                  ? line.manualUnitPrice
+                  : 0,
+            })),
+            total: result.total,
+            paymentMode: 'À crédit',
+            saleRef: result.txnNumber ?? result.saleId,
+            ticketTitle: `Vente #${result.txnNumber ?? result.saleId}`,
+            clientName: detail.name,
+            clientPhone: detail.phone,
+            clientAddress: detail.address,
+            fulfillmentLabel: 'Sur place',
+            departmentName: detail.department?.name,
+            cashier: cashierLabel(),
+            departmentId: detail.departmentId ?? undefined,
+            amountReceived: result.amountPaid > 0.009 ? result.amountPaid : undefined,
+            balanceDue: result.balanceDue > 0.009 ? result.balanceDue : undefined,
+          });
+          await printReceipt(receipt);
+        } catch {
+          setPayStatus(
+            `Vente #${result.txnNumber ?? result.saleId} enregistrée, mais l’impression a échoué`,
+          );
+        }
+      }
       await refreshDetail(detail.id);
     } catch (err) {
       setSaleStatus(formatApiError(err, 'Échec de la vente à crédit'));
@@ -517,18 +599,55 @@ export function CreditCustomersScreen({ mode }: Props) {
                     <Text style={styles.empty}>Aucune fiche ouverte</Text>
                   ) : (
                     openSales.map((s) => (
-                      <Pressable
+                      <View
                         key={s.id}
-                        onPress={() => setPaySaleId(s.id)}
                         style={[styles.saleRow, paySaleId === s.id && styles.saleRowActive]}>
-                        <View style={styles.rowInfo}>
+                        <Pressable
+                          onPress={() => setPaySaleId(s.id)}
+                          style={styles.rowInfo}>
                           <Text style={styles.rowTitle}>#{saleDisplayRef(s)}</Text>
                           <Text style={styles.meta}>{formatDateTime(s.createdAt)}</Text>
-                        </View>
+                        </Pressable>
                         <MoneyText value={s.balanceDue} style={styles.rowValue} />
-                      </Pressable>
+                        <Pressable
+                          onPress={() => void reprintFicheSale(s)}
+                          disabled={printingSaleId === s.id}
+                          hitSlop={8}>
+                          <Ionicons
+                            name="print-outline"
+                            size={20}
+                            color={BrandColors.primary}
+                          />
+                        </Pressable>
+                      </View>
                     ))
                   )}
+
+                  {detail.sales.some((s) => s.balanceDue <= 0.009) ? (
+                    <>
+                      <Text style={styles.section}>Fiches soldées</Text>
+                      {detail.sales
+                        .filter((s) => s.balanceDue <= 0.009)
+                        .map((s) => (
+                          <View key={`paid-${s.id}`} style={styles.saleRow}>
+                            <View style={styles.rowInfo}>
+                              <Text style={styles.rowTitle}>#{saleDisplayRef(s)}</Text>
+                              <Text style={styles.meta}>{formatDateTime(s.createdAt)}</Text>
+                            </View>
+                            <Pressable
+                              onPress={() => void reprintFicheSale(s)}
+                              disabled={printingSaleId === s.id}
+                              hitSlop={8}>
+                              <Ionicons
+                                name="print-outline"
+                                size={20}
+                                color={BrandColors.primary}
+                              />
+                            </Pressable>
+                          </View>
+                        ))}
+                    </>
+                  ) : null}
 
                   {detail.balance > 0.009 && canManage ? (
                     <>
@@ -634,6 +753,14 @@ export function CreditCustomersScreen({ mode }: Props) {
                         value={payNote}
                         onChangeText={setPayNote}
                       />
+                      <Pressable onPress={() => setPrintTicket((v) => !v)} style={styles.printToggle}>
+                        <Ionicons
+                          name={printTicket ? 'checkbox' : 'square-outline'}
+                          size={20}
+                          color={BrandColors.primary}
+                        />
+                        <Text style={styles.printToggleLabel}>Imprimer le ticket</Text>
+                      </Pressable>
                       <Pressable
                         style={[
                           styles.primaryBtn,
@@ -827,6 +954,14 @@ export function CreditCustomersScreen({ mode }: Props) {
               onChangeText={setSaleNote}
             />
             {saleStatus ? <Text style={styles.payStatus}>{saleStatus}</Text> : null}
+            <Pressable onPress={() => setPrintTicket((v) => !v)} style={styles.printToggle}>
+              <Ionicons
+                name={printTicket ? 'checkbox' : 'square-outline'}
+                size={20}
+                color={BrandColors.primary}
+              />
+              <Text style={styles.printToggleLabel}>Imprimer le ticket</Text>
+            </Pressable>
           </ScrollView>
         }
         footer={
@@ -1110,4 +1245,6 @@ const styles = StyleSheet.create({
     backgroundColor: BrandColors.surface,
   },
   secondaryBtnText: { fontWeight: '700', color: BrandColors.text },
+  printToggle: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, marginTop: Spacing.two },
+  printToggleLabel: { color: BrandColors.text, fontWeight: '600' },
 });

@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 
+import { Ionicons } from '@expo/vector-icons';
 import { KpiCard } from '@/components/monitor/KpiCard';
 import { ModalShell } from '@/components/ModalShell';
 import { RefreshableScroll } from '@/components/RefreshableScroll';
@@ -28,10 +29,13 @@ import {
   listDonationBeneficiaries,
 } from '@/services/api';
 import { formatApiError } from '@/services/api-errors';
+import { printReceipt } from '@/services/bluetooth-printer';
+import { buildDonationReceiptData } from '@/services/receipt';
 import type {
   Department,
   DonationBeneficiaryDetail,
   DonationBeneficiaryListItem,
+  DonationRow,
   DonationSummary,
   Product,
 } from '@/types/api';
@@ -66,6 +70,8 @@ export function DonationBeneficiariesScreen() {
   const [qty, setQty] = useState<Record<number, string>>({});
   const [donateBusy, setDonateBusy] = useState(false);
   const [donateStatus, setDonateStatus] = useState<string | null>(null);
+  const [printTicket, setPrintTicket] = useState(true);
+  const [printingDonationId, setPrintingDonationId] = useState<number | null>(null);
 
   const donateItems = useMemo(
     () =>
@@ -167,6 +173,25 @@ export function DonationBeneficiariesScreen() {
     }
   }
 
+  async function reprintDonation(
+    donation: DonationRow,
+    beneficiary: DonationBeneficiaryDetail,
+  ) {
+    setPrintingDonationId(donation.id);
+    try {
+      const data = await buildDonationReceiptData({
+        donation,
+        beneficiary,
+        cashier: user?.fullName?.trim() || user?.phone || 'Caissier',
+      });
+      await printReceipt(data);
+    } catch {
+      setError('Impression impossible');
+    } finally {
+      setPrintingDonationId(null);
+    }
+  }
+
   async function submitDonation() {
     if (!detail || donateDeptId === '' || !donateItems.length) {
       setDonateStatus('Indiquez une quantité.');
@@ -175,11 +200,23 @@ export function DonationBeneficiariesScreen() {
     setDonateBusy(true);
     setDonateStatus(null);
     try {
-      await createDonation({
+      const created = await createDonation({
         beneficiaryId: detail.id,
         departmentId: donateDeptId,
         items: donateItems,
       });
+      if (printTicket) {
+        try {
+          const data = await buildDonationReceiptData({
+            donation: created,
+            beneficiary: detail,
+            cashier: user?.fullName?.trim() || user?.phone || 'Caissier',
+          });
+          await printReceipt(data);
+        } catch {
+          setError('Don enregistré, mais l’impression a échoué');
+        }
+      }
       setDonateVisible(false);
       setDetail(await getDonationBeneficiary(detail.id));
       await load();
@@ -285,9 +322,17 @@ export function DonationBeneficiariesScreen() {
               ) : null}
               {detail.donations.map((d) => (
                 <View key={d.id} style={styles.historyCard}>
-                  <Text style={styles.rowName}>
-                    {formatDateTime(d.createdAt)} · {d.department?.name}
-                  </Text>
+                  <View style={styles.historyHead}>
+                    <Text style={styles.rowName}>
+                      {formatDateTime(d.createdAt)} · {d.department?.name}
+                    </Text>
+                    <Pressable
+                      onPress={() => void reprintDonation(d, detail)}
+                      disabled={printingDonationId === d.id}
+                      hitSlop={8}>
+                      <Ionicons name="print-outline" size={20} color={BrandColors.primary} />
+                    </Pressable>
+                  </View>
                   {d.items.map((it) => (
                     <Text key={it.id} style={styles.meta}>
                       {it.product?.name} · {formatQuantity(it.quantity)}
@@ -383,6 +428,14 @@ export function DonationBeneficiariesScreen() {
               </View>
             ))}
             {donateStatus ? <Text style={styles.error}>{donateStatus}</Text> : null}
+            <Pressable onPress={() => setPrintTicket((v) => !v)} style={styles.printToggle}>
+              <Ionicons
+                name={printTicket ? 'checkbox' : 'square-outline'}
+                size={20}
+                color={BrandColors.primary}
+              />
+              <Text style={styles.printToggleLabel}>Imprimer le ticket</Text>
+            </Pressable>
           </ScrollView>
         }
         footer={
@@ -458,6 +511,12 @@ const styles = StyleSheet.create({
     gap: 4,
     backgroundColor: BrandColors.surface,
   },
+  historyHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
   chip: {
     paddingHorizontal: Spacing.three,
     paddingVertical: 8,
@@ -500,4 +559,6 @@ const styles = StyleSheet.create({
   },
   modalTopTitle: { fontSize: 18, fontWeight: '700', color: BrandColors.text },
   modalClose: { color: BrandColors.primary, fontWeight: '600' },
+  printToggle: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, marginTop: Spacing.two },
+  printToggleLabel: { color: BrandColors.text, fontWeight: '600' },
 });

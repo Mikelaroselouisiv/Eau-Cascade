@@ -14,6 +14,7 @@ declare global {
       printReceipt?: (saleData: {
         /** Pour nom de fichier PDF (réimpression / export). */
         saleId?: number;
+        ticketTitle?: string | null;
         documentType?: 'RECEIPT' | 'DISBURSEMENT_ORDER';
         companyName: string;
         companyPhone?: string | null;

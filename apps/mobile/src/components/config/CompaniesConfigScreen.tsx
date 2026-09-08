@@ -27,7 +27,7 @@ export function CompaniesConfigScreen() {
   const canEditCompany = canPerm('company.manage') || canPerm('config.manage');
   const canEditDepts = canPerm('departments.manage');
   const canDelete = can(['ADMIN']) || canPerm('company.manage');
-  const allowed = canEditCompany || canEditDepts || canPerm('config.view');
+  const allowed = canEditCompany || canEditDepts;
 
   const [rows, setRows] = useState<CompanyListItem[]>([]);
   const [error, setError] = useState<string | null>(null);

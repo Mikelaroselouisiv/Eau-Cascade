@@ -7,9 +7,11 @@ import {
   createDonation,
   createDonationBeneficiary,
   getCompanies,
+  getCompanyById,
   getDepartments,
   getDonationBeneficiary,
   getDonationSummary,
+  getPrinterSettings,
   getProducts,
   listDonationBeneficiaries,
   updateDonationBeneficiary,
@@ -19,11 +21,16 @@ import type {
   Department,
   DonationBeneficiaryDetail,
   DonationBeneficiaryListItem,
+  DonationRow,
   DonationSummary,
   Product,
 } from '../types/api';
 import { formatDateTime } from '../utils/datetime';
 import { formatQuantity } from '../utils/formatQuantity';
+import {
+  buildReceiptPayloadFromDonation,
+  printThermalReceipt,
+} from '../utils/receiptPayload';
 import { defaultAssignedPlantDepartmentId, departmentsForUser } from '../utils/user-scope';
 
 function formatApiError(err: unknown, fallback: string): string {
@@ -78,6 +85,8 @@ export function DonationPage() {
   const [qty, setQty] = useState<Record<number, string>>({});
   const [donateNote, setDonateNote] = useState('');
   const [donateBusy, setDonateBusy] = useState(false);
+  const [printTicket, setPrintTicket] = useState(true);
+  const [printingDonationId, setPrintingDonationId] = useState<number | null>(null);
 
   const [editNote, setEditNote] = useState('');
 
@@ -236,6 +245,31 @@ export function DonationPage() {
     [products, qty],
   );
 
+  async function printDonationTicket(
+    donation: DonationRow,
+    beneficiary: Pick<DonationBeneficiaryDetail, 'name' | 'phone' | 'address' | 'companyId'>,
+  ) {
+    const company = await getCompanyById(beneficiary.companyId).catch(() => null);
+    const printer = await getPrinterSettings(donation.departmentId).catch(() => null);
+    const cashier = user?.fullName?.trim() || user?.phone || 'Caissier';
+    return printThermalReceipt(
+      buildReceiptPayloadFromDonation(donation, beneficiary, company, printer, cashier),
+    );
+  }
+
+  async function reprintDonation(donation: DonationRow) {
+    if (!detail) return;
+    setPrintingDonationId(donation.id);
+    try {
+      const ok = await printDonationTicket(donation, detail);
+      if (!ok) setMessage('Impression impossible', { persist: true });
+    } catch {
+      setMessage('Impression impossible', { persist: true });
+    } finally {
+      setPrintingDonationId(null);
+    }
+  }
+
   async function submitDonation(e: FormEvent) {
     e.preventDefault();
     if (!detail || !canManage || donateDeptId === '') return;
@@ -245,13 +279,23 @@ export function DonationPage() {
     }
     setDonateBusy(true);
     try {
-      await createDonation({
+      const created = await createDonation({
         beneficiaryId: detail.id,
         departmentId: donateDeptId,
         items: donateItems,
         note: donateNote.trim() || undefined,
       });
       setMessage('Don enregistré.');
+      if (printTicket) {
+        try {
+          const ok = await printDonationTicket(created, detail);
+          if (!ok) {
+            setMessage('Don enregistré, mais l’impression a échoué', { persist: true });
+          }
+        } catch {
+          setMessage('Don enregistré, mais l’impression a échoué', { persist: true });
+        }
+      }
       setShowDonateModal(false);
       await openFiche(detail.id);
       await refreshList();
@@ -493,6 +537,14 @@ export function DonationPage() {
                         ))}
                       </ul>
                       {d.note ? <p className="muted">{d.note}</p> : null}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={printingDonationId === d.id}
+                        onClick={() => void reprintDonation(d)}
+                      >
+                        {printingDonationId === d.id ? 'Impression…' : 'Imprimer le ticket'}
+                      </button>
                     </details>
                   ))}
                 </section>
@@ -544,6 +596,14 @@ export function DonationPage() {
               <label>
                 Note
                 <textarea value={donateNote} onChange={(e) => setDonateNote(e.target.value)} rows={2} />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={printTicket}
+                  onChange={(e) => setPrintTicket(e.target.checked)}
+                />
+                Imprimer le ticket
               </label>
               <div className="credit-form-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowDonateModal(false)}>

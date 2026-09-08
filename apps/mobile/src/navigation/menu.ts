@@ -101,7 +101,7 @@ export const MENU_ITEMS: MenuItem[] = [
     label: 'Configuration',
     href: '/(app)/config',
     icon: 'settings-outline',
-    roles: ['ADMIN', 'MANAGER'],
+    roles: ['ADMIN', 'MANAGER', 'CASHIER', 'CHEF_PRODUCTION'],
     permission: 'config.view',
   },
 ];
@@ -251,7 +251,7 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
       name: 'entreprise',
       title: 'Entreprise',
       icon: 'business-outline',
-      permission: 'config.view',
+      permission: 'company.manage',
       roles: ['ADMIN', 'MANAGER'],
     },
     {
@@ -259,7 +259,7 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
       title: 'Imprimante',
       icon: 'print-outline',
       permission: 'printer.manage',
-      roles: ['ADMIN', 'MANAGER'],
+      roles: ['ADMIN', 'MANAGER', 'CASHIER', 'CHEF_PRODUCTION'],
     },
     {
       name: 'conditionnement',
@@ -421,6 +421,13 @@ export function canAccessTab(tab: SectionTab, access: AccessFns): boolean {
     return (
       access.canPerm('products.manage') ||
       (access.canPerm('products.view') && access.canPerm('stock.view'))
+    );
+  }
+  if (tab.name === 'entreprise') {
+    return (
+      access.canPerm('company.manage') ||
+      access.canPerm('config.manage') ||
+      access.canPerm('departments.manage')
     );
   }
   if (tab.name === 'utilisateurs') {

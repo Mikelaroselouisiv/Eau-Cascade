@@ -24,8 +24,12 @@ export interface SaleReceiptData {
   isTest?: boolean;
   previewSampleBody?: string | null;
   saleRef?: number;
+  ticketTitle?: string | null;
   items?: ReceiptItem[];
   total?: number;
+  amountReceived?: number;
+  changeDue?: number;
+  balanceDue?: number;
   paymentMode?: string;
   receiptFooterText?: string | null;
   paperWidth?: 58 | 80;
@@ -88,6 +92,12 @@ export function buildTicketText(saleData: SaleReceiptData, _width: 58 | 80 = 80)
   if (phone) lines.push(clipLine(`Tel: ${phone}`, lineWidth));
 
   lines.push(separator);
+  const ticketTitle = (saleData.ticketTitle || '').trim();
+  if (ticketTitle) {
+    lines.push(clipLine(ticketTitle, lineWidth));
+  } else if (saleData.saleRef != null) {
+    lines.push(clipLine(`Ticket #${saleData.saleRef}`, lineWidth));
+  }
   if (saleData.receiptClientName) {
     lines.push(clipLine(`Client: ${saleData.receiptClientName}`, lineWidth));
   }
@@ -102,9 +112,6 @@ export function buildTicketText(saleData: SaleReceiptData, _width: 58 | 80 = 80)
   }
   if (saleData.departmentName) {
     lines.push(clipLine(`Departement: ${saleData.departmentName}`, lineWidth));
-  }
-  if (saleData.saleRef != null) {
-    lines.push(clipLine(`Ticket #${saleData.saleRef}`, lineWidth));
   }
   lines.push(`Caissier: ${saleData.cashier ?? 'N/A'}`);
   lines.push(`Date: ${date}`);
@@ -133,6 +140,17 @@ export function buildTicketText(saleData: SaleReceiptData, _width: 58 | 80 = 80)
     }
     lines.push(separator);
     lines.push(`TOTAL: ${formatMoney(saleData.total)}`);
+    if (saleData.amountReceived != null && Number(saleData.amountReceived) > 0.009) {
+      lines.push(clipLine(`Reçu: ${formatMoney(saleData.amountReceived)}`, lineWidth));
+    }
+    const changeDue = Number(saleData.changeDue ?? 0);
+    const balanceDue = Number(saleData.balanceDue ?? 0);
+    if (changeDue > 0.009) {
+      lines.push(clipLine(`Monnaie due: ${formatMoney(changeDue)}`, lineWidth));
+    }
+    if (balanceDue > 0.009) {
+      lines.push(clipLine(`Reste à payer: ${formatMoney(balanceDue)}`, lineWidth));
+    }
     lines.push(`Paiement: ${saleData.paymentMode ?? 'N/A'}`);
   }
 
