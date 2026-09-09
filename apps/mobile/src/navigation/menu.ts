@@ -54,7 +54,7 @@ export const MENU_ITEMS: MenuItem[] = [
     label: 'Production',
     href: '/(app)/production',
     icon: 'construct-outline',
-    roles: ['ADMIN', 'MANAGER', 'CHEF_PRODUCTION'],
+    roles: ['ADMIN', 'MANAGER', 'CHEF_PRODUCTION', 'ACCOUNTANT'],
     permission: 'production.use',
   },
   {
@@ -371,6 +371,13 @@ export function canAccessMenuItem(item: MenuItem, access: AccessFns): boolean {
   }
   if (item.key === 'deliveries' && access.role === 'CHEF_PRODUCTION') {
     return false;
+  }
+  if (item.key === 'production') {
+    return (
+      access.canPerm('production.use') ||
+      access.canPerm('workers.manage') ||
+      access.canPerm('carriers.manage')
+    );
   }
   if (item.permission) return access.canPerm(item.permission);
   return access.can(item.roles);

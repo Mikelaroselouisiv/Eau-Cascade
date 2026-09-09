@@ -231,7 +231,9 @@ export class RolesService implements OnModuleInit {
             p !== 'stock.view' &&
             p !== 'stock.manage' &&
             p !== 'stock.adjust' &&
-            p !== 'stock.raw_in',
+            p !== 'stock.raw_in' &&
+            p !== 'workers.manage' &&
+            p !== 'carriers.manage',
         );
         if (stripped.length !== existing.permissions.length) {
           await this.prisma.appRole.update({
@@ -293,12 +295,18 @@ export class RolesService implements OnModuleInit {
           this.cache.delete(code);
         }
       }
-      if (code === 'ACCOUNTANT' && !existing.permissions.includes('donation.view')) {
-        await this.prisma.appRole.update({
-          where: { id: existing.id },
-          data: { permissions: [...existing.permissions, 'donation.view'] },
-        });
-        this.cache.delete(code);
+      if (code === 'ACCOUNTANT') {
+        let next = existing.permissions;
+        if (!next.includes('donation.view')) next = [...next, 'donation.view'];
+        if (!next.includes('workers.manage')) next = [...next, 'workers.manage'];
+        if (!next.includes('carriers.manage')) next = [...next, 'carriers.manage'];
+        if (next.length !== existing.permissions.length) {
+          await this.prisma.appRole.update({
+            where: { id: existing.id },
+            data: { permissions: next },
+          });
+          this.cache.delete(code);
+        }
       }
     }
   }

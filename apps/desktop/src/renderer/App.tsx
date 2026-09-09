@@ -73,7 +73,7 @@ export default function App() {
             <Route
               path="production"
               element={
-                <RequirePermission anyOf={['production.use', 'transfers.manage']}>
+                <RequirePermission anyOf={['production.use', 'transfers.manage', 'workers.manage', 'carriers.manage']}>
                   <ProductionPage />
                 </RequirePermission>
               }

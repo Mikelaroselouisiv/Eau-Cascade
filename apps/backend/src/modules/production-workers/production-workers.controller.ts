@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Permissions } from '../../common/decorators/permissions.decorator';
+import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import {
@@ -31,7 +31,7 @@ type ScopeUser = {
 
 @Controller('production-workers')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Permissions('production.use')
+@PermissionsAny('production.use', 'workers.manage')
 export class ProductionWorkersController {
   constructor(private readonly workers: ProductionWorkersService) {}
 
@@ -97,6 +97,7 @@ export class ProductionWorkersController {
   }
 
   @Get(':id')
+  @Permissions('workers.manage')
   getOne(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user: ScopeUser,

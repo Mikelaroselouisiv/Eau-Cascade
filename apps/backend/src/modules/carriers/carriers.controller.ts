@@ -27,7 +27,13 @@ type ScopeUser = {
 
 @Controller('carriers')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@PermissionsAny('production.use', 'deliveries.manage', 'deliveries.manage_home', 'deliveries.view')
+@PermissionsAny(
+    'production.use',
+    'deliveries.manage',
+    'deliveries.manage_home',
+    'deliveries.view',
+    'carriers.manage',
+  )
 export class CarriersController {
   constructor(private readonly carriers: CarriersService) {}
 
@@ -51,6 +57,7 @@ export class CarriersController {
   }
 
   @Get(':id')
+  @Permissions('carriers.manage')
   getOne(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user: ScopeUser,

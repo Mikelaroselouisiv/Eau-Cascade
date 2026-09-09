@@ -211,22 +211,40 @@ export function ProductionWorkersPanel({
         ) : null}
       </View>
       {workers.length === 0 ? <Text style={styles.meta}>Aucun ouvrier</Text> : null}
-      {workers.map((w) => (
-        <Pressable
-          key={w.id}
-          onPress={() => void openFiche(w.id)}
-          style={{
-            paddingVertical: 10,
-            borderBottomWidth: 1,
-            borderBottomColor: BrandColors.border,
-          }}>
-          <Text style={{ color: BrandColors.text, fontWeight: '600' }}>{w.name}</Text>
-          <Text style={styles.meta}>
-            {w.phone} · {ymdFromIso(w.startedAt)} · {formatMoney(w.payrollCoefficient)} · MP{' '}
-            {formatQuantity(w.sessionIssuedQty ?? 0)} · PF {formatQuantity(w.sessionQuantity ?? 0)}
-          </Text>
-        </Pressable>
-      ))}
+      {workers.map((w) => {
+        const row = (
+          <>
+            <Text style={{ color: BrandColors.text, fontWeight: '600' }}>{w.name}</Text>
+            <Text style={styles.meta}>
+              {canManageWorkers
+                ? `${w.phone} · ${ymdFromIso(w.startedAt)} · ${formatMoney(w.payrollCoefficient)} · MP ${formatQuantity(w.sessionIssuedQty ?? 0)} · PF ${formatQuantity(w.sessionQuantity ?? 0)}`
+                : w.phone}
+            </Text>
+          </>
+        );
+        return canManageWorkers ? (
+          <Pressable
+            key={w.id}
+            onPress={() => void openFiche(w.id)}
+            style={{
+              paddingVertical: 10,
+              borderBottomWidth: 1,
+              borderBottomColor: BrandColors.border,
+            }}>
+            {row}
+          </Pressable>
+        ) : (
+          <View
+            key={w.id}
+            style={{
+              paddingVertical: 10,
+              borderBottomWidth: 1,
+              borderBottomColor: BrandColors.border,
+            }}>
+            {row}
+          </View>
+        );
+      })}
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: Spacing.three, marginBottom: 10 }}>
         <Pressable onPress={() => { setOp('issue'); setQty({}); }} style={[styles.chip, op === 'issue' && styles.chipActive]}>
@@ -273,7 +291,8 @@ export function ProductionWorkersPanel({
       {outputs.map((o) => (
         <Text key={`o-${o.id}`} style={[styles.meta, { marginTop: 6 }]}>
           PF · {formatDateTimeShort(o.createdAt)} · {o.worker.name} · {o.product.name} ·{' '}
-          {formatQuantity(o.quantity)} · {formatMoney(o.payrollAmount ?? 0)}
+          {formatQuantity(o.quantity)}
+          {canManageWorkers ? ` · ${formatMoney(o.payrollAmount ?? 0)}` : ''}
         </Text>
       ))}
 

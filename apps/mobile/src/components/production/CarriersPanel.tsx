@@ -134,18 +134,32 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
         ) : null}
       </View>
       {rows.length === 0 ? <Text style={styles.meta}>Aucun transporteur</Text> : null}
-      {rows.map((w) => (
-        <Pressable
-          key={w.id}
-          onPress={() => void openFiche(w.id)}
-          style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BrandColors.border }}>
-          <Text style={{ color: BrandColors.text, fontWeight: '600' }}>{w.name}</Text>
-          <Text style={styles.meta}>
-            {w.phone} · {ymdFromIso(w.startedAt)} · {formatQuantity(w.deliveredQty ?? 0)} ·{' '}
-            {formatMoney(w.payrollAmount ?? 0)}
-          </Text>
-        </Pressable>
-      ))}
+      {rows.map((w) => {
+        const row = (
+          <>
+            <Text style={{ color: BrandColors.text, fontWeight: '600' }}>{w.name}</Text>
+            <Text style={styles.meta}>
+              {canManage
+                ? `${w.phone} · ${ymdFromIso(w.startedAt)} · ${formatQuantity(w.deliveredQty ?? 0)} · ${formatMoney(w.payrollAmount ?? 0)}`
+                : w.phone}
+            </Text>
+          </>
+        );
+        return canManage ? (
+          <Pressable
+            key={w.id}
+            onPress={() => void openFiche(w.id)}
+            style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BrandColors.border }}>
+            {row}
+          </Pressable>
+        ) : (
+          <View
+            key={w.id}
+            style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BrandColors.border }}>
+            {row}
+          </View>
+        );
+      })}
 
       <ModalShell
         visible={createOpen}

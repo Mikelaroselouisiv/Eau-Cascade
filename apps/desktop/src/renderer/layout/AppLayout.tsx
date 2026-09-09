@@ -82,6 +82,13 @@ export function AppLayout() {
       }
       return canPerm('stock.raw_in') && (user?.productionDepartmentIds?.length ?? 0) > 0;
     }
+    if (item.to === '/app/production') {
+      return (
+        canPerm('production.use') ||
+        canPerm('workers.manage') ||
+        canPerm('carriers.manage')
+      );
+    }
     if (!canPerm(item.permission)) return false;
     if (item.to === '/app/livraisons' && user?.role === 'CHEF_PRODUCTION') {
       return false;

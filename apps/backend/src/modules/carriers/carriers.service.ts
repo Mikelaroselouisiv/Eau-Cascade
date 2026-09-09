@@ -6,10 +6,12 @@ import {
 } from '@nestjs/common';
 import { Prisma, ProductNature } from '@prisma/client';
 import { isProductionDepartment } from '../../common/department-kind';
+import { permissionGranted } from '../../common/permissions';
 import { canAccessAssignedDepartment } from '../../common/user-scope';
 import { ymdToBusinessDayEnd, ymdToBusinessDayStart, nowBusinessYmd } from '../../common/utils/business-timezone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { RolesService } from '../roles/roles.service';
 import type { CreateCarrierDto, UpdateCarrierDto } from './dto/carrier.dto';
 
 const CARRIER_INCLUDE = {
@@ -34,7 +36,14 @@ export class CarriersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly rolesService: RolesService,
   ) {}
+
+  private async canSeePayroll(user: ScopeUser) {
+    if (!user.role) return false;
+    const perms = await this.rolesService.getPermissionsForUserRole(user.role);
+    return permissionGranted(perms, 'carriers.manage');
+  }
 
   private assertDeptAccess(user: ScopeUser, departmentId: number) {
     if (!canAccessAssignedDepartment(user, departmentId)) {
@@ -147,10 +156,21 @@ export class CarriersService {
             _sum: { quantity: true, payrollAmount: true },
           });
     const byId = new Map(sums.map((s) => [s.carrierId, s]));
+    const showPay = await this.canSeePayroll(user);
     return rows.map((r) => {
+      const serialized = this.serialize(r);
+      if (!showPay) {
+        const { rates: _rates, ...rest } = serialized;
+        return {
+          ...rest,
+          rates: [],
+          dateFrom,
+          dateTo,
+        };
+      }
       const sum = byId.get(r.id)?._sum;
       return {
-        ...this.serialize(r),
+        ...serialized,
         dateFrom,
         dateTo,
         deliveredQty: Number(sum?.quantity ?? 0),

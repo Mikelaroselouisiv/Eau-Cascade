@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, ProductNature, ProductionFlowKind } from '@prisma/client';
 import { isProductionDepartment } from '../../common/department-kind';
+import { permissionGranted } from '../../common/permissions';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
 import { canAccessAssignedDepartment } from '../../common/user-scope';
 import { ymdToBusinessDayEnd, ymdToBusinessDayStart } from '../../common/utils/business-timezone';
@@ -13,6 +14,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { ProductionSessionsService } from '../production-sessions/production-sessions.service';
+import { RolesService } from '../roles/roles.service';
 import type {
   CreateProductionWorkerDto,
   DeclareWorkerMovementDto,
@@ -45,7 +47,14 @@ export class ProductionWorkersService {
     private readonly inventoryService: InventoryService,
     private readonly auditService: AuditService,
     private readonly productionSessions: ProductionSessionsService,
+    private readonly rolesService: RolesService,
   ) {}
+
+  private async canSeePayroll(user: ScopeUser) {
+    if (!user.role) return false;
+    const perms = await this.rolesService.getPermissionsForUserRole(user.role);
+    return permissionGranted(perms, 'workers.manage');
+  }
 
   private assertDeptAccess(user: ScopeUser, departmentId: number) {
     if (!canAccessAssignedDepartment(user, departmentId)) {
@@ -133,13 +142,20 @@ export class ProductionWorkersService {
     const issuedBy = new Map(issued.map((g) => [g.workerId, g]));
     const returnedBy = new Map(returned.map((g) => [g.workerId, g]));
 
+    const showPay = await this.canSeePayroll(user);
     return workers.map((w) => {
       const out = returnedBy.get(w.id);
-      return {
+      const row = {
         ...w,
-        payrollCoefficient: Number(w.payrollCoefficient),
         sessionIssuedQty: Number(issuedBy.get(w.id)?._sum.quantity ?? 0),
         sessionQuantity: Number(out?._sum.quantity ?? 0),
+      };
+      if (!showPay) {
+        return { ...row, payrollCoefficient: 0, sessionPayroll: 0 };
+      }
+      return {
+        ...row,
+        payrollCoefficient: Number(w.payrollCoefficient),
         sessionPayroll: Number(out?._sum.payrollAmount ?? 0),
       };
     });
@@ -323,7 +339,14 @@ export class ProductionWorkersService {
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
-    return rows.map((r) => ({ ...r, quantity: Number(r.quantity) }));
+    const showPay = await this.canSeePayroll(user);
+    return rows.map((r) => ({
+      ...r,
+      quantity: Number(r.quantity),
+      worker: showPay
+        ? r.worker
+        : { id: r.worker.id, name: r.worker.name, phone: r.worker.phone, payrollCoefficient: 0 },
+    }));
   }
 
   async listOutputs(departmentId: number, user: ScopeUser, workerId?: number) {
@@ -339,10 +362,14 @@ export class ProductionWorkersService {
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
+    const showPay = await this.canSeePayroll(user);
     return rows.map((r) => ({
       ...r,
       quantity: Number(r.quantity),
-      payrollAmount: Number(r.payrollAmount),
+      payrollAmount: showPay ? Number(r.payrollAmount) : 0,
+      worker: showPay
+        ? r.worker
+        : { id: r.worker.id, name: r.worker.name, phone: r.worker.phone, payrollCoefficient: 0 },
     }));
   }
 

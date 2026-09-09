@@ -307,36 +307,48 @@ export function ProductionWorkersSection({
                 <tr>
                   <th>Nom</th>
                   <th>Téléphone</th>
-                  <th>Entrée</th>
-                  <th>{moneyLabel('Coefficient')}</th>
-                  <th>MP</th>
-                  <th>PF</th>
-                  <th>Paie</th>
+                  {canManageWorkers ? (
+                    <>
+                      <th>Entrée</th>
+                      <th>{moneyLabel('Coefficient')}</th>
+                      <th>MP</th>
+                      <th>PF</th>
+                      <th>Paie</th>
+                    </>
+                  ) : null}
                 </tr>
               </thead>
               <tbody>
                 {workers.map((w) => (
                   <tr
                     key={w.id}
-                    className="dashboard-sale-row"
-                    role="button"
-                    tabIndex={0}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => void openFiche(w.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        void openFiche(w.id);
-                      }
-                    }}
+                    className={canManageWorkers ? 'dashboard-sale-row' : undefined}
+                    role={canManageWorkers ? 'button' : undefined}
+                    tabIndex={canManageWorkers ? 0 : undefined}
+                    style={canManageWorkers ? { cursor: 'pointer' } : undefined}
+                    onClick={canManageWorkers ? () => void openFiche(w.id) : undefined}
+                    onKeyDown={
+                      canManageWorkers
+                        ? (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              void openFiche(w.id);
+                            }
+                          }
+                        : undefined
+                    }
                   >
                     <td>{w.name}</td>
                     <td>{w.phone}</td>
-                    <td>{formatYmd(w.startedAt)}</td>
-                    <td className="journal-amt">{formatMoney(w.payrollCoefficient)}</td>
-                    <td className="journal-amt">{formatQuantity(w.sessionIssuedQty ?? 0)}</td>
-                    <td className="journal-amt">{formatQuantity(w.sessionQuantity ?? 0)}</td>
-                    <td className="journal-amt">{formatMoney(w.sessionPayroll ?? 0)}</td>
+                    {canManageWorkers ? (
+                      <>
+                        <td>{formatYmd(w.startedAt)}</td>
+                        <td className="journal-amt">{formatMoney(w.payrollCoefficient)}</td>
+                        <td className="journal-amt">{formatQuantity(w.sessionIssuedQty ?? 0)}</td>
+                        <td className="journal-amt">{formatQuantity(w.sessionQuantity ?? 0)}</td>
+                        <td className="journal-amt">{formatMoney(w.sessionPayroll ?? 0)}</td>
+                      </>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -388,7 +400,7 @@ export function ProductionWorkersSection({
                   <th>Ouvrier</th>
                   <th>Produit</th>
                   <th>Qté</th>
-                  <th>Paie</th>
+                  {canManageWorkers ? <th>Paie</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -398,7 +410,9 @@ export function ProductionWorkersSection({
                     <td>{row.worker.name}</td>
                     <td>{row.product.name}</td>
                     <td className="journal-amt">{formatQuantity(row.quantity)}</td>
-                    <td className="journal-amt">{formatMoney(row.payrollAmount ?? 0)}</td>
+                    {canManageWorkers ? (
+                      <td className="journal-amt">{formatMoney(row.payrollAmount ?? 0)}</td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

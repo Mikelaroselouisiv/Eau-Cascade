@@ -159,32 +159,44 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
                 <tr>
                   <th>Nom</th>
                   <th>Téléphone</th>
-                  <th>Entrée</th>
-                  <th>Livré</th>
-                  <th>Paie</th>
+                  {canManage ? (
+                    <>
+                      <th>Entrée</th>
+                      <th>Livré</th>
+                      <th>Paie</th>
+                    </>
+                  ) : null}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((w) => (
                   <tr
                     key={w.id}
-                    className="dashboard-sale-row"
-                    role="button"
-                    tabIndex={0}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => void openFiche(w.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        void openFiche(w.id);
-                      }
-                    }}
+                    className={canManage ? 'dashboard-sale-row' : undefined}
+                    role={canManage ? 'button' : undefined}
+                    tabIndex={canManage ? 0 : undefined}
+                    style={canManage ? { cursor: 'pointer' } : undefined}
+                    onClick={canManage ? () => void openFiche(w.id) : undefined}
+                    onKeyDown={
+                      canManage
+                        ? (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              void openFiche(w.id);
+                            }
+                          }
+                        : undefined
+                    }
                   >
                     <td>{w.name}</td>
                     <td>{w.phone}</td>
-                    <td>{formatYmd(w.startedAt)}</td>
-                    <td className="journal-amt">{formatQuantity(w.deliveredQty ?? 0)}</td>
-                    <td className="journal-amt">{formatMoney(w.payrollAmount ?? 0)}</td>
+                    {canManage ? (
+                      <>
+                        <td>{formatYmd(w.startedAt)}</td>
+                        <td className="journal-amt">{formatQuantity(w.deliveredQty ?? 0)}</td>
+                        <td className="journal-amt">{formatMoney(w.payrollAmount ?? 0)}</td>
+                      </>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
