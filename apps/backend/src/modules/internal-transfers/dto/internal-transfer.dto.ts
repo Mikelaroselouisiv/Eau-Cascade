@@ -51,3 +51,23 @@ export class CreateInternalTransferDto {
   @Min(1)
   carrierId?: number;
 }
+
+export class UpdateInternalTransferItemDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  id: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.0001)
+  quantity: number;
+}
+
+export class UpdateInternalTransferDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => UpdateInternalTransferItemDto)
+  items: UpdateInternalTransferItemDto[];
+}

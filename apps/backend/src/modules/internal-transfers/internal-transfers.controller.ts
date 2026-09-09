@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -14,7 +15,7 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Permissions, PermissionsAny } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { CreateInternalTransferDto } from './dto/internal-transfer.dto';
+import { CreateInternalTransferDto, UpdateInternalTransferDto } from './dto/internal-transfer.dto';
 import { InternalTransfersService } from './internal-transfers.service';
 
 type ScopeUser = {
@@ -63,6 +64,17 @@ export class InternalTransfersController {
   @Permissions('transfers.manage')
   create(@Body() dto: CreateInternalTransferDto, @GetUser() user: ScopeUser) {
     return this.transfers.create(dto, user);
+  }
+
+  @Patch(':id')
+  @Permissions('transfers.manage')
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateInternalTransferDto,
+    @GetUser() user: ScopeUser,
+  ) {
+    if (!id) throw new BadRequestException('id invalide');
+    return this.transfers.update(id, dto, user);
   }
 
   @Post(':id/confirm')

@@ -25,7 +25,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { ProductionSessionsService } from '../production-sessions/production-sessions.service';
 import { CarriersService } from '../carriers/carriers.service';
-import type { CreateInternalTransferDto } from './dto/internal-transfer.dto';
+import type {
+  CreateInternalTransferDto,
+  UpdateInternalTransferDto,
+} from './dto/internal-transfer.dto';
 
 const TRANSFER_INCLUDE = {
   fromDepartment: { select: { id: true, name: true, kind: true, companyId: true } },
@@ -285,6 +288,104 @@ export class InternalTransfersService {
     });
 
     return created;
+  }
+
+  async update(id: number, dto: UpdateInternalTransferDto, user: ScopeUser) {
+    const transfer = await this.prisma.internalTransfer.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        items: true,
+        fromDepartment: true,
+      },
+    });
+    if (!transfer) throw new NotFoundException('Transfert introuvable');
+    if (transfer.status !== InternalTransferStatus.PENDING) {
+      throw new BadRequestException('Ce transfert n’est plus en attente.');
+    }
+    this.assertCanDispatch(user, transfer.fromDepartment);
+
+    const byItemId = new Map(transfer.items.map((item) => [item.id, item]));
+    const seen = new Set<number>();
+    for (const patch of dto.items) {
+      if (!byItemId.has(patch.id)) {
+        throw new BadRequestException(`Ligne ${patch.id} n’appartient pas à ce transfert.`);
+      }
+      if (seen.has(patch.id)) {
+        throw new BadRequestException(`Ligne ${patch.id} en double.`);
+      }
+      seen.add(patch.id);
+    }
+    if (seen.size !== transfer.items.length) {
+      throw new BadRequestException('Toutes les lignes du transfert doivent être envoyées.');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const patch of dto.items) {
+        const current = byItemId.get(patch.id)!;
+        const newQty = Number(patch.quantity);
+        const oldQty = Number(current.quantity);
+        if (Math.abs(newQty - oldQty) <= 0.0001) continue;
+
+        await tx.internalTransferItem.update({
+          where: { id: current.id },
+          data: { quantity: newQty },
+        });
+
+        const flows = await tx.productionFlow.findMany({
+          where: {
+            internalTransferId: transfer.id,
+            productId: current.productId,
+            kind: ProductionFlowKind.FLOW_TRANSFER_OUT,
+          },
+          orderBy: { id: 'asc' },
+        });
+        if (flows[0]) {
+          await tx.productionFlow.update({
+            where: { id: flows[0].id },
+            data: { quantity: newQty },
+          });
+          for (const extra of flows.slice(1)) {
+            await tx.productionFlow.update({
+              where: { id: extra.id },
+              data: { quantity: 0 },
+            });
+          }
+        }
+
+        const trips = await tx.carrierTrip.findMany({
+          where: {
+            internalTransferId: transfer.id,
+            productId: current.productId,
+          },
+          orderBy: { id: 'asc' },
+        });
+        if (trips[0]) {
+          const coefficient = Number(trips[0].coefficient);
+          await tx.carrierTrip.update({
+            where: { id: trips[0].id },
+            data: { quantity: newQty, payrollAmount: newQty * coefficient },
+          });
+          for (const extra of trips.slice(1)) {
+            await tx.carrierTrip.update({
+              where: { id: extra.id },
+              data: { quantity: 0, payrollAmount: 0 },
+            });
+          }
+        }
+      }
+    });
+
+    await this.auditService.log({
+      userId: user.id,
+      action: 'INTERNAL_TRANSFER_UPDATED',
+      entity: 'InternalTransfer',
+      entityId: String(id),
+    });
+
+    return this.prisma.internalTransfer.findFirst({
+      where: { id },
+      include: TRANSFER_INCLUDE,
+    });
   }
 
   async confirm(id: number, user: ScopeUser) {
