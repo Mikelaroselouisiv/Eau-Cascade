@@ -1,4 +1,4 @@
-import { clampToRecentTotalsRange, mustClampRecentTotals } from './recent-range';
+import { clampToRecentTotalsRange, mustClampRecentExpenses, mustClampRecentTotals } from './recent-range';
 
 describe('recent-range', () => {
   it('does not clamp roles with reports.view or *', () => {
@@ -8,6 +8,16 @@ describe('recent-range', () => {
 
   it('clamps manager-style permissions', () => {
     expect(mustClampRecentTotals(['dashboard.view', 'sales.recent_totals'])).toBe(true);
+  });
+
+  it('does not clamp expense journal for finance.view, finance.write or *', () => {
+    expect(mustClampRecentExpenses(['finance.view'])).toBe(false);
+    expect(mustClampRecentExpenses(['finance.write'])).toBe(false);
+    expect(mustClampRecentExpenses(['*'])).toBe(false);
+  });
+
+  it('clamps expense journal without finance.view', () => {
+    expect(mustClampRecentExpenses(['dashboard.view', 'finance.recent_expenses'])).toBe(true);
   });
 
   it('clamps an old range to today + yesterday (Port-au-Prince)', () => {

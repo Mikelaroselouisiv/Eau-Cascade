@@ -38,6 +38,10 @@ export const PERMISSIONS = [
   { code: 'finance.view', label: 'Consulter la finance (journal, totaux)' },
   { code: 'finance.write', label: 'Saisir / modifier toute écriture financière' },
   { code: 'finance.expense', label: 'Enregistrer des dépenses uniquement (sans voir la finance)' },
+  {
+    code: 'finance.recent_expenses',
+    label: 'Voir le journal des dépenses (2 derniers jours max)',
+  },
   { code: 'accounting.view', label: 'Consulter la comptabilité' },
   { code: 'accounting.write', label: 'Saisir des écritures comptables' },
   { code: 'accounting.manage', label: 'Gérer exercices et plan comptable' },
@@ -105,6 +109,7 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ id: string; label: string; codes
       'finance.view',
       'finance.write',
       'finance.expense',
+      'finance.recent_expenses',
       'accounting.view',
       'accounting.write',
       'accounting.manage',
@@ -166,7 +171,7 @@ export const SYSTEM_ROLE_LABELS: Record<string, string> = {
 
 /**
  * Nombre de jours calendaires (fuseau Port-au-Prince) pour `sales.recent_totals`
- * : aujourd’hui + veille = 2 jours.
+ * et `finance.recent_expenses` : aujourd’hui + veille = 2 jours.
  */
 export const SALES_RECENT_TOTALS_DAYS = 2;
 
@@ -207,6 +212,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'users.view',
     'credit.view',
     'credit.manage',
+    'finance.recent_expenses',
     'donation.view',
     'donation.manage',
     'production.use',

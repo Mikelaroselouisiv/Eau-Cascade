@@ -43,6 +43,7 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ id: string; label: string; codes
       'finance.view',
       'finance.write',
       'finance.expense',
+      'finance.recent_expenses',
       'accounting.view',
       'accounting.write',
       'accounting.manage',

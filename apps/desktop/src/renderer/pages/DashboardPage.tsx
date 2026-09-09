@@ -76,10 +76,13 @@ export function DashboardPage() {
   const canManageFinance = canPerm('finance.write');
   /** Voir journal / totaux finance (pas seulement saisir une dépense). */
   const canViewFinance = canPerm('finance.view') || canManageFinance;
+  /** Journal des dépenses, même fenêtre 2 jours que les ventes. */
+  const canViewRecentExpenses = canPerm('finance.recent_expenses');
+  const canViewExpenseJournal = canViewFinance || canViewRecentExpenses;
   /** Formulaire dépense seul — sans accès au reste de la finance. */
   const canRecordExpense =
     user?.role !== 'CASHIER' && (canPerm('finance.expense') || canManageFinance);
-  const showExpensesTab = canRecordExpense || canViewFinance;
+  const showExpensesTab = canRecordExpense || canViewExpenseJournal;
   const canCancelOrRefund = canPerm('sales.cancel');
   const canDeleteSale = canPerm('sales.delete');
   const canSeePurchases = isAdmin || canPerm('purchasing.manage');
@@ -97,6 +100,28 @@ export function DashboardPage() {
     if (canSeeUnlimitedSalesRange || !canSeeSalesTotals) return null;
     return addDaysYmd(formatYmd(new Date()), -1);
   }, [canSeeUnlimitedSalesRange, canSeeSalesTotals]);
+  const expensesRecentMinYmd = useMemo(() => {
+    if (canViewFinance || !canViewExpenseJournal) return null;
+    return addDaysYmd(formatYmd(new Date()), -1);
+  }, [canViewFinance, canViewExpenseJournal]);
+  const canSeePurchasesInFinance = canViewFinance && canSeePurchases;
+
+  function defaultExpenseFromYmd() {
+    if (expensesRecentMinYmd) return expensesRecentMinYmd;
+    return defaultMonthStartYmd();
+  }
+
+  function clampExpenseRangeYmd(from: string, to: string): { from: string; to: string } {
+    const today = formatYmd(new Date());
+    let nextFrom = from;
+    let nextTo = to;
+    if (expensesRecentMinYmd) {
+      if (nextFrom < expensesRecentMinYmd) nextFrom = expensesRecentMinYmd;
+      if (nextTo > today) nextTo = today;
+      if (nextTo < nextFrom) nextTo = nextFrom;
+    }
+    return { from: nextFrom, to: nextTo };
+  }
 
   function defaultVentesFromYmd() {
     if (salesRecentMinYmd) return salesRecentMinYmd;
@@ -131,32 +156,33 @@ export function DashboardPage() {
   const [expensePrintOrder, setExpensePrintOrder] = useState(false);
   const [expenseDeptId, setExpenseDeptId] = useState<number | ''>('');
 
-  const [achatsTotalsDateFrom, setAchatsTotalsDateFrom] = useState(defaultMonthStartYmd);
+  const [achatsTotalsDateFrom, setAchatsTotalsDateFrom] = useState(defaultExpenseFromYmd);
   const [achatsTotalsDateTo, setAchatsTotalsDateTo] = useState(() => formatYmd(new Date()));
   const [achatsTotalsSnapshot, setAchatsTotalsSnapshot] = useState<DashboardBalanceSnapshot | null>(null);
   const [achatsTotalsLoading, setAchatsTotalsLoading] = useState(false);
 
-  const [ledgerDateFrom, setLedgerDateFrom] = useState(defaultMonthStartYmd);
+  const [ledgerDateFrom, setLedgerDateFrom] = useState(defaultExpenseFromYmd);
   const [ledgerDateTo, setLedgerDateTo] = useState(() => formatYmd(new Date()));
   const [ledgerNature, setLedgerNature] = useState<'all' | 'purchase' | 'sale' | 'expense'>(
     isAdmin ? 'all' : 'expense',
   );
 
-  /** Nature journal : les managers ne voient pas les lignes d’achat. */
+  /** Nature journal : vue limitée = dépenses seulement ; les achats restent hors de cette fenêtre. */
   const effectiveLedgerNature = useMemo((): 'all' | 'purchase' | 'sale' | 'expense' => {
-    if (canSeePurchases) return ledgerNature;
+    if (!canViewFinance) return 'expense';
+    if (canSeePurchasesInFinance) return ledgerNature;
     if (ledgerNature === 'purchase') return 'expense';
     return ledgerNature;
-  }, [canSeePurchases, ledgerNature]);
+  }, [canViewFinance, canSeePurchasesInFinance, ledgerNature]);
 
   useEffect(() => {
-    if (!canSeePurchases && ledgerNature === 'purchase') {
+    if (!canSeePurchasesInFinance && ledgerNature === 'purchase') {
       setLedgerNature('expense');
     }
-  }, [canSeePurchases, ledgerNature]);
+  }, [canSeePurchasesInFinance, ledgerNature]);
 
   function sanitizeLedgerItems(items: FinanceLedgerRow[]) {
-    if (canSeePurchases) return items;
+    if (canSeePurchasesInFinance) return items;
     return items.filter((row) => row.kind !== 'PURCHASE');
   }
 
@@ -339,12 +365,12 @@ export function DashboardPage() {
     if (!canAccessDashboard || companyId === '') return;
 
     const cid = Number(companyId);
-    setAchatsTotalsDateFrom(defaultMonthStartYmd());
+    setAchatsTotalsDateFrom(defaultExpenseFromYmd());
     setAchatsTotalsDateTo(formatYmd(new Date()));
     setAchatsTotalsSnapshot(null);
-    setLedgerDateFrom(defaultMonthStartYmd());
+    setLedgerDateFrom(defaultExpenseFromYmd());
     setLedgerDateTo(formatYmd(new Date()));
-    setLedgerNature('all');
+    setLedgerNature(isAdmin ? 'all' : 'expense');
     setLedgerItems([]);
     setLedgerTotal(0);
     setLedgerSkip(0);
@@ -514,7 +540,7 @@ export function DashboardPage() {
   }, [companyId, salesListQuery, canAccessDashboard, setMsg, tab, salesDeptParams]);
 
   useEffect(() => {
-    if (!canViewFinance || companyId === '' || tab !== 'achats') return;
+    if (!canViewExpenseJournal || companyId === '' || tab !== 'achats') return;
     if (!achatsTotalsDateFrom || !achatsTotalsDateTo || achatsTotalsDateFrom > achatsTotalsDateTo) return;
     setAchatsTotalsLoading(true);
     void getDashboardSummaryRange({
@@ -527,10 +553,10 @@ export function DashboardPage() {
         setMsg('Impossible de charger les totaux achats / dépenses.', { persist: true }),
       )
       .finally(() => setAchatsTotalsLoading(false));
-  }, [tab, companyId, achatsTotalsDateFrom, achatsTotalsDateTo, canViewFinance, setMsg]);
+  }, [tab, companyId, achatsTotalsDateFrom, achatsTotalsDateTo, canViewExpenseJournal, setMsg]);
 
   useEffect(() => {
-    if (!canViewFinance || companyId === '' || tab !== 'achats') return;
+    if (!canViewExpenseJournal || companyId === '' || tab !== 'achats') return;
     if (!ledgerDateFrom || !ledgerDateTo || ledgerDateFrom > ledgerDateTo) return;
     setLedgerLoading(true);
     setLedgerSkip(0);
@@ -545,15 +571,17 @@ export function DashboardPage() {
       .then((res) => {
         const items = sanitizeLedgerItems(res.items);
         setLedgerItems(items);
-        setLedgerTotal(canSeePurchases ? res.total : items.length);
+        setLedgerTotal(
+          canSeePurchasesInFinance || effectiveLedgerNature !== 'all' ? res.total : items.length,
+        );
         setLedgerSkip(0);
       })
       .catch(() => setMsg('Impossible de charger le journal unifié.', { persist: true }))
       .finally(() => setLedgerLoading(false));
-  }, [tab, companyId, ledgerDateFrom, ledgerDateTo, effectiveLedgerNature, canViewFinance, canSeePurchases, setMsg]);
+  }, [tab, companyId, ledgerDateFrom, ledgerDateTo, effectiveLedgerNature, canViewExpenseJournal, canSeePurchasesInFinance, setMsg]);
 
   async function refreshAchatsLedger() {
-    if (companyId === '' || !canViewFinance) return;
+    if (companyId === '' || !canViewExpenseJournal) return;
     const cid = Number(companyId);
     const [range, ledgerRes] = await Promise.all([
       getDashboardSummaryRange({
@@ -573,7 +601,9 @@ export function DashboardPage() {
     setAchatsTotalsSnapshot(range);
     const items = sanitizeLedgerItems(ledgerRes.items);
     setLedgerItems(items);
-    setLedgerTotal(canSeePurchases ? ledgerRes.total : items.length);
+    setLedgerTotal(
+      canSeePurchasesInFinance || effectiveLedgerNature !== 'all' ? ledgerRes.total : items.length,
+    );
     setLedgerSkip(0);
   }
 
@@ -689,7 +719,11 @@ export function DashboardPage() {
       const extra = sanitizeLedgerItems(res.items);
       setLedgerItems((prev) => [...prev, ...extra]);
       setLedgerSkip(nextSkip);
-      setLedgerTotal(canSeePurchases ? res.total : nextSkip + extra.length);
+      setLedgerTotal(
+        canSeePurchasesInFinance || effectiveLedgerNature !== 'all'
+          ? res.total
+          : nextSkip + extra.length,
+      );
     } catch {
       setMsg('Impossible de charger plus de lignes du journal.', { persist: true });
     } finally {
@@ -1388,13 +1422,13 @@ export function DashboardPage() {
           {tab === 'achats' && showExpensesTab ? (
             <>
               <section
-                className={canViewFinance ? 'grid two-col' : 'grid'}
+                className={canViewExpenseJournal ? 'grid two-col' : 'grid'}
                 style={{ marginTop: '1rem' }}
               >
                 {canRecordExpense ? (
                   <div className="card">
                     <h2>Nouvelle dépense manuelle</h2>
-                    {!canViewFinance ? (
+                    {!canViewExpenseJournal ? (
                       <p className="dept-hint">
                         Vous pouvez enregistrer une dépense. Le journal et les totaux finance restent
                         réservés à d’autres rôles.
@@ -1489,9 +1523,14 @@ export function DashboardPage() {
                   </div>
                 ) : null}
 
-                {canViewFinance ? (
+                {canViewExpenseJournal ? (
                 <div className="card">
-                  <h2>{canSeePurchases ? 'Totaux (achats & dépenses manuelles)' : 'Totaux (dépenses manuelles)'}</h2>
+                  <h2>{canSeePurchasesInFinance ? 'Totaux (achats & dépenses manuelles)' : 'Totaux (dépenses manuelles)'}</h2>
+                  {expensesRecentMinYmd ? (
+                    <p className="dept-hint" style={{ marginTop: 0 }}>
+                      Totaux limités aux 2 derniers jours (depuis le {expensesRecentMinYmd}).
+                    </p>
+                  ) : null}
                   <div
                     className="form-grid inline"
                     style={{
@@ -1504,7 +1543,16 @@ export function DashboardPage() {
                       <input
                         type="date"
                         value={achatsTotalsDateFrom}
-                        onChange={(e) => setAchatsTotalsDateFrom(e.target.value)}
+                        min={expensesRecentMinYmd ?? undefined}
+                        max={formatYmd(new Date())}
+                        onChange={(e) => {
+                          const { from, to } = clampExpenseRangeYmd(
+                            e.target.value,
+                            achatsTotalsDateTo,
+                          );
+                          setAchatsTotalsDateFrom(from);
+                          setAchatsTotalsDateTo(to);
+                        }}
                       />
                     </label>
                     <label>
@@ -1512,7 +1560,16 @@ export function DashboardPage() {
                       <input
                         type="date"
                         value={achatsTotalsDateTo}
-                        onChange={(e) => setAchatsTotalsDateTo(e.target.value)}
+                        min={expensesRecentMinYmd ?? undefined}
+                        max={formatYmd(new Date())}
+                        onChange={(e) => {
+                          const { from, to } = clampExpenseRangeYmd(
+                            achatsTotalsDateFrom,
+                            e.target.value,
+                          );
+                          setAchatsTotalsDateFrom(from);
+                          setAchatsTotalsDateTo(to);
+                        }}
                       />
                     </label>
                   </div>
@@ -1526,7 +1583,7 @@ export function DashboardPage() {
                     </p>
                   ) : (
                     <section className="grid kpis" style={{ marginBottom: 0 }}>
-                      {canSeePurchases ? (
+                      {canSeePurchasesInFinance ? (
                         <div className="card kpi">
                           <div className="kpi-label">Achats reçus</div>
                           <div className="kpi-value">{formatMoney(achatsTotalsSnapshot.purchases)}</div>
@@ -1542,9 +1599,20 @@ export function DashboardPage() {
                 ) : null}
               </section>
 
-              {canViewFinance ? (
+              {canViewExpenseJournal ? (
               <section className="card" style={{ marginTop: '1rem' }}>
-                <h2>{canSeePurchases ? 'Journal (achats, ventes caisse, dépenses)' : 'Journal (ventes caisse, dépenses)'}</h2>
+                <h2>
+                  {canSeePurchasesInFinance
+                    ? 'Journal (achats, ventes caisse, dépenses)'
+                    : canViewFinance
+                      ? 'Journal (ventes caisse, dépenses)'
+                      : 'Journal des dépenses'}
+                </h2>
+                {expensesRecentMinYmd ? (
+                  <p className="dept-hint" style={{ marginTop: 0 }}>
+                    Totaux limités aux 2 derniers jours (depuis le {expensesRecentMinYmd}).
+                  </p>
+                ) : null}
                 <div
                   className="form-grid inline"
                   style={{
@@ -1553,6 +1621,7 @@ export function DashboardPage() {
                     gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
                   }}
                 >
+                  {canViewFinance ? (
                   <label>
                     Nature
                     <select
@@ -1562,17 +1631,24 @@ export function DashboardPage() {
                       }
                     >
                       <option value="all">Toutes</option>
-                      {canSeePurchases ? <option value="purchase">Achats</option> : null}
+                      {canSeePurchasesInFinance ? <option value="purchase">Achats</option> : null}
                       <option value="sale">Ventes (caisse)</option>
                       <option value="expense">Dépenses</option>
                     </select>
                   </label>
+                  ) : null}
                   <label>
                     Date début
                     <input
                       type="date"
                       value={ledgerDateFrom}
-                      onChange={(e) => setLedgerDateFrom(e.target.value)}
+                      min={expensesRecentMinYmd ?? undefined}
+                      max={formatYmd(new Date())}
+                      onChange={(e) => {
+                        const { from, to } = clampExpenseRangeYmd(e.target.value, ledgerDateTo);
+                        setLedgerDateFrom(from);
+                        setLedgerDateTo(to);
+                      }}
                     />
                   </label>
                   <label>
@@ -1580,7 +1656,13 @@ export function DashboardPage() {
                     <input
                       type="date"
                       value={ledgerDateTo}
-                      onChange={(e) => setLedgerDateTo(e.target.value)}
+                      min={expensesRecentMinYmd ?? undefined}
+                      max={formatYmd(new Date())}
+                      onChange={(e) => {
+                        const { from, to } = clampExpenseRangeYmd(ledgerDateFrom, e.target.value);
+                        setLedgerDateFrom(from);
+                        setLedgerDateTo(to);
+                      }}
                     />
                   </label>
                   <button
@@ -1593,7 +1675,10 @@ export function DashboardPage() {
                         companyId: Number(companyId),
                         dateFrom: ledgerDateFrom,
                         dateTo: ledgerDateTo,
-                        nature: effectiveLedgerNature === 'all' && !canSeePurchases ? 'expense' : effectiveLedgerNature,
+                        nature:
+                          effectiveLedgerNature === 'all' && !canSeePurchasesInFinance
+                            ? 'expense'
+                            : effectiveLedgerNature,
                       })
                         .then((blob) => {
                           const url = URL.createObjectURL(blob);

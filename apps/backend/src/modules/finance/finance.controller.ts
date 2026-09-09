@@ -20,6 +20,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { formatDateFr } from '../../common/pdf/pdf-format';
 import { mergePlantCashierPermissions } from '../../common/plant-cashier';
 import { permissionsSatisfy } from '../../common/permissions';
+import { clampToRecentTotalsRange, mustClampRecentExpenses } from '../../common/utils/recent-range';
 import { RolesService } from '../roles/roles.service';
 import { CloseCashDto, CreateFinanceEntryDto } from './dto/finance-entry.dto';
 import { FinanceLedgerNature, FinanceService } from './finance.service';
@@ -31,6 +32,26 @@ export class FinanceController {
     private readonly financeService: FinanceService,
     private readonly rolesService: RolesService,
   ) {}
+
+  private async resolveLedgerAccess(
+    user: { role?: string } | undefined,
+    dateFrom: string,
+    dateTo: string,
+    natureRaw?: string,
+  ): Promise<{ dateFrom: string; dateTo: string; nature: FinanceLedgerNature }> {
+    const perms = user?.role ? await this.rolesService.getPermissionsForUserRole(user.role) : [];
+    const fullHistory =
+      permissionsSatisfy(perms, ['finance.view']) || permissionsSatisfy(perms, ['finance.write']);
+    const range = mustClampRecentExpenses(perms)
+      ? clampToRecentTotalsRange(dateFrom, dateTo)
+      : { dateFrom: dateFrom.trim(), dateTo: dateTo.trim() };
+    const allowed: FinanceLedgerNature[] = ['all', 'purchase', 'sale', 'expense'];
+    let nature = (allowed.includes(natureRaw as FinanceLedgerNature)
+      ? natureRaw
+      : 'all') as FinanceLedgerNature;
+    if (!fullHistory) nature = 'expense';
+    return { ...range, nature };
+  }
 
   @Get('journal')
   @Permissions('finance.view')
@@ -52,14 +73,15 @@ export class FinanceController {
   }
 
   @Get('ledger')
-  @Permissions('finance.view')
-  ledger(
+  @PermissionsAny('finance.view', 'finance.recent_expenses')
+  async ledger(
     @Query('companyId') companyIdRaw?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('nature') natureRaw?: string,
     @Query('skip') skipRaw?: string,
     @Query('take') takeRaw?: string,
+    @GetUser() user?: { role?: string },
   ) {
     const parseIntOr = (raw: string | undefined) => {
       if (raw === undefined || raw === '') return undefined;
@@ -73,28 +95,26 @@ export class FinanceController {
     if (!dateFrom?.trim() || !dateTo?.trim()) {
       throw new BadRequestException('dateFrom et dateTo requis');
     }
-    const allowed: FinanceLedgerNature[] = ['all', 'purchase', 'sale', 'expense'];
-    const nature = (allowed.includes(natureRaw as FinanceLedgerNature)
-      ? natureRaw
-      : 'all') as FinanceLedgerNature;
+    const access = await this.resolveLedgerAccess(user, dateFrom, dateTo, natureRaw);
     return this.financeService.ledger({
       companyId,
-      dateFrom: dateFrom.trim(),
-      dateTo: dateTo.trim(),
-      nature,
+      dateFrom: access.dateFrom,
+      dateTo: access.dateTo,
+      nature: access.nature,
       skip: skipRaw ? Number.parseInt(skipRaw, 10) : undefined,
       take: takeRaw ? Number.parseInt(takeRaw, 10) : undefined,
     });
   }
 
   @Get('ledger/export/pdf')
-  @Permissions('finance.view')
+  @PermissionsAny('finance.view', 'finance.recent_expenses')
   async exportLedgerPdf(
     @Res() res: Response,
     @Query('companyId') companyIdRaw?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('nature') natureRaw?: string,
+    @GetUser() user?: { role?: string },
   ) {
     const companyId = companyIdRaw ? Number.parseInt(companyIdRaw, 10) : NaN;
     if (!Number.isFinite(companyId) || companyId <= 0) {
@@ -103,16 +123,13 @@ export class FinanceController {
     if (!dateFrom?.trim() || !dateTo?.trim()) {
       throw new BadRequestException('dateFrom et dateTo requis');
     }
-    const allowed: FinanceLedgerNature[] = ['all', 'purchase', 'sale', 'expense'];
-    const nature = (allowed.includes(natureRaw as FinanceLedgerNature)
-      ? natureRaw
-      : 'all') as FinanceLedgerNature;
+    const access = await this.resolveLedgerAccess(user, dateFrom, dateTo, natureRaw);
 
     const pdfBuffer = await this.financeService.exportLedgerPdf({
       companyId,
-      dateFrom: dateFrom.trim(),
-      dateTo: dateTo.trim(),
-      nature,
+      dateFrom: access.dateFrom,
+      dateTo: access.dateTo,
+      nature: access.nature,
     });
     const filenameDate = formatDateFr(new Date()).replace(/\//g, '-');
     res.setHeader('Content-Type', 'application/pdf');

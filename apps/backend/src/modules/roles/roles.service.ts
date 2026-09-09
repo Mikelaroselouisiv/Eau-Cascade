@@ -282,6 +282,9 @@ export class RolesService implements OnModuleInit {
         if (code === 'MANAGER' && !next.includes('carriers.manage')) {
           next = [...next, 'carriers.manage'];
         }
+        if (code === 'MANAGER' && !next.includes('finance.recent_expenses')) {
+          next = [...next, 'finance.recent_expenses'];
+        }
         if (next.length !== existing.permissions.length) {
           await this.prisma.appRole.update({
             where: { id: existing.id },

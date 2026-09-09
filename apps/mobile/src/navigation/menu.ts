@@ -160,7 +160,7 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
       title: 'Dépenses',
       icon: 'cash-outline',
       permission: 'finance.view',
-      roles: ['ADMIN'],
+      roles: ['ADMIN', 'MANAGER'],
     },
     {
       name: 'banque',
@@ -396,7 +396,8 @@ export function canAccessTab(tab: SectionTab, access: AccessFns): boolean {
     return (
       access.canPerm('finance.view') ||
       access.canPerm('finance.write') ||
-      access.canPerm('finance.expense')
+      access.canPerm('finance.expense') ||
+      access.canPerm('finance.recent_expenses')
     );
   }
   if (tab.name === 'expenses') {

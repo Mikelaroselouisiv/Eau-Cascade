@@ -18,6 +18,14 @@ export function mustClampRecentTotals(perms: string[] | null | undefined): boole
   return !permissionsSatisfy(perms ?? [], ['reports.view']);
 }
 
+/** Sans `finance.view` / `finance.write` (ni `*`), le journal dépenses reste dans la fenêtre 2 jours. */
+export function mustClampRecentExpenses(perms: string[] | null | undefined): boolean {
+  return (
+    !permissionsSatisfy(perms ?? [], ['finance.view']) &&
+    !permissionsSatisfy(perms ?? [], ['finance.write'])
+  );
+}
+
 export function clampToRecentTotalsRange(
   dateFrom?: string,
   dateTo?: string,

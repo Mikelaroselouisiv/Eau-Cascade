@@ -29,9 +29,11 @@ import {
 } from '@/services/api';
 import type { DashboardBalanceSnapshot, FinanceLedgerRow } from '@/types/api';
 import {
+  addDaysYmd,
   businessTodayYmd,
   dashboardPresetRange,
   formatDateTime,
+  formatYmdDisplay,
 } from '@/utils/datetime';
 
 type LedgerNature = 'all' | 'purchase' | 'sale' | 'expense';
@@ -51,14 +53,22 @@ export default function DepensesScreen() {
   const { companyId, ready } = useCompanyScope();
   const isAdmin = can(['ADMIN']);
   const canViewFinance = isAdmin || canPerm('finance.view') || canPerm('finance.write');
+  const canViewExpenseJournal = canViewFinance || canPerm('finance.recent_expenses');
+  const expensesRecentMinYmd =
+    canViewFinance || !canViewExpenseJournal ? null : addDaysYmd(businessTodayYmd(), -1);
   const canWriteFinance =
     user?.role !== 'CASHIER' &&
     (isAdmin || canPerm('finance.write') || canPerm('finance.expense'));
-  const [range, setRange] = useState(() => dashboardPresetRange('month'));
+  const [range, setRange] = useState(() =>
+    expensesRecentMinYmd
+      ? { dateFrom: expensesRecentMinYmd, dateTo: businessTodayYmd() }
+      : dashboardPresetRange('month'),
+  );
   const [snapshot, setSnapshot] = useState<DashboardBalanceSnapshot | null>(null);
   const [ledger, setLedger] = useState<FinanceLedgerRow[]>([]);
   const [ledgerTotal, setLedgerTotal] = useState(0);
   const [nature, setNature] = useState<LedgerNature>(isAdmin ? 'all' : 'expense');
+  const ledgerNature: LedgerNature = canViewFinance ? nature : 'expense';
   const [amount, setAmount] = useState('');
   const [label, setLabel] = useState('');
   const [detail, setDetail] = useState('');
@@ -71,11 +81,18 @@ export default function DepensesScreen() {
 
   const load = useCallback(async () => {
     if (companyId == null) return;
-    const { dateFrom, dateTo } = range;
+    const today = businessTodayYmd();
+    const dateFrom =
+      expensesRecentMinYmd && range.dateFrom < expensesRecentMinYmd
+        ? expensesRecentMinYmd
+        : range.dateFrom;
+    const dateTo = expensesRecentMinYmd && range.dateTo > today ? today : range.dateTo;
     try {
       const [snap, led] = await Promise.all([
         getDashboardSummaryRange({ companyId, dateFrom, dateTo }),
-        getFinanceLedger({ companyId, dateFrom, dateTo, nature, take: 40 }),
+        canViewExpenseJournal
+          ? getFinanceLedger({ companyId, dateFrom, dateTo, nature: ledgerNature, take: 40 })
+          : Promise.resolve({ items: [] as FinanceLedgerRow[], total: 0 }),
       ]);
       setSnapshot(snap);
       setLedger(led.items);
@@ -85,7 +102,7 @@ export default function DepensesScreen() {
       setLedger([]);
       setLedgerTotal(0);
     }
-  }, [companyId, nature, range]);
+  }, [canViewExpenseJournal, companyId, expensesRecentMinYmd, ledgerNature, range]);
 
   useFocusEffect(
     useCallback(() => {
@@ -133,13 +150,18 @@ export default function DepensesScreen() {
   async function loadMore() {
     if (loadingMore || ledger.length >= ledgerTotal || companyId == null) return;
     setLoadingMore(true);
-    const { dateFrom, dateTo } = range;
+    const today = businessTodayYmd();
+    const dateFrom =
+      expensesRecentMinYmd && range.dateFrom < expensesRecentMinYmd
+        ? expensesRecentMinYmd
+        : range.dateFrom;
+    const dateTo = expensesRecentMinYmd && range.dateTo > today ? today : range.dateTo;
     try {
       const next = await getFinanceLedger({
         companyId,
         dateFrom,
         dateTo,
-        nature,
+        nature: ledgerNature,
         skip: ledger.length,
         take: 40,
       });
@@ -180,8 +202,14 @@ export default function DepensesScreen() {
           dateFrom={range.dateFrom}
           dateTo={range.dateTo}
           onChange={(dateFrom, dateTo) => setRange({ dateFrom, dateTo })}
+          minYmd={expensesRecentMinYmd}
         />
-        {canViewFinance && snapshot ? (
+        {expensesRecentMinYmd ? (
+          <Text style={styles.sectionHint}>
+            Totaux limités aux 2 derniers jours (depuis {formatYmdDisplay(expensesRecentMinYmd)}).
+          </Text>
+        ) : null}
+        {canViewExpenseJournal && snapshot ? (
           <View style={styles.kpiGrid}>
             {isAdmin ? (
               <KpiCard label="Achats" value={snapshot.purchases} money />
@@ -193,7 +221,7 @@ export default function DepensesScreen() {
         {canWriteFinance ? (
           <View style={styles.formCard}>
             <Text style={styles.section}>Nouvelle dépense manuelle</Text>
-            {!canViewFinance ? (
+            {!canViewExpenseJournal ? (
               <Text style={styles.fieldLabel}>
                 Saisie seule — le journal financier n’est pas visible pour ce compte.
               </Text>
@@ -261,6 +289,8 @@ export default function DepensesScreen() {
           </View>
         ) : null}
 
+        {canViewExpenseJournal ? (
+          <>
         <Text style={styles.section}>Journal</Text>
         {isAdmin ? (
           <ScrollView
@@ -336,6 +366,8 @@ export default function DepensesScreen() {
             )}
           </Pressable>
         ) : null}
+          </>
+        ) : null}
       </RefreshableScroll>
     </Screen>
   );
@@ -344,6 +376,7 @@ export default function DepensesScreen() {
 const styles = StyleSheet.create({
   kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   section: { marginTop: Spacing.two, fontSize: 15, fontWeight: '700', color: BrandColors.text },
+  sectionHint: { color: BrandColors.textMuted, fontSize: 11, marginTop: 2 },
   formCard: {
     gap: Spacing.two,
     padding: Spacing.three,
