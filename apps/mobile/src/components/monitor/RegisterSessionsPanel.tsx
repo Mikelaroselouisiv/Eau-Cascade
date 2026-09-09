@@ -7,7 +7,7 @@ import { MoneyText } from '@/components/MoneyText';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { getDepartments, getUsers, listRegisterSessions } from '@/services/api';
-import type { Department, InventoryLineRow, RegisterSessionDetail, SessionUser } from '@/types/api';
+import type { Department, RegisterSessionDetail, SessionUser } from '@/types/api';
 import { formatDateTime } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
 import {
@@ -30,45 +30,6 @@ const MAX_TAKE = 200;
 
 function userLabel(user?: { fullName?: string | null; phone?: string | null; email?: string | null } | null) {
   return user?.fullName?.trim() || user?.phone?.trim() || user?.email?.trim() || 'Utilisateur inconnu';
-}
-
-function lineQty(line: InventoryLineRow): number {
-  return Number(line.countedQty ?? line.systemQtyAtOpen) || 0;
-}
-
-function soldArticleRows(session: RegisterSessionDetail) {
-  const rows = new Map<
-    number,
-    { productId: number; name: string; opened: number | null; closed: number | null }
-  >();
-  for (const line of session.openingInventorySession?.lines ?? []) {
-    rows.set(line.productId, {
-      productId: line.productId,
-      name: line.product.name,
-      opened: lineQty(line),
-      closed: null,
-    });
-  }
-  for (const line of session.closingInventorySession?.lines ?? []) {
-    const prev = rows.get(line.productId);
-    const closed = lineQty(line);
-    if (prev) prev.closed = closed;
-    else {
-      rows.set(line.productId, {
-        productId: line.productId,
-        name: line.product.name,
-        opened: null,
-        closed,
-      });
-    }
-  }
-  return [...rows.values()]
-    .map((row) => ({
-      ...row,
-      sold: row.opened != null && row.closed != null ? row.opened - row.closed : null,
-    }))
-    .filter((row) => Math.abs(row.sold ?? 0) > 1e-9)
-    .sort((a, b) => Math.abs(b.sold ?? 0) - Math.abs(a.sold ?? 0));
 }
 
 export function RegisterSessionsPanel({ companyId, dateFrom, dateTo, refreshKey }: Props) {
@@ -405,36 +366,25 @@ function CardCashCell({
 }
 
 function SoldArticlesBlock({ session }: { session: RegisterSessionDetail }) {
-  const rows = soldArticleRows(session);
-  const totalSold = rows.reduce((sum, row) => sum + Math.max(0, row.sold ?? 0), 0);
+  const rows = session.soldProducts ?? [];
+  const totalSold = rows.reduce((sum, row) => sum + Math.max(0, row.deliveredQty), 0);
   return (
     <View style={styles.soldBlock}>
       <Text style={styles.detailSection}>Articles écoulés</Text>
       {rows.length === 0 ? (
-        <Text style={styles.soldEmpty}>Aucun article écoulé</Text>
+        <Text style={styles.soldEmpty}>Aucun article livré pendant cette session</Text>
       ) : (
         <>
           <View style={styles.soldHead}>
             <Text style={[styles.soldColName, styles.soldHeadText]}>Article</Text>
-            <Text style={[styles.soldColQty, styles.soldHeadText]}>Ouvert</Text>
-            <Text style={[styles.soldColQty, styles.soldHeadText]}>Fermé</Text>
-            <Text style={[styles.soldColQty, styles.soldHeadText]}>Écoulé</Text>
+            <Text style={[styles.soldColQty, styles.soldHeadText]}>Livré</Text>
           </View>
           {rows.map((row) => (
             <View key={row.productId} style={styles.soldRow}>
               <Text style={styles.soldColName} numberOfLines={2}>
                 {row.name}
               </Text>
-              <Text style={styles.soldColQty}>{row.opened == null ? '—' : formatQuantity(row.opened)}</Text>
-              <Text style={styles.soldColQty}>{row.closed == null ? '—' : formatQuantity(row.closed)}</Text>
-              <Text
-                style={[
-                  styles.soldColQty,
-                  styles.soldQty,
-                  (row.sold ?? 0) < 0 && styles.cashValueWarning,
-                ]}>
-                {row.sold == null ? '—' : formatQuantity(row.sold)}
-              </Text>
+              <Text style={[styles.soldColQty, styles.soldQty]}>{formatQuantity(row.deliveredQty)}</Text>
             </View>
           ))}
           <View style={styles.soldTotal}>

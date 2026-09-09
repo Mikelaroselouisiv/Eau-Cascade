@@ -237,6 +237,7 @@ export interface RegisterSessionDetail {
   closedBy?: UserAttribution | null;
   openingInventorySession?: InventorySessionDetail;
   closingInventorySession?: InventorySessionDetail | null;
+  soldProducts?: Array<{ productId: number; name: string; deliveredQty: number }>;
 }
 
 export interface RegisterSessionContext {

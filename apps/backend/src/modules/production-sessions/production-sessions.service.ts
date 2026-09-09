@@ -190,7 +190,13 @@ export class ProductionSessionsService {
         countedQty: Prisma.Decimal | number | null;
       }>;
     } | null;
+    workerIssues?: Array<{
+      quantity: Prisma.Decimal | number;
+      product: { id: number; name: string };
+    }>;
   }) {
+    const issued = this.rawIssuedFromWorkers(session);
+    const issuedById = new Map(issued.map((row) => [row.productId, row]));
     const openingLines = session.openingInventorySession?.lines ?? [];
     const closingByProduct = new Map(
       (session.closingInventorySession?.lines ?? []).map((l) => [
@@ -199,7 +205,9 @@ export class ProductionSessionsService {
       ]),
     );
     const closed = session.closingInventorySession != null;
-    return openingLines.map((l) => {
+    const seen = new Set<number>();
+    const rows = openingLines.map((l) => {
+      seen.add(l.productId);
       const opened = Number(l.countedQty ?? 0);
       const remaining = closed ? (closingByProduct.get(l.productId) ?? 0) : opened;
       return {
@@ -207,9 +215,20 @@ export class ProductionSessionsService {
         name: l.product.name,
         openedQty: opened,
         remainingQty: remaining,
-        usedQty: closed ? Math.max(0, opened - remaining) : 0,
+        usedQty: issuedById.get(l.productId)?.issuedQty ?? 0,
       };
     });
+    for (const row of issued) {
+      if (seen.has(row.productId)) continue;
+      rows.push({
+        productId: row.productId,
+        name: row.name,
+        openedQty: 0,
+        remainingQty: 0,
+        usedQty: row.issuedQty,
+      });
+    }
+    return rows;
   }
 
   private outflowFromFlows(session: {

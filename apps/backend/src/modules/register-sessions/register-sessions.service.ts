@@ -15,6 +15,15 @@ import type {
   CloseRegisterSessionDto,
   OpenRegisterSessionDto,
 } from './dto/register-session.dto';
+import {
+  addSoldQty,
+  emptySoldMaps,
+  eventBelongsToSession,
+  finalizeSoldMaps,
+  saleQtyToBase,
+  type SessionSoldWindow,
+  type SoldProductRow,
+} from './sold-from-deliveries';
 
 const SESSION_INCLUDE = {
   register: { include: { store: true, department: true } },
@@ -234,7 +243,7 @@ export class RegisterSessionsService {
     return claimed;
   }
 
-  listSessions(filters?: {
+  async listSessions(filters?: {
     companyId?: number;
     departmentId?: number;
     registerId?: number;
@@ -283,28 +292,135 @@ export class RegisterSessionsService {
     if (openedAt.gte || openedAt.lte) where.openedAt = openedAt;
 
     const dir = filters?.sortDir === 'asc' ? 'asc' : 'desc';
-    if (filters?.sortBy === 'userName') {
-      return this.prisma.registerSession.findMany({
-        where,
-        include: SESSION_INCLUDE,
-        orderBy: [{ openedBy: { fullName: dir } }, { openedAt: 'desc' }],
-        take,
-      });
-    }
-
-    return this.prisma.registerSession.findMany({
-      where,
-      include: SESSION_INCLUDE,
-      orderBy: { openedAt: dir },
-      take,
-    });
+    const rows =
+      filters?.sortBy === 'userName'
+        ? await this.prisma.registerSession.findMany({
+            where,
+            include: SESSION_INCLUDE,
+            orderBy: [{ openedBy: { fullName: dir } }, { openedAt: 'desc' }],
+            take,
+          })
+        : await this.prisma.registerSession.findMany({
+            where,
+            include: SESSION_INCLUDE,
+            orderBy: { openedAt: dir },
+            take,
+          });
+    return this.attachSoldProducts(rows);
   }
 
-  getSession(id: number) {
-    return this.prisma.registerSession.findFirst({
+  async getSession(id: number) {
+    const row = await this.prisma.registerSession.findFirst({
       where: { id, deletedAt: null },
       include: SESSION_INCLUDE,
     });
+    if (!row) return null;
+    const [withSold] = await this.attachSoldProducts([row]);
+    return withSold;
+  }
+
+  /**
+   * Produits finis écoulés = quantités livrées pendant la session
+   * (dépôts + ventes sur place auto-complétées), pas ouverture − fermeture.
+   */
+  private async attachSoldProducts<T extends SessionSoldWindow>(
+    sessions: T[],
+  ): Promise<Array<T & { soldProducts: SoldProductRow[] }>> {
+    if (!sessions.length) return [];
+    const maps = emptySoldMaps(sessions);
+    const deptIds = [...new Set(sessions.map((s) => s.departmentId))];
+    const minOpen = sessions.reduce(
+      (acc, s) => (s.openedAt < acc ? s.openedAt : acc),
+      sessions[0].openedAt,
+    );
+    const maxClose = sessions.reduce((acc, s) => {
+      const end = s.closedAt ?? new Date();
+      return end > acc ? end : acc;
+    }, minOpen);
+
+    const drops = await this.prisma.deliveryDrop.findMany({
+      where: {
+        departmentId: { in: deptIds },
+        createdAt: { gte: minOpen, lte: maxClose },
+        delivery: { deletedAt: null },
+      },
+      select: {
+        departmentId: true,
+        createdAt: true,
+        quantity: true,
+        saleItem: {
+          select: {
+            quantity: true,
+            baseQuantity: true,
+            product: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+    for (const drop of drops) {
+      const base = saleQtyToBase(Number(drop.quantity), {
+        quantity: Number(drop.saleItem.quantity),
+        baseQuantity: Number(drop.saleItem.baseQuantity),
+      });
+      for (const session of sessions) {
+        if (!eventBelongsToSession(drop.createdAt, drop.departmentId, session)) continue;
+        addSoldQty(
+          maps.get(session.id)!,
+          drop.saleItem.product.id,
+          drop.saleItem.product.name,
+          base,
+        );
+      }
+    }
+
+    const autoDeliveries = await this.prisma.delivery.findMany({
+      where: {
+        departmentId: { in: deptIds },
+        deletedAt: null,
+        deliveredAt: { gte: minOpen, lte: maxClose },
+        drops: { none: {} },
+      },
+      select: {
+        departmentId: true,
+        deliveredAt: true,
+        items: {
+          select: {
+            quantityDelivered: true,
+            saleItem: {
+              select: {
+                quantity: true,
+                baseQuantity: true,
+                product: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    for (const delivery of autoDeliveries) {
+      if (delivery.departmentId == null || delivery.deliveredAt == null) continue;
+      for (const session of sessions) {
+        if (!eventBelongsToSession(delivery.deliveredAt, delivery.departmentId, session)) continue;
+        for (const item of delivery.items) {
+          const base = saleQtyToBase(Number(item.quantityDelivered), {
+            quantity: Number(item.saleItem.quantity),
+            baseQuantity: Number(item.saleItem.baseQuantity),
+          });
+          addSoldQty(
+            maps.get(session.id)!,
+            item.saleItem.product.id,
+            item.saleItem.product.name,
+            base,
+          );
+        }
+      }
+    }
+
+    const finalized = finalizeSoldMaps(maps);
+    return sessions.map((session) => ({
+      ...session,
+      soldProducts: finalized.get(session.id) ?? [],
+    }));
   }
 
   /**

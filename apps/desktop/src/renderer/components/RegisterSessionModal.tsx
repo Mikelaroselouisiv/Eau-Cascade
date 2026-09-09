@@ -78,7 +78,33 @@ export function RegisterSessionModal({ session, onClose }: Props) {
           </dd>
         </dl>
 
-        <h3 style={{ fontSize: '1rem', margin: '0 0 0.5rem' }}>{inventoryTitle}</h3>
+        <h3 style={{ fontSize: '1rem', margin: '0 0 0.5rem' }}>Articles écoulés</h3>
+        {(session.soldProducts ?? []).length === 0 ? (
+          <p className="dept-hint" style={{ marginTop: 0 }}>
+            Aucun article livré pendant cette session.
+          </p>
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Produit</th>
+                  <th>Livré</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(session.soldProducts ?? []).map((row) => (
+                  <tr key={row.productId}>
+                    <td>{row.name}</td>
+                    <td className="journal-amt">{formatQuantity(row.deliveredQty)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <h3 style={{ fontSize: '1rem', margin: '0.75rem 0 0.5rem' }}>{inventoryTitle}</h3>
         {variances.length === 0 ? (
           <p className="dept-hint" style={{ marginTop: 0 }}>
             Aucun écart enregistré.
