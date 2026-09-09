@@ -1179,6 +1179,7 @@ export interface ProductionWorkerMovementRow {
 
 export interface ProductionWorkerFiche {
   id: number;
+  departmentId: number;
   name: string;
   phone: string;
   payrollCoefficient: number;

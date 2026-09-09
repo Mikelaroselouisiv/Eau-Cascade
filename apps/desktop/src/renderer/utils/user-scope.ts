@@ -121,6 +121,24 @@ export function defaultAssignedPlantDepartmentId<
   return depts[0]?.id ?? '';
 }
 
+/** Usines visibles pour l’écoulement — chef : affectation stricte. */
+export function productionPlantsForUser<T extends { id: number; kind?: string | null }>(
+  depts: T[],
+  user: {
+    role?: string | null;
+    departmentId?: number | null;
+    departmentIds?: number[] | null;
+    productionDepartmentIds?: number[] | null;
+  } | null,
+): T[] {
+  const plants = depts.filter((d) => isProductionKind(d.kind));
+  if (!user || isAdminRole(user.role) || user.role === 'MANAGER') return plants;
+  const fromProduction = (user.productionDepartmentIds ?? []).filter((id) => id > 0);
+  if (fromProduction.length) return plants.filter((d) => fromProduction.includes(d.id));
+  const assigned = resolvedDepartmentIds(user);
+  return plants.filter((d) => assigned.includes(d.id));
+}
+
 /** Usines (production + distribution) dans le périmètre de l’utilisateur. */
 export function assignedProductionDepartmentIds<
   T extends { id: number; kind?: string | null },

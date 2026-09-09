@@ -313,6 +313,7 @@ export interface ProductionWorkerOutputRow {
 
 export interface ProductionWorkerFiche {
   id: number;
+  departmentId: number;
   name: string;
   phone: string;
   payrollCoefficient: number;
@@ -372,14 +373,20 @@ export interface InternalTransferItemRow {
 
 export interface InternalTransferRow {
   id: number;
+  companyId?: number;
   fromDepartmentId: number;
   toDepartmentId: number;
   status: InternalTransferStatus;
+  note?: string | null;
   createdAt: string;
+  confirmedAt?: string | null;
+  rejectedAt?: string | null;
   fromDepartment: { id: number; name: string; kind?: 'DISTRIBUTION' | 'PRODUCTION_DISTRIBUTION' };
   toDepartment: { id: number; name: string; kind?: 'DISTRIBUTION' | 'PRODUCTION_DISTRIBUTION' };
   carrierId?: number | null;
   carrier?: { id: number; name: string; phone?: string; departmentId?: number } | null;
+  createdBy?: UserAttribution | null;
+  confirmedBy?: UserAttribution | null;
   items: InternalTransferItemRow[];
 }
 
@@ -670,6 +677,8 @@ export interface DeliveryDrop {
   createdAt: string;
   department?: { id: number; name: string } | null;
   stop?: { id: number; address: string; quantity: number | string } | null;
+  deliveredBy?: { id: number; fullName?: string | null; phone?: string | null } | null;
+  createdBy?: { id: number; fullName?: string | null; phone?: string | null } | null;
 }
 
 export interface DeliveryItem {

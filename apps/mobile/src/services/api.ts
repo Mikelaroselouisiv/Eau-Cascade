@@ -1033,6 +1033,7 @@ export async function getProductionWorker(
 export async function updateProductionWorker(
   id: number,
   payload: {
+    departmentId?: number;
     name?: string;
     phone?: string;
     payrollCoefficient?: number;
@@ -1069,6 +1070,7 @@ export async function createCarrier(payload: {
 export async function updateCarrier(
   id: number,
   payload: {
+    departmentId?: number;
     name?: string;
     phone?: string;
     isActive?: boolean;
@@ -1129,6 +1131,8 @@ export async function listInternalTransfers(params?: {
   toDepartmentId?: number;
   status?: 'PENDING' | 'CONFIRMED' | 'REJECTED';
   inbox?: boolean;
+  skip?: number;
+  take?: number;
 }): Promise<InternalTransferRow[]> {
   const { data } = await api.get<InternalTransferRow[]>('/internal-transfers', { params });
   return data;
@@ -1137,11 +1141,19 @@ export async function listInternalTransfers(params?: {
 export async function createInternalTransfer(payload: {
   fromDepartmentId: number;
   toDepartmentId: number;
-  carrierId: number;
+  carrierId?: number;
   items: Array<{ productId: number; quantity: number }>;
   note?: string;
 }): Promise<InternalTransferRow> {
   const { data } = await api.post<InternalTransferRow>('/internal-transfers', payload);
+  return data;
+}
+
+export async function updateInternalTransfer(
+  id: number,
+  payload: { items: Array<{ id: number; quantity: number }> },
+): Promise<InternalTransferRow> {
+  const { data } = await api.patch<InternalTransferRow>(`/internal-transfers/${id}`, payload);
   return data;
 }
 

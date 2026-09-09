@@ -19,8 +19,11 @@ import type { Product, ProductionWorkerFiche, ProductionWorkerOutputRow, Product
 import { businessTodayYmd, formatDateTimeShort, formatMoney, monthStartYmd, ymdFromIso } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
 
+type PlantOpt = { id: number; name: string };
+
 type Props = {
   departmentId: number;
+  plants: PlantOpt[];
   productionEnabled: boolean;
   finishedGoods: Product[];
   rawMaterials: Product[];
@@ -32,6 +35,7 @@ type Props = {
 
 export function ProductionWorkersPanel({
   departmentId,
+  plants,
   productionEnabled,
   finishedGoods,
   rawMaterials,
@@ -51,6 +55,7 @@ export function ProductionWorkersPanel({
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newCoef, setNewCoef] = useState('');
+  const [newDeptId, setNewDeptId] = useState<number | ''>(departmentId);
   const [workerId, setWorkerId] = useState<number | ''>('');
   const [qty, setQty] = useState<Record<number, string>>({});
   const [fiche, setFiche] = useState<ProductionWorkerFiche | null>(null);
@@ -59,20 +64,24 @@ export function ProductionWorkersPanel({
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editCoef, setEditCoef] = useState('');
+  const [editDeptId, setEditDeptId] = useState<number | ''>(departmentId);
   const [editError, setEditError] = useState('');
   const catalog = op === 'issue' ? rawMaterials : finishedGoods;
 
   const reload = useCallback(async () => {
-    const [w, i, o] = await Promise.all([
-      listProductionWorkers(departmentId),
+    const plantIds = plants.length ? plants.map((p) => p.id) : [departmentId];
+    const [lists, i, o] = await Promise.all([
+      Promise.all(plantIds.map((id) => listProductionWorkers(id).catch(() => [] as ProductionWorkerRow[]))),
       listProductionWorkerIssues({ departmentId }),
       listProductionWorkerOutputs({ departmentId }),
     ]);
+    const seen = new Set<number>();
+    const w = lists.flat().filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true)));
     setWorkers(w);
     setIssues(i);
     setOutputs(o);
     setWorkerId((prev) => (prev !== '' && w.some((row) => row.id === prev) ? prev : (w[0]?.id ?? '')));
-  }, [departmentId]);
+  }, [departmentId, plants]);
 
   useEffect(() => {
     setError('');
@@ -84,6 +93,10 @@ export function ProductionWorkersPanel({
     const name = newName.trim();
     const phone = newPhone.trim();
     const coef = Number(newCoef.replace(',', '.'));
+    if (newDeptId === '') {
+      setCreateError('Département requis.');
+      return;
+    }
     if (!name || !phone || !Number.isFinite(coef) || coef <= 0) {
       setCreateError('Nom, téléphone et coefficient sont requis.');
       return;
@@ -91,7 +104,7 @@ export function ProductionWorkersPanel({
     setBusy(true);
     setCreateError('');
     try {
-      await createProductionWorker({ departmentId, name, phone, payrollCoefficient: coef });
+      await createProductionWorker({ departmentId: newDeptId, name, phone, payrollCoefficient: coef });
       setNewName('');
       setNewPhone('');
       setNewCoef('');
@@ -151,6 +164,7 @@ export function ProductionWorkersPanel({
         setEditName(row.name);
         setEditPhone(row.phone);
         setEditCoef(String(row.payrollCoefficient));
+        setEditDeptId(row.departmentId);
         setEditError('');
       }
     } catch (e) {
@@ -163,6 +177,10 @@ export function ProductionWorkersPanel({
     const name = editName.trim();
     const phone = editPhone.trim();
     const coef = Number(editCoef.replace(',', '.'));
+    if (editDeptId === '') {
+      setEditError('Département requis.');
+      return;
+    }
     if (!name || !phone || !Number.isFinite(coef) || coef <= 0) {
       setEditError('Nom, téléphone et coefficient sont requis.');
       return;
@@ -170,7 +188,12 @@ export function ProductionWorkersPanel({
     setBusy(true);
     setEditError('');
     try {
-      await updateProductionWorker(fiche.id, { name, phone, payrollCoefficient: coef });
+      await updateProductionWorker(fiche.id, {
+        departmentId: editDeptId,
+        name,
+        phone,
+        payrollCoefficient: coef,
+      });
       await reload();
       const row = await getProductionWorker(fiche.id, { dateFrom, dateTo });
       setFiche(row);
@@ -204,6 +227,7 @@ export function ProductionWorkersPanel({
               setNewName('');
               setNewPhone('');
               setNewCoef('');
+              setNewDeptId(departmentId);
               setCreateOpen(true);
             }}>
             <Text style={{ color: BrandColors.primary, fontWeight: '700' }}>Nouvel ouvrier</Text>
@@ -217,8 +241,8 @@ export function ProductionWorkersPanel({
             <Text style={{ color: BrandColors.text, fontWeight: '600' }}>{w.name}</Text>
             <Text style={styles.meta}>
               {canManageWorkers
-                ? `${w.phone} · ${ymdFromIso(w.startedAt)} · ${formatMoney(w.payrollCoefficient)} · MP ${formatQuantity(w.sessionIssuedQty ?? 0)} · PF ${formatQuantity(w.sessionQuantity ?? 0)}`
-                : w.phone}
+                ? `${plants.find((p) => p.id === w.departmentId)?.name ?? ''} · ${w.phone} · ${ymdFromIso(w.startedAt)} · ${formatMoney(w.payrollCoefficient)} · MP ${formatQuantity(w.sessionIssuedQty ?? 0)} · PF ${formatQuantity(w.sessionQuantity ?? 0)}`
+                : [plants.find((p) => p.id === w.departmentId)?.name, w.phone].filter(Boolean).join(' · ')}
             </Text>
           </>
         );
@@ -302,6 +326,17 @@ export function ProductionWorkersPanel({
         body={
           <ScrollView contentContainerStyle={{ padding: Spacing.three, gap: 10 }} keyboardShouldPersistTaps="handled">
             {createError ? <Text style={styles.error}>{createError}</Text> : null}
+            <Text style={styles.meta}>Département *</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {plants.map((p) => (
+                <Pressable
+                  key={p.id}
+                  onPress={() => setNewDeptId(p.id)}
+                  style={[styles.chip, newDeptId === p.id && styles.chipActive]}>
+                  <Text style={[styles.chipText, newDeptId === p.id && styles.chipTextActive]}>{p.name}</Text>
+                </Pressable>
+              ))}
+            </View>
             <TextInput
               style={[styles.qtyInput, { width: '100%' }]}
               placeholder="Nom"
@@ -348,6 +383,17 @@ export function ProductionWorkersPanel({
               {canManageWorkers ? (
                 <>
                   {editError ? <Text style={styles.error}>{editError}</Text> : null}
+                  <Text style={styles.meta}>Département *</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {plants.map((p) => (
+                      <Pressable
+                        key={p.id}
+                        onPress={() => setEditDeptId(p.id)}
+                        style={[styles.chip, editDeptId === p.id && styles.chipActive]}>
+                        <Text style={[styles.chipText, editDeptId === p.id && styles.chipTextActive]}>{p.name}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
                   <TextInput
                     style={[styles.qtyInput, { width: '100%' }]}
                     placeholder="Nom"

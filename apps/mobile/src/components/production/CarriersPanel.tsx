@@ -10,15 +10,18 @@ import type { CarrierFiche, CarrierRow, Product } from '@/types/api';
 import { businessTodayYmd, formatMoney, monthStartYmd, ymdFromIso } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
 
+type PlantOpt = { id: number; name: string };
+
 type Props = {
   departmentId: number;
+  plants: PlantOpt[];
   finishedGoods: Product[];
   canManage: boolean;
   styles: Record<string, object>;
   onMessage: (msg: string) => void;
 };
 
-export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, onMessage }: Props) {
+export function CarriersPanel({ departmentId, plants, finishedGoods, canManage, styles, onMessage }: Props) {
   const [rows, setRows] = useState<CarrierRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -26,17 +29,22 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newRates, setNewRates] = useState<Record<number, string>>({});
+  const [newDeptId, setNewDeptId] = useState<number | ''>(departmentId);
   const [fiche, setFiche] = useState<CarrierFiche | null>(null);
   const [dateFrom, setDateFrom] = useState(monthStartYmd());
   const [dateTo, setDateTo] = useState(businessTodayYmd());
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editRates, setEditRates] = useState<Record<number, string>>({});
+  const [editDeptId, setEditDeptId] = useState<number | ''>(departmentId);
   const [editError, setEditError] = useState('');
 
   const reload = useCallback(async () => {
-    setRows(await listCarriers(departmentId));
-  }, [departmentId]);
+    const plantIds = plants.length ? plants.map((p) => p.id) : [departmentId];
+    const lists = await Promise.all(plantIds.map((id) => listCarriers(id).catch(() => [] as CarrierRow[])));
+    const seen = new Set<number>();
+    setRows(lists.flat().filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true))));
+  }, [departmentId, plants]);
 
   useEffect(() => {
     void reload().catch((e) => onMessage(formatApiError(e, 'Chargement impossible.')));
@@ -54,6 +62,10 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
   async function onCreate() {
     const name = newName.trim();
     const phone = newPhone.trim();
+    if (newDeptId === '') {
+      setCreateError('Département requis.');
+      return;
+    }
     if (!name || !phone) {
       setCreateError('Nom et téléphone sont requis.');
       return;
@@ -61,7 +73,7 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
     setBusy(true);
     setCreateError('');
     try {
-      await createCarrier({ departmentId, name, phone, rates: collectRates(newRates) });
+      await createCarrier({ departmentId: newDeptId, name, phone, rates: collectRates(newRates) });
       setNewName('');
       setNewPhone('');
       setNewRates({});
@@ -83,6 +95,7 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
       if (switched) {
         setEditName(row.name);
         setEditPhone(row.phone);
+        setEditDeptId(row.departmentId);
         const next: Record<number, string> = {};
         for (const r of row.rates) next[r.productId] = String(r.coefficient);
         setEditRates(next);
@@ -97,6 +110,10 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
     if (!fiche || !canManage) return;
     const name = editName.trim();
     const phone = editPhone.trim();
+    if (editDeptId === '') {
+      setEditError('Département requis.');
+      return;
+    }
     if (!name || !phone) {
       setEditError('Nom et téléphone sont requis.');
       return;
@@ -104,7 +121,12 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
     setBusy(true);
     setEditError('');
     try {
-      await updateCarrier(fiche.id, { name, phone, rates: collectRates(editRates) });
+      await updateCarrier(fiche.id, {
+        departmentId: editDeptId,
+        name,
+        phone,
+        rates: collectRates(editRates),
+      });
       await reload();
       const row = await getCarrier(fiche.id, { dateFrom, dateTo });
       setFiche(row);
@@ -127,6 +149,7 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
               setNewName('');
               setNewPhone('');
               setNewRates({});
+              setNewDeptId(departmentId);
               setCreateOpen(true);
             }}>
             <Text style={{ color: BrandColors.primary, fontWeight: '700' }}>Nouveau</Text>
@@ -140,8 +163,8 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
             <Text style={{ color: BrandColors.text, fontWeight: '600' }}>{w.name}</Text>
             <Text style={styles.meta}>
               {canManage
-                ? `${w.phone} · ${ymdFromIso(w.startedAt)} · ${formatQuantity(w.deliveredQty ?? 0)} · ${formatMoney(w.payrollAmount ?? 0)}`
-                : w.phone}
+                ? `${plants.find((p) => p.id === w.departmentId)?.name ?? ''} · ${w.phone} · ${ymdFromIso(w.startedAt)} · ${formatQuantity(w.deliveredQty ?? 0)} · ${formatMoney(w.payrollAmount ?? 0)}`
+                : [plants.find((p) => p.id === w.departmentId)?.name, w.phone].filter(Boolean).join(' · ')}
             </Text>
           </>
         );
@@ -167,6 +190,17 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
         body={
           <ScrollView contentContainerStyle={{ padding: Spacing.three, gap: 10 }} keyboardShouldPersistTaps="handled">
             {createError ? <Text style={styles.error}>{createError}</Text> : null}
+            <Text style={styles.meta}>Département *</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {plants.map((p) => (
+                <Pressable
+                  key={p.id}
+                  onPress={() => setNewDeptId(p.id)}
+                  style={[styles.chip, newDeptId === p.id && styles.chipActive]}>
+                  <Text style={[styles.chipText, newDeptId === p.id && styles.chipTextActive]}>{p.name}</Text>
+                </Pressable>
+              ))}
+            </View>
             <TextInput style={[styles.qtyInput, { width: '100%' }]} placeholder="Nom" value={newName} onChangeText={setNewName} />
             <TextInput
               style={[styles.qtyInput, { width: '100%' }]}
@@ -212,6 +246,17 @@ export function CarriersPanel({ departmentId, finishedGoods, canManage, styles, 
               {canManage ? (
                 <>
                   {editError ? <Text style={styles.error}>{editError}</Text> : null}
+                  <Text style={styles.meta}>Département *</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {plants.map((p) => (
+                      <Pressable
+                        key={p.id}
+                        onPress={() => setEditDeptId(p.id)}
+                        style={[styles.chip, editDeptId === p.id && styles.chipActive]}>
+                        <Text style={[styles.chipText, editDeptId === p.id && styles.chipTextActive]}>{p.name}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
                   <TextInput style={[styles.qtyInput, { width: '100%' }]} value={editName} onChangeText={setEditName} />
                   <TextInput
                     style={[styles.qtyInput, { width: '100%' }]}

@@ -8,7 +8,13 @@ import { Prisma, ProductNature, ProductionFlowKind } from '@prisma/client';
 import { isProductionDepartment } from '../../common/department-kind';
 import { permissionGranted } from '../../common/permissions';
 import { USER_ATTRIBUTION_SELECT } from '../../common/user-attribution';
-import { canAccessAssignedDepartment } from '../../common/user-scope';
+import {
+  canAccessAssignedDepartment,
+  isAdminRole,
+  isAssignedToDepartment,
+  isManagerRole,
+  resolvedDepartmentIds,
+} from '../../common/user-scope';
 import { ymdToBusinessDayEnd, ymdToBusinessDayStart } from '../../common/utils/business-timezone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -38,6 +44,7 @@ type ScopeUser = {
   companyId?: number | null;
   departmentId?: number | null;
   departmentIds?: number[] | null;
+  productionDepartmentIds?: number[] | null;
 };
 
 @Injectable()
@@ -56,8 +63,20 @@ export class ProductionWorkersService {
     return permissionGranted(perms, 'workers.manage');
   }
 
+  private assignedPlantIds(user: ScopeUser): number[] {
+    const fromProduction = (user.productionDepartmentIds ?? []).filter((id) => id > 0);
+    if (fromProduction.length) return fromProduction;
+    return resolvedDepartmentIds(user);
+  }
+
   private assertDeptAccess(user: ScopeUser, departmentId: number) {
-    if (!canAccessAssignedDepartment(user, departmentId)) {
+    if (isAdminRole(user.role) || isManagerRole(user.role) || user.role === 'ACCOUNTANT') {
+      if (!canAccessAssignedDepartment(user, departmentId)) {
+        throw new ForbiddenException('Vous n’êtes pas affecté à ce département.');
+      }
+      return;
+    }
+    if (!isAssignedToDepartment({ ...user, departmentIds: this.assignedPlantIds(user) }, departmentId)) {
       throw new ForbiddenException('Vous n’êtes pas affecté à ce département.');
     }
   }
@@ -290,6 +309,21 @@ export class ProductionWorkersService {
     if (!existing) throw new NotFoundException('Ouvrier introuvable');
     this.assertDeptAccess(user, existing.departmentId);
 
+    let nextDepartmentId = existing.departmentId;
+    let nextCompanyId = existing.companyId;
+    if (dto.departmentId != null && dto.departmentId !== existing.departmentId) {
+      this.assertDeptAccess(user, dto.departmentId);
+      const dept = await this.prisma.department.findFirst({
+        where: { id: dto.departmentId, deletedAt: null },
+      });
+      if (!dept) throw new NotFoundException('Département introuvable');
+      if (!isProductionDepartment(dept.kind)) {
+        throw new BadRequestException('Ce département n’est pas une unité de production.');
+      }
+      nextDepartmentId = dept.id;
+      nextCompanyId = dept.companyId;
+    }
+
     if (dto.phone != null) {
       const phone = this.normalizePhone(dto.phone);
       const duplicate = await this.prisma.productionWorker.findFirst({
@@ -308,6 +342,8 @@ export class ProductionWorkersService {
     const row = await this.prisma.productionWorker.update({
       where: { id },
       data: {
+        departmentId: nextDepartmentId,
+        companyId: nextCompanyId,
         ...(dto.name != null ? { name: dto.name.trim() } : {}),
         ...(dto.phone != null ? { phone: this.normalizePhone(dto.phone) } : {}),
         ...(dto.payrollCoefficient != null ? { payrollCoefficient: dto.payrollCoefficient } : {}),

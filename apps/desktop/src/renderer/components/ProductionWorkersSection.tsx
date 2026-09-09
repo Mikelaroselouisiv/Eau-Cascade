@@ -29,8 +29,11 @@ function errMsg(err: unknown, fallback: string) {
   return fallback;
 }
 
+type PlantOpt = { id: number; name: string };
+
 type Props = {
   departmentId: number;
+  plants: PlantOpt[];
   productionEnabled: boolean;
   finishedGoods: Product[];
   rawMaterials: Product[];
@@ -41,6 +44,7 @@ type Props = {
 
 export function ProductionWorkersSection({
   departmentId,
+  plants,
   productionEnabled,
   finishedGoods,
   rawMaterials,
@@ -60,6 +64,7 @@ export function ProductionWorkersSection({
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newCoef, setNewCoef] = useState('');
+  const [newDeptId, setNewDeptId] = useState<number | ''>(departmentId);
 
   const [workerId, setWorkerId] = useState<number | ''>('');
   const [qty, setQty] = useState<Record<number, string>>({});
@@ -71,16 +76,20 @@ export function ProductionWorkersSection({
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editCoef, setEditCoef] = useState('');
+  const [editDeptId, setEditDeptId] = useState<number | ''>(departmentId);
   const [editError, setEditError] = useState('');
 
   const catalog = op === 'issue' ? rawMaterials : finishedGoods;
 
   async function reload() {
-    const [w, i, o] = await Promise.all([
-      listProductionWorkers(departmentId),
+    const plantIds = plants.length ? plants.map((p) => p.id) : [departmentId];
+    const [lists, i, o] = await Promise.all([
+      Promise.all(plantIds.map((id) => listProductionWorkers(id).catch(() => [] as ProductionWorkerRow[]))),
       listProductionWorkerIssues({ departmentId }),
       listProductionWorkerOutputs({ departmentId }),
     ]);
+    const seen = new Set<number>();
+    const w = lists.flat().filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true)));
     setWorkers(w);
     setIssues(i);
     setOutputs(o);
@@ -91,12 +100,16 @@ export function ProductionWorkersSection({
     setError('');
     setQty({});
     void reload().catch((e) => onMessage(errMsg(e, 'Chargement impossible.')));
-  }, [departmentId]);
+  }, [departmentId, plants]);
 
   async function onCreate() {
     const name = newName.trim();
     const phone = newPhone.trim();
     const coef = Number(newCoef.replace(',', '.'));
+    if (newDeptId === '') {
+      setCreateError('Département requis.');
+      return;
+    }
     if (!name || !phone || !Number.isFinite(coef) || coef <= 0) {
       setCreateError('Nom, téléphone et coefficient sont requis.');
       return;
@@ -105,7 +118,7 @@ export function ProductionWorkersSection({
     setCreateError('');
     try {
       await createProductionWorker({
-        departmentId,
+        departmentId: newDeptId,
         name,
         phone,
         payrollCoefficient: coef,
@@ -170,6 +183,7 @@ export function ProductionWorkersSection({
         setEditName(row.name);
         setEditPhone(row.phone);
         setEditCoef(String(row.payrollCoefficient));
+        setEditDeptId(row.departmentId);
         setEditError('');
       }
     } catch (e) {
@@ -184,6 +198,10 @@ export function ProductionWorkersSection({
     const name = editName.trim();
     const phone = editPhone.trim();
     const coef = Number(editCoef.replace(',', '.'));
+    if (editDeptId === '') {
+      setEditError('Département requis.');
+      return;
+    }
     if (!name || !phone || !Number.isFinite(coef) || coef <= 0) {
       setEditError('Nom, téléphone et coefficient sont requis.');
       return;
@@ -192,6 +210,7 @@ export function ProductionWorkersSection({
     setEditError('');
     try {
       await updateProductionWorker(fiche.id, {
+        departmentId: editDeptId,
         name,
         phone,
         payrollCoefficient: coef,
@@ -291,6 +310,7 @@ export function ProductionWorkersSection({
                 setNewName('');
                 setNewPhone('');
                 setNewCoef('');
+                setNewDeptId(departmentId);
                 setCreateOpen(true);
               }}
             >
@@ -306,6 +326,7 @@ export function ProductionWorkersSection({
               <thead>
                 <tr>
                   <th>Nom</th>
+                  <th>Département</th>
                   <th>Téléphone</th>
                   {canManageWorkers ? (
                     <>
@@ -339,6 +360,7 @@ export function ProductionWorkersSection({
                     }
                   >
                     <td>{w.name}</td>
+                    <td>{plants.find((p) => p.id === w.departmentId)?.name ?? w.department?.name ?? '—'}</td>
                     <td>{w.phone}</td>
                     {canManageWorkers ? (
                       <>
@@ -441,6 +463,20 @@ export function ProductionWorkersSection({
             {createError ? <p className="error-text">{createError}</p> : null}
             <div className="form-grid">
               <label>
+                Département *
+                <select
+                  value={newDeptId}
+                  onChange={(e) => setNewDeptId(e.target.value ? Number(e.target.value) : '')}
+                >
+                  <option value="">—</option>
+                  {plants.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
                 Nom *
                 <input value={newName} onChange={(e) => setNewName(e.target.value)} />
               </label>
@@ -492,6 +528,20 @@ export function ProductionWorkersSection({
               <>
                 {editError ? <p className="error-text">{editError}</p> : null}
                 <div className="form-grid">
+                  <label>
+                    Département *
+                    <select
+                      value={editDeptId}
+                      onChange={(e) => setEditDeptId(e.target.value ? Number(e.target.value) : '')}
+                    >
+                      <option value="">—</option>
+                      {plants.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <label>
                     Nom *
                     <input value={editName} onChange={(e) => setEditName(e.target.value)} />

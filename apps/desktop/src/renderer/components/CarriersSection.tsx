@@ -15,14 +15,17 @@ function errMsg(err: unknown, fallback: string) {
   return fallback;
 }
 
+type PlantOpt = { id: number; name: string };
+
 type Props = {
   departmentId: number;
+  plants: PlantOpt[];
   finishedGoods: Product[];
   canManage: boolean;
   onMessage: (msg: string) => void;
 };
 
-export function CarriersSection({ departmentId, finishedGoods, canManage, onMessage }: Props) {
+export function CarriersSection({ departmentId, plants, finishedGoods, canManage, onMessage }: Props) {
   const [rows, setRows] = useState<CarrierRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -30,6 +33,7 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newRates, setNewRates] = useState<Record<number, string>>({});
+  const [newDeptId, setNewDeptId] = useState<number | ''>(departmentId);
   const [fiche, setFiche] = useState<CarrierFiche | null>(null);
   const [dateFrom, setDateFrom] = useState(defaultMonthStartYmd());
   const [dateTo, setDateTo] = useState(formatYmd());
@@ -37,15 +41,19 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editRates, setEditRates] = useState<Record<number, string>>({});
+  const [editDeptId, setEditDeptId] = useState<number | ''>(departmentId);
   const [editError, setEditError] = useState('');
 
   async function reload() {
-    setRows(await listCarriers(departmentId));
+    const plantIds = plants.length ? plants.map((p) => p.id) : [departmentId];
+    const lists = await Promise.all(plantIds.map((id) => listCarriers(id).catch(() => [] as CarrierRow[])));
+    const seen = new Set<number>();
+    setRows(lists.flat().filter((row) => (seen.has(row.id) ? false : (seen.add(row.id), true))));
   }
 
   useEffect(() => {
     void reload().catch((e) => onMessage(errMsg(e, 'Chargement impossible.')));
-  }, [departmentId]);
+  }, [departmentId, plants]);
 
   function collectRates(src: Record<number, string>) {
     return finishedGoods
@@ -59,6 +67,10 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
   async function onCreate() {
     const name = newName.trim();
     const phone = newPhone.trim();
+    if (newDeptId === '') {
+      setCreateError('Département requis.');
+      return;
+    }
     if (!name || !phone) {
       setCreateError('Nom et téléphone sont requis.');
       return;
@@ -66,7 +78,7 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
     setBusy(true);
     setCreateError('');
     try {
-      await createCarrier({ departmentId, name, phone, rates: collectRates(newRates) });
+      await createCarrier({ departmentId: newDeptId, name, phone, rates: collectRates(newRates) });
       setNewName('');
       setNewPhone('');
       setNewRates({});
@@ -89,6 +101,7 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
       if (switched) {
         setEditName(row.name);
         setEditPhone(row.phone);
+        setEditDeptId(row.departmentId);
         const next: Record<number, string> = {};
         for (const r of row.rates) next[r.productId] = String(r.coefficient);
         setEditRates(next);
@@ -105,6 +118,10 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
     if (!fiche || !canManage) return;
     const name = editName.trim();
     const phone = editPhone.trim();
+    if (editDeptId === '') {
+      setEditError('Département requis.');
+      return;
+    }
     if (!name || !phone) {
       setEditError('Nom et téléphone sont requis.');
       return;
@@ -112,7 +129,12 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
     setFicheBusy(true);
     setEditError('');
     try {
-      await updateCarrier(fiche.id, { name, phone, rates: collectRates(editRates) });
+      await updateCarrier(fiche.id, {
+        departmentId: editDeptId,
+        name,
+        phone,
+        rates: collectRates(editRates),
+      });
       await reload();
       const row = await getCarrier(fiche.id, { dateFrom, dateTo });
       setFiche(row);
@@ -143,6 +165,7 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
                 setNewName('');
                 setNewPhone('');
                 setNewRates({});
+                setNewDeptId(departmentId);
                 setCreateOpen(true);
               }}
             >
@@ -158,6 +181,7 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
               <thead>
                 <tr>
                   <th>Nom</th>
+                  <th>Département</th>
                   <th>Téléphone</th>
                   {canManage ? (
                     <>
@@ -189,6 +213,7 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
                     }
                   >
                     <td>{w.name}</td>
+                    <td>{plants.find((p) => p.id === w.departmentId)?.name ?? '—'}</td>
                     <td>{w.phone}</td>
                     {canManage ? (
                       <>
@@ -219,6 +244,20 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
             </div>
             {createError ? <p className="error-text">{createError}</p> : null}
             <div className="form-grid">
+              <label>
+                Département *
+                <select
+                  value={newDeptId}
+                  onChange={(e) => setNewDeptId(e.target.value ? Number(e.target.value) : '')}
+                >
+                  <option value="">—</option>
+                  {plants.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label>
                 Nom *
                 <input value={newName} onChange={(e) => setNewName(e.target.value)} />
@@ -276,6 +315,20 @@ export function CarriersSection({ departmentId, finishedGoods, canManage, onMess
               <>
                 {editError ? <p className="error-text">{editError}</p> : null}
                 <div className="form-grid">
+                  <label>
+                    Département *
+                    <select
+                      value={editDeptId}
+                      onChange={(e) => setEditDeptId(e.target.value ? Number(e.target.value) : '')}
+                    >
+                      <option value="">—</option>
+                      {plants.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <label>
                     Nom *
                     <input value={editName} onChange={(e) => setEditName(e.target.value)} />

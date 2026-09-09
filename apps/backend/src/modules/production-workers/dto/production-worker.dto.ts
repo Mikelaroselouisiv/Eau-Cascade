@@ -38,6 +38,12 @@ export class CreateProductionWorkerDto {
 
 export class UpdateProductionWorkerDto {
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  departmentId?: number;
+
+  @IsOptional()
   @IsString()
   @MinLength(1)
   name?: string;

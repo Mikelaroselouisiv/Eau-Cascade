@@ -51,6 +51,12 @@ export class CreateCarrierDto {
 
 export class UpdateCarrierDto {
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  departmentId?: number;
+
+  @IsOptional()
   @IsString()
   @MinLength(1)
   name?: string;

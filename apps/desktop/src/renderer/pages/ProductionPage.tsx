@@ -19,7 +19,7 @@ import type {
 } from '../types/api';
 import { useAuth } from '../context/AuthContext';
 import { getPosDeviceId, getPosDeviceName } from '../services/pos-device';
-import { departmentsForUser } from '../utils/user-scope';
+import { departmentsForUser, productionPlantsForUser } from '../utils/user-scope';
 import { RegisterStockCountForm } from '../components/RegisterStockCountForm';
 import { ProductionOutflowSection } from '../components/ProductionOutflowSection';
 import { ProductionWorkersSection } from '../components/ProductionWorkersSection';
@@ -81,8 +81,8 @@ export function ProductionPage() {
 
   const productionEnabled = session != null;
   const plants = useMemo(
-    () => departments.filter((d) => d.kind === 'PRODUCTION_DISTRIBUTION'),
-    [departments],
+    () => productionPlantsForUser(allDepartments, user),
+    [allDepartments, user],
   );
   const currentPlant = plants.find((d) => d.id === departmentId);
 
@@ -106,9 +106,10 @@ export function ProductionPage() {
         setAllDepartments(rows);
         const scoped = departmentsForUser(rows, user);
         setDepartments(scoped);
-        const firstPlant = scoped.find((d) => d.kind === 'PRODUCTION_DISTRIBUTION');
+        const visiblePlants = productionPlantsForUser(rows, user);
+        const firstPlant = visiblePlants[0];
         setDepartmentId((prev) =>
-          prev !== '' && scoped.some((d) => d.id === prev) ? prev : (firstPlant?.id ?? ''),
+          prev !== '' && visiblePlants.some((d) => d.id === prev) ? prev : (firstPlant?.id ?? ''),
         );
       })
       .catch(() => {
@@ -395,6 +396,7 @@ export function ProductionPage() {
           {pane === 'workers' ? (
             <ProductionWorkersSection
               departmentId={departmentId}
+              plants={plants}
               productionEnabled={productionEnabled}
               finishedGoods={products}
               rawMaterials={rawMaterials}
@@ -405,6 +407,7 @@ export function ProductionPage() {
           ) : pane === 'carriers' ? (
             <CarriersSection
               departmentId={departmentId}
+              plants={plants}
               finishedGoods={products}
               canManage={canManageCarriers}
               onMessage={setMessage}

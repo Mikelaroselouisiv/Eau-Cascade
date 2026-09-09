@@ -1061,6 +1061,7 @@ export async function createProductionWorker(payload: {
 export async function updateProductionWorker(
   id: number,
   payload: {
+    departmentId?: number;
     name?: string;
     phone?: string;
     payrollCoefficient?: number;
@@ -1097,6 +1098,7 @@ export async function createCarrier(payload: {
 export async function updateCarrier(
   id: number,
   payload: {
+    departmentId?: number;
     name?: string;
     phone?: string;
     isActive?: boolean;

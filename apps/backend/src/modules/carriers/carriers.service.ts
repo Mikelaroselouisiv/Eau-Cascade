@@ -7,7 +7,13 @@ import {
 import { Prisma, ProductNature } from '@prisma/client';
 import { isProductionDepartment } from '../../common/department-kind';
 import { permissionGranted } from '../../common/permissions';
-import { canAccessAssignedDepartment } from '../../common/user-scope';
+import {
+  canAccessAssignedDepartment,
+  isAdminRole,
+  isAssignedToDepartment,
+  isManagerRole,
+  resolvedDepartmentIds,
+} from '../../common/user-scope';
 import { ymdToBusinessDayEnd, ymdToBusinessDayStart, nowBusinessYmd } from '../../common/utils/business-timezone';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -29,6 +35,7 @@ type ScopeUser = {
   companyId?: number | null;
   departmentId?: number | null;
   departmentIds?: number[] | null;
+  productionDepartmentIds?: number[] | null;
 };
 
 @Injectable()
@@ -45,8 +52,20 @@ export class CarriersService {
     return permissionGranted(perms, 'carriers.manage');
   }
 
+  private assignedPlantIds(user: ScopeUser): number[] {
+    const fromProduction = (user.productionDepartmentIds ?? []).filter((id) => id > 0);
+    if (fromProduction.length) return fromProduction;
+    return resolvedDepartmentIds(user);
+  }
+
   private assertDeptAccess(user: ScopeUser, departmentId: number) {
-    if (!canAccessAssignedDepartment(user, departmentId)) {
+    if (isAdminRole(user.role) || isManagerRole(user.role) || user.role === 'ACCOUNTANT') {
+      if (!canAccessAssignedDepartment(user, departmentId)) {
+        throw new ForbiddenException('Vous n’êtes pas affecté à ce département.');
+      }
+      return;
+    }
+    if (!isAssignedToDepartment({ ...user, departmentIds: this.assignedPlantIds(user) }, departmentId)) {
       throw new ForbiddenException('Vous n’êtes pas affecté à ce département.');
     }
   }
@@ -264,6 +283,15 @@ export class CarriersService {
     if (!existing) throw new NotFoundException('Transporteur introuvable');
     this.assertDeptAccess(user, existing.departmentId);
 
+    let nextDepartmentId = existing.departmentId;
+    let nextCompanyId = existing.companyId;
+    if (dto.departmentId != null && dto.departmentId !== existing.departmentId) {
+      this.assertDeptAccess(user, dto.departmentId);
+      const dept = await this.assertPlant(dto.departmentId);
+      nextDepartmentId = dept.id;
+      nextCompanyId = dept.companyId;
+    }
+
     if (dto.phone != null) {
       const phone = this.normalizePhone(dto.phone);
       const duplicate = await this.prisma.carrier.findFirst({
@@ -280,7 +308,7 @@ export class CarriersService {
     }
 
     if (dto.rates) {
-      await this.validateRates(existing.companyId, existing.departmentId, dto.rates);
+      await this.validateRates(nextCompanyId, nextDepartmentId, dto.rates);
     }
 
     const row = await this.prisma.$transaction(async (tx) => {
@@ -300,6 +328,8 @@ export class CarriersService {
       return tx.carrier.update({
         where: { id },
         data: {
+          departmentId: nextDepartmentId,
+          companyId: nextCompanyId,
           ...(dto.name != null ? { name: dto.name.trim() } : {}),
           ...(dto.phone != null ? { phone: this.normalizePhone(dto.phone) } : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
