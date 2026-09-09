@@ -45,8 +45,9 @@ export class CreateInternalTransferDto {
   @MaxLength(500)
   note?: string;
 
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  carrierId: number;
+  carrierId?: number;
 }

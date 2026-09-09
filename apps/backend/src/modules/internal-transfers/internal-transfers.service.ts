@@ -208,11 +208,14 @@ export class InternalTransfersService {
     const destIsPlant = isProductionDepartment(toDept.kind);
     const created = await this.prisma.$transaction(async (tx) => {
       const session = await this.productionSessions.requireOpenSessionTx(tx, dto.fromDepartmentId);
-      const carrier = await this.carriersService.requireForHomeDrop(tx, {
-        carrierId: dto.carrierId,
-        departmentId: dto.fromDepartmentId,
-        companyId: fromDept.companyId,
-      });
+      const carrier =
+        dto.carrierId != null
+          ? await this.carriersService.requireForHomeDrop(tx, {
+              carrierId: dto.carrierId,
+              departmentId: dto.fromDepartmentId,
+              companyId: fromDept.companyId,
+            })
+          : null;
 
       const row = await tx.internalTransfer.create({
         data: {
@@ -221,7 +224,7 @@ export class InternalTransfersService {
           toDepartmentId: dto.toDepartmentId,
           note: dto.note?.trim() || null,
           createdById: user.id,
-          carrierId: carrier.id,
+          carrierId: carrier?.id ?? null,
           status: destIsPlant ? InternalTransferStatus.CONFIRMED : InternalTransferStatus.PENDING,
           ...(destIsPlant
             ? { confirmedById: user.id, confirmedAt: new Date() }
@@ -247,14 +250,16 @@ export class InternalTransfersService {
           productionSessionId: session.id,
           internalTransferId: row.id,
         });
-        await this.carriersService.recordTripTx(tx, {
-          carrierId: carrier.id,
-          departmentId: dto.fromDepartmentId,
-          internalTransferId: row.id,
-          productId: item.productId,
-          quantity: qty,
-          userId: user.id,
-        });
+        if (carrier) {
+          await this.carriersService.recordTripTx(tx, {
+            carrierId: carrier.id,
+            departmentId: dto.fromDepartmentId,
+            internalTransferId: row.id,
+            productId: item.productId,
+            quantity: qty,
+            userId: user.id,
+          });
+        }
         if (destIsPlant) {
           const destProductId = await resolveProductInDepartment(tx, byId.get(item.productId)!, dto.toDepartmentId);
           await this.productionSessions.recordFlowTx(tx, {
