@@ -254,7 +254,8 @@ export class CreditService {
         productSaleUnitId: number;
       }> = [];
       let total = 0;
-      let firstDepartmentId: number | null = customer.departmentId;
+      // Même règle que le POS : la fiche suit le département produit, pas celui du client crédit.
+      let firstDepartmentId: number | null = null;
 
       const loaded: Array<{
         item: (typeof dto.items)[number];
@@ -433,6 +434,10 @@ export class CreditService {
         where: { id: sale.id },
         data: { txnNumber },
       });
+
+      if (firstDepartmentId == null) {
+        firstDepartmentId = customer.departmentId;
+      }
 
       // Fiche livraison : magasin DISTRIBUTION → déjà livrée ; usine → PENDING.
       const delivery = await this.deliveriesService.createFromSaleTx(tx, {

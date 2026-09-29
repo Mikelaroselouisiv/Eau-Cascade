@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator,
@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 
 import { Ionicons } from '@expo/vector-icons';
+import { ChipScroll } from '@/components/ChipScroll';
+import { CreditHistoryDetailModal } from '@/components/credit/CreditHistoryDetailModal';
 import { MoneyText } from '@/components/MoneyText';
 import { KpiCard } from '@/components/monitor/KpiCard';
 import { ModalShell } from '@/components/ModalShell';
@@ -19,7 +21,7 @@ import { Screen } from '@/components/Screen';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import { resolvedDepartmentIds } from '@/utils/user-scope';
+import { departmentsForUser, resolvedDepartmentIds } from '@/utils/user-scope';
 import { posPaymentOptions, type PosCollectMethod } from '@/utils/posCollect';
 import { useCompanyScope } from '@/hooks/useCompanyScope';
 import {
@@ -27,9 +29,12 @@ import {
   createCreditSale,
   getCreditCustomer,
   getCreditSummary,
+  getDepartments,
   getProducts,
+  getSaleById,
   listBanks,
   listCreditCustomers,
+  listRegisters,
   recordCreditPayment,
 } from '@/services/api';
 import { formatApiError } from '@/services/api-errors';
@@ -40,18 +45,25 @@ import type {
   CreditCustomerDetail,
   CreditCustomerListItem,
   CreditCustomerStatus,
+  CreditRepaymentRow,
+  CreditSaleRow,
   CreditSummary,
+  CreditTimelineEvent,
+  Department,
   Product,
+  Sale,
 } from '@/types/api';
 import { formatDateTime, formatMoney } from '@/utils/datetime';
 import { saleDisplayRef } from '@/utils/saleRef';
 import {
   addLineToCart,
+  defaultSaleUnit,
   setCartLineManualPrice,
   setCartLineQty,
   specialPricesReady,
   type CartLine,
 } from '@/utils/posCart';
+import { resolveVolumeUnitPrice } from '@/utils/volumeUnitPrice';
 
 const STATUS_LABEL: Record<CreditCustomerStatus, string> = {
   CLEAR: 'À jour',
@@ -79,6 +91,35 @@ function matchesMode(c: CreditCustomerListItem, mode: CreditListMode): boolean {
   if (mode === 'all') return true;
   if (mode === 'PARTIAL') return c.status === 'PARTIAL';
   return c.status === 'OVERDUE' || c.status === 'AT_LIMIT';
+}
+
+function sameInstant(left: string, right: string) {
+  return new Date(left).getTime() === new Date(right).getTime();
+}
+
+function resolveTimelineSale(
+  event: CreditTimelineEvent,
+  sales: CreditSaleRow[],
+): CreditSaleRow | null {
+  const saleId = event.meta?.saleId;
+  if (saleId != null) return sales.find((sale) => sale.id === saleId) ?? null;
+  return (
+    sales.find((sale) => sameInstant(sale.createdAt, event.at) && Number(sale.total) === event.amount) ??
+    null
+  );
+}
+
+function resolveTimelinePayment(
+  event: CreditTimelineEvent,
+  repayments: CreditRepaymentRow[],
+): CreditRepaymentRow | null {
+  const paymentId = event.meta?.paymentId;
+  if (paymentId != null) return repayments.find((row) => row.id === paymentId) ?? null;
+  return (
+    repayments.find(
+      (row) => sameInstant(row.createdAt, event.at) && Number(row.amount) === event.amount,
+    ) ?? null
+  );
 }
 
 export function CreditCustomersScreen({ mode }: Props) {
@@ -110,6 +151,9 @@ export function CreditCustomersScreen({ mode }: Props) {
   const [paying, setPaying] = useState(false);
   const [payStatus, setPayStatus] = useState<string | null>(null);
   const [saleVisible, setSaleVisible] = useState(false);
+  const [saleOpening, setSaleOpening] = useState(false);
+  const [saleDepts, setSaleDepts] = useState<Department[]>([]);
+  const [saleDeptId, setSaleDeptId] = useState<number | ''>('');
   const [products, setProducts] = useState<Product[]>([]);
   const [productQuery, setProductQuery] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -120,6 +164,11 @@ export function CreditCustomersScreen({ mode }: Props) {
   const [saleStatus, setSaleStatus] = useState<string | null>(null);
   const [printTicket, setPrintTicket] = useState(true);
   const [printingSaleId, setPrintingSaleId] = useState<number | null>(null);
+  const [historyEvent, setHistoryEvent] = useState<CreditTimelineEvent | null>(null);
+  const [historySale, setHistorySale] = useState<Sale | CreditSaleRow | null>(null);
+  const [historyPayment, setHistoryPayment] = useState<CreditRepaymentRow | null>(null);
+  const [historyRegister, setHistoryRegister] = useState<string | null>(null);
+  const [historyBusy, setHistoryBusy] = useState(false);
   const [createVisible, setCreateVisible] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -150,15 +199,21 @@ export function CreditCustomersScreen({ mode }: Props) {
 
   const filteredProducts = useMemo(() => {
     const query = productQuery.trim().toLocaleLowerCase('fr');
-    return products.filter(
-      (product) =>
+    const company = detail?.companyId ?? companyId;
+    return products.filter((product) => {
+      const productCompanyId = product.companyId ?? product.company?.id;
+      if (company != null && productCompanyId != null && productCompanyId !== company) {
+        return false;
+      }
+      return (
         product.nature !== 'RAW_MATERIAL' &&
         product.saleUnits.length > 0 &&
         (!query ||
           product.name.toLocaleLowerCase('fr').includes(query) ||
-          (product.sku ?? '').toLocaleLowerCase('fr').includes(query)),
-    );
-  }, [products, productQuery]);
+          (product.sku ?? '').toLocaleLowerCase('fr').includes(query))
+      );
+    });
+  }, [products, productQuery, detail?.companyId, companyId]);
 
   const load = useCallback(async () => {
     if (!allowed || companyId == null) return;
@@ -236,6 +291,57 @@ export function CreditCustomersScreen({ mode }: Props) {
     await printReceipt(data);
   }
 
+  function closeHistory() {
+    setHistoryEvent(null);
+    setHistorySale(null);
+    setHistoryPayment(null);
+    setHistoryRegister(null);
+    setHistoryBusy(false);
+  }
+
+  function closeCustomerFiche() {
+    closeHistory();
+    setDetail(null);
+  }
+
+  async function openHistory(event: CreditTimelineEvent, customer = detail) {
+    if (!customer) return;
+    const localSale = resolveTimelineSale(event, customer.sales);
+    const payment = resolveTimelinePayment(event, customer.repayments);
+    const saleId = event.meta?.saleId ?? payment?.saleId ?? localSale?.id ?? null;
+    setHistoryEvent(event);
+    setHistorySale(localSale);
+    setHistoryPayment(payment);
+    setHistoryRegister(localSale?.registerId != null ? `Caisse #${localSale.registerId}` : null);
+    setHistoryBusy(true);
+    try {
+      const fullSale = saleId != null ? await getSaleById(saleId).catch(() => null) : null;
+      if (fullSale) setHistorySale(fullSale);
+      const registerId = fullSale?.registerId ?? localSale?.registerId ?? null;
+      if (registerId != null && companyId != null) {
+        const registers = await listRegisters({ companyId }).catch(() => []);
+        const register = registers.find((row) => row.id === registerId);
+        setHistoryRegister(
+          register
+            ? [register.code, register.department?.name].filter(Boolean).join(' · ')
+            : `Caisse #${registerId}`,
+        );
+      }
+    } finally {
+      setHistoryBusy(false);
+    }
+  }
+
+  function openSaleHistory(sale: CreditSaleRow) {
+    void openHistory({
+      kind: 'SALE',
+      at: sale.createdAt,
+      label: `Achat à crédit #${saleDisplayRef(sale)}`,
+      amount: sale.total,
+      meta: { saleId: sale.id, balanceDue: sale.balanceDue, paid: sale.amountPaid },
+    });
+  }
+
   async function reprintFicheSale(sale: CreditCustomerDetail['sales'][number]) {
     if (!detail) return;
     setPrintingSaleId(sale.id);
@@ -304,28 +410,66 @@ export function CreditCustomersScreen({ mode }: Props) {
         }
       }
       await refreshDetail(detail.id);
-    } catch {
-      setPayStatus('Échec encaissement');
+    } catch (err) {
+      setPayStatus(formatApiError(err, 'Échec encaissement'));
     } finally {
       setPaying(false);
     }
   }
 
+  async function loadSaleProducts(deptId: number | '') {
+    try {
+      setProducts(await getProducts(deptId === '' ? undefined : deptId));
+    } catch {
+      setProducts([]);
+      setSaleStatus('Impossible de charger les produits');
+    }
+  }
+
   async function openCreditSale() {
-    if (!detail) return;
+    if (!detail || companyId == null) return;
     setCart([]);
     setSaleQtyDrafts({});
     setDownPayment('');
     setSaleNote('');
     setProductQuery('');
     setSaleStatus(null);
-    setSaleVisible(true);
-    try {
-      setProducts(await getProducts(detail.departmentId ?? undefined));
-    } catch {
-      setProducts([]);
-      setSaleStatus('Impossible de charger les produits');
+    let depts = saleDepts;
+    if (depts.length === 0) {
+      try {
+        depts = departmentsForUser(await getDepartments(companyId), user);
+        setSaleDepts(depts);
+      } catch {
+        depts = [];
+      }
     }
+    const preferred =
+      (detail.departmentId != null && depts.some((d) => d.id === detail.departmentId)
+        ? detail.departmentId
+        : depts[0]?.id) ?? '';
+    setSaleDeptId(preferred);
+    setSaleOpening(true);
+    await loadSaleProducts(preferred);
+  }
+
+  useEffect(() => {
+    if (!saleOpening || saleVisible) return;
+    const timer = setTimeout(() => setSaleVisible(true), 80);
+    return () => clearTimeout(timer);
+  }, [saleOpening, saleVisible]);
+
+  function closeCreditSale() {
+    setSaleVisible(false);
+    setSaleOpening(false);
+  }
+
+  function onSaleDeptChange(id: number) {
+    if (id === saleDeptId) return;
+    setSaleDeptId(id);
+    setCart([]);
+    setSaleQtyDrafts({});
+    setSaleStatus(null);
+    void loadSaleProducts(id);
   }
 
   function addCreditProduct(product: Product) {
@@ -334,11 +478,26 @@ export function CreditCustomersScreen({ mode }: Props) {
       setSaleStatus(result.error);
       return;
     }
-    setCart(result.cart);
+    const su = defaultSaleUnit(product);
+    const seeded = result.cart.map((line) => {
+      if (!su || line.productSaleUnitId !== su.id || line.manualUnitPrice != null) return line;
+      const tiers = (su.volumePrices ?? []).map((v) => ({
+        minQuantity: Number(v.minQuantity),
+        unitPrice: Number(v.unitPrice),
+      }));
+      const price = resolveVolumeUnitPrice(Number(su.salePrice), tiers, line.quantity);
+      return Number.isFinite(price) ? { ...line, manualUnitPrice: price } : line;
+    });
+    setCart(seeded);
+    setSaleStatus(null);
   }
 
   async function submitCreditSale() {
     if (!detail || cart.length === 0 || saleBusy) return;
+    if (saleDepts.length > 1 && saleDeptId === '') {
+      setSaleStatus('Département requis');
+      return;
+    }
     if (!pricesReady) {
       setSaleStatus('Chaque ligne doit avoir un prix unitaire.');
       return;
@@ -363,7 +522,7 @@ export function CreditCustomersScreen({ mode }: Props) {
         downPaymentMethod: 'CASH',
         note: saleNote.trim() || undefined,
       });
-      setSaleVisible(false);
+      closeCreditSale();
       setPayStatus(
         `Vente #${result.txnNumber ?? result.saleId} — total ${formatMoney(result.total)}, reste ${formatMoney(result.balanceDue)}`,
       );
@@ -386,9 +545,10 @@ export function CreditCustomersScreen({ mode }: Props) {
             clientPhone: detail.phone,
             clientAddress: detail.address,
             fulfillmentLabel: 'Sur place',
-            departmentName: detail.department?.name,
+            departmentName:
+              saleDepts.find((d) => d.id === saleDeptId)?.name ?? detail.department?.name,
             cashier: cashierLabel(),
-            departmentId: detail.departmentId ?? undefined,
+            departmentId: saleDeptId === '' ? detail.departmentId ?? undefined : saleDeptId,
             amountReceived: result.amountPaid > 0.009 ? result.amountPaid : undefined,
             balanceDue: result.balanceDue > 0.009 ? result.balanceDue : undefined,
           });
@@ -566,8 +726,8 @@ export function CreditCustomersScreen({ mode }: Props) {
       />
 
       <ModalShell
-        visible={detail != null}
-        onRequestClose={() => setDetail(null)}
+        visible={detail != null && !saleVisible && !saleOpening && historyEvent == null}
+        onRequestClose={closeCustomerFiche}
         body={
           detail ? (
             <FlatList
@@ -609,6 +769,9 @@ export function CreditCustomersScreen({ mode }: Props) {
                           <Text style={styles.meta}>{formatDateTime(s.createdAt)}</Text>
                         </Pressable>
                         <MoneyText value={s.balanceDue} style={styles.rowValue} />
+                        <Pressable onPress={() => openSaleHistory(s)} hitSlop={8}>
+                          <Ionicons name="information-circle-outline" size={20} color={BrandColors.primary} />
+                        </Pressable>
                         <Pressable
                           onPress={() => void reprintFicheSale(s)}
                           disabled={printingSaleId === s.id}
@@ -630,10 +793,10 @@ export function CreditCustomersScreen({ mode }: Props) {
                         .filter((s) => s.balanceDue <= 0.009)
                         .map((s) => (
                           <View key={`paid-${s.id}`} style={styles.saleRow}>
-                            <View style={styles.rowInfo}>
+                            <Pressable onPress={() => openSaleHistory(s)} style={styles.rowInfo}>
                               <Text style={styles.rowTitle}>#{saleDisplayRef(s)}</Text>
                               <Text style={styles.meta}>{formatDateTime(s.createdAt)}</Text>
-                            </View>
+                            </Pressable>
                             <Pressable
                               onPress={() => void reprintFicheSale(s)}
                               disabled={printingSaleId === s.id}
@@ -790,7 +953,7 @@ export function CreditCustomersScreen({ mode }: Props) {
               }
               ListEmptyComponent={<Text style={styles.empty}>Aucun mouvement</Text>}
               renderItem={({ item: t }) => (
-                <View style={styles.timelineRow}>
+                <Pressable style={styles.timelineRow} onPress={() => void openHistory(t)}>
                   <View style={styles.rowInfo}>
                     <Text style={styles.rowTitle}>{t.label}</Text>
                     <Text style={styles.meta}>
@@ -804,21 +967,22 @@ export function CreditCustomersScreen({ mode }: Props) {
                       { color: t.kind === 'PAYMENT' ? BrandColors.ok : BrandColors.text },
                     ]}
                   />
-                </View>
+                  <Ionicons name="chevron-forward" size={18} color={BrandColors.textMuted} />
+                </Pressable>
               )}
             />
           ) : null
         }
         footer={
           <View style={styles.footer}>
-            <Pressable style={styles.secondaryBtn} onPress={() => setDetail(null)}>
+            <Pressable style={styles.secondaryBtn} onPress={closeCustomerFiche}>
               <Text style={styles.secondaryBtnText}>Fermer</Text>
             </Pressable>
           </View>
         }>
         <View style={styles.modalTop}>
           <Text style={styles.modalTopTitle}>Fiche crédit</Text>
-          <Pressable onPress={() => setDetail(null)} hitSlop={12}>
+          <Pressable onPress={closeCustomerFiche} hitSlop={12}>
             <Text style={styles.modalClose}>Fermer</Text>
           </Pressable>
         </View>
@@ -826,11 +990,32 @@ export function CreditCustomersScreen({ mode }: Props) {
 
       <ModalShell
         visible={saleVisible}
-        onRequestClose={() => setSaleVisible(false)}
+        onRequestClose={closeCreditSale}
         body={
           <ScrollView
             contentContainerStyle={styles.saleBody}
             keyboardShouldPersistTaps="handled">
+            {saleDepts.length > 0 ? (
+              <ChipScroll>
+                {saleDepts.map((dept) => {
+                  const active = saleDeptId === dept.id;
+                  return (
+                    <Pressable
+                      key={dept.id}
+                      onPress={() => onSaleDeptChange(dept.id)}
+                      style={[styles.methodChip, active && styles.methodChipActive]}>
+                      <Text
+                        style={[
+                          styles.methodChipText,
+                          active && styles.methodChipTextActive,
+                        ]}>
+                        {dept.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ChipScroll>
+            ) : null}
             <TextInput
               style={styles.input}
               placeholder="Rechercher produit / SKU…"
@@ -983,7 +1168,7 @@ export function CreditCustomersScreen({ mode }: Props) {
         }>
         <View style={styles.modalTop}>
           <Text style={styles.modalTopTitle}>Nouvelle vente à crédit</Text>
-          <Pressable onPress={() => setSaleVisible(false)} hitSlop={12}>
+          <Pressable onPress={closeCreditSale} hitSlop={12}>
             <Text style={styles.modalClose}>Fermer</Text>
           </Pressable>
         </View>
@@ -1054,6 +1239,16 @@ export function CreditCustomersScreen({ mode }: Props) {
           </Pressable>
         </View>
       </ModalShell>
+      <CreditHistoryDetailModal
+        visible={historyEvent != null}
+        customer={detail}
+        event={historyEvent}
+        sale={historySale}
+        payment={historyPayment}
+        registerLabel={historyRegister}
+        busy={historyBusy}
+        onClose={closeHistory}
+      />
     </Screen>
   );
 }

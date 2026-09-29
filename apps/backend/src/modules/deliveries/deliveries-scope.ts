@@ -59,6 +59,23 @@ export function cashierListWhere(user: DeliveryScopeUser): Prisma.DeliveryWhereI
   return { OR: [ownSales, home] };
 }
 
+function departmentOrProductMatch(
+  departmentId: number | { in: number[] },
+): Prisma.DeliveryWhereInput {
+  return {
+    OR: [
+      { departmentId },
+      {
+        items: {
+          some: {
+            saleItem: { product: { departmentId } },
+          },
+        },
+      },
+    ],
+  };
+}
+
 export function departmentListClause(
   scope: {
     departmentId?: number;
@@ -68,14 +85,12 @@ export function departmentListClause(
 ): Prisma.DeliveryWhereInput {
   const homePending: Prisma.DeliveryWhereInput | null = includeHomePool ? homePoolClause() : null;
   if (scope.departmentId != null) {
-    return homePending
-      ? { OR: [{ departmentId: scope.departmentId }, homePending] }
-      : { departmentId: scope.departmentId };
+    const match = departmentOrProductMatch(scope.departmentId);
+    return homePending ? { OR: [match, homePending] } : match;
   }
   if (scope.departmentIds && scope.departmentIds.length) {
-    return homePending
-      ? { OR: [{ departmentId: { in: scope.departmentIds } }, homePending] }
-      : { departmentId: { in: scope.departmentIds } };
+    const match = departmentOrProductMatch({ in: scope.departmentIds });
+    return homePending ? { OR: [match, homePending] } : match;
   }
   if (Array.isArray(scope.departmentIds)) {
     return homePending ?? NO_MATCH;
@@ -130,10 +145,12 @@ export function chefCanAccessDelivery(
   opts: {
     fulfillmentType?: FulfillmentType | string | null;
     departmentId?: number | null;
+    productDepartmentIds?: number[] | null;
   },
 ): boolean {
   if (!isChefProductionRole(user)) return false;
   const isHome = opts.fulfillmentType === FulfillmentType.HOME || opts.fulfillmentType === 'HOME';
   if (isHome && opts.departmentId == null) return true;
-  return isAssignedToDepartment(user, opts.departmentId);
+  if (isAssignedToDepartment(user, opts.departmentId)) return true;
+  return (opts.productDepartmentIds ?? []).some((id) => isAssignedToDepartment(user, id));
 }

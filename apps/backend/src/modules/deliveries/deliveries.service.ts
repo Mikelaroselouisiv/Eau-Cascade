@@ -96,6 +96,17 @@ function saleRefOf(sale?: { id: number; txnNumber?: number | null } | null, sale
   return saleId ?? null;
 }
 
+function productDepartmentIdsOf(
+  items?: Array<{ saleItem?: { product?: { departmentId?: number | null } | null } | null }>,
+): number[] {
+  const ids = new Set<number>();
+  for (const item of items ?? []) {
+    const departmentId = item.saleItem?.product?.departmentId;
+    if (departmentId != null) ids.add(departmentId);
+  }
+  return [...ids];
+}
+
 @Injectable()
 export class DeliveriesService {
   constructor(
@@ -361,6 +372,7 @@ export class DeliveriesService {
       delivery.departmentId,
       delivery.fulfillmentType,
       delivery.sale?.user?.id,
+      productDepartmentIdsOf(delivery.items),
     );
     return this.withSaleRef(delivery);
   }
@@ -443,7 +455,12 @@ export class DeliveriesService {
   async update(id: number, dto: UpdateDeliveryDto, user: ScopeUser) {
     const delivery = await this.prisma.delivery.findFirst({
       where: { id, deletedAt: null },
-      include: { items: true, sale: { select: { id: true, status: true, userId: true } } },
+      include: {
+        items: {
+          include: { saleItem: { select: { product: { select: { departmentId: true } } } } },
+        },
+        sale: { select: { id: true, status: true, userId: true } },
+      },
     });
     if (!delivery) throw new NotFoundException('Livraison introuvable');
     if (delivery.sale.status !== 'COMPLETED') {
@@ -455,6 +472,7 @@ export class DeliveriesService {
       delivery.departmentId,
       delivery.fulfillmentType,
       delivery.sale.userId,
+      productDepartmentIdsOf(delivery.items),
     );
     await this.assertCanManageFulfillment(user, delivery.fulfillmentType);
 
@@ -597,7 +615,9 @@ export class DeliveriesService {
     const delivery = await this.prisma.delivery.findFirst({
       where: { id, deletedAt: null },
       include: {
-        items: true,
+        items: {
+          include: { saleItem: { select: { product: { select: { departmentId: true } } } } },
+        },
         sale: { select: { id: true, status: true, userId: true } },
       },
     });
@@ -611,6 +631,7 @@ export class DeliveriesService {
       delivery.departmentId,
       delivery.fulfillmentType,
       delivery.sale.userId,
+      productDepartmentIdsOf(delivery.items),
     );
     await this.assertCanManageFulfillment(user, delivery.fulfillmentType);
 
@@ -1183,6 +1204,7 @@ export class DeliveriesService {
     departmentId: number | null,
     fulfillmentType?: FulfillmentType | string | null,
     saleUserId?: number | null,
+    productDepartmentIds?: number[],
   ) {
     const role = user.role ?? '';
     if (role === 'ADMIN') return;
@@ -1195,7 +1217,9 @@ export class DeliveriesService {
       throw new ForbiddenException('Accès refusé');
     }
     if (isChefProductionRole(user)) {
-      if (chefCanAccessDelivery(user, { fulfillmentType, departmentId })) return;
+      if (chefCanAccessDelivery(user, { fulfillmentType, departmentId, productDepartmentIds })) {
+        return;
+      }
       throw new ForbiddenException('Accès refusé');
     }
     if (fulfillmentType === FulfillmentType.HOME || fulfillmentType === 'HOME') return;

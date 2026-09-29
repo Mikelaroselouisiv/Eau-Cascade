@@ -260,6 +260,20 @@ export interface ProductionSessionDetail {
   department?: { id: number; name: string };
   openedBy?: UserAttribution | null;
   closedBy?: UserAttribution | null;
+  openingInventorySession?: {
+    lines: Array<{
+      productId: number;
+      countedQty: string | number | null;
+      product: { id: number; name: string };
+    }>;
+  } | null;
+  closingInventorySession?: {
+    lines: Array<{
+      productId: number;
+      countedQty: string | number | null;
+      product?: { id: number; name: string };
+    }>;
+  } | null;
   usage?: Array<{
     productId: number;
     name: string;
@@ -764,41 +778,66 @@ export interface CreditCustomerListItem {
   createdAt?: string;
 }
 
+export interface CreditSaleItemRow {
+  id: number;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+  lineLabel?: string | null;
+  product?: {
+    id: number;
+    name: string;
+    sku?: string | null;
+    department?: { id: number; name?: string } | null;
+  } | null;
+}
+
+export interface CreditSaleRow {
+  id: number;
+  txnNumber?: number | null;
+  total: number;
+  amountPaid: number;
+  balanceDue: number;
+  createdAt: string;
+  clientName?: string | null;
+  cashier?: string | null;
+  registerId?: number | null;
+  fulfillmentType?: FulfillmentType;
+  user?: UserAttribution | null;
+  items: CreditSaleItemRow[];
+  delivery?: { id: number; status: string } | null;
+}
+
+export interface CreditRepaymentRow {
+  id: number;
+  amount: number;
+  method: string;
+  reference?: string | null;
+  note?: string | null;
+  saleId?: number | null;
+  createdAt: string;
+  user?: UserAttribution | null;
+  registerSessionId?: number | null;
+}
+
+export interface CreditTimelineEvent {
+  kind: 'SALE' | 'PAYMENT';
+  at: string;
+  label: string;
+  amount: number;
+  meta?: {
+    saleId?: number | null;
+    paymentId?: number | null;
+    balanceDue?: number;
+    paid?: number;
+  };
+}
+
 export interface CreditCustomerDetail extends CreditCustomerListItem {
   availableCredit: number;
-  sales: Array<{
-    id: number;
-    txnNumber?: number | null;
-    total: number;
-    amountPaid: number;
-    balanceDue: number;
-    createdAt: string;
-    clientName?: string | null;
-    items: Array<{
-      id: number;
-      quantity: number;
-      unitPrice: number;
-      subtotal: number;
-      lineLabel?: string | null;
-      product?: { id: number; name: string; sku?: string | null } | null;
-    }>;
-    delivery?: { id: number; status: string } | null;
-  }>;
-  repayments: Array<{
-    id: number;
-    amount: number;
-    method: string;
-    reference?: string | null;
-    note?: string | null;
-    saleId?: number | null;
-    createdAt: string;
-  }>;
-  timeline: Array<{
-    kind: 'SALE' | 'PAYMENT';
-    at: string;
-    label: string;
-    amount: number;
-  }>;
+  sales: CreditSaleRow[];
+  repayments: CreditRepaymentRow[];
+  timeline: CreditTimelineEvent[];
 }
 
 export interface CreditSummary {

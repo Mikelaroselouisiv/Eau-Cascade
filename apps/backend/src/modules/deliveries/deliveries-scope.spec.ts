@@ -62,7 +62,18 @@ describe('deliveries-scope', () => {
     expect(resolveDeliveryScope(chefNoDept, {})).toEqual({ companyId: 1, departmentIds: [] });
     expect(departmentListClause({ departmentIds: [4] }, true)).toEqual({
       OR: [
-        { departmentId: { in: [4] } },
+        {
+          OR: [
+            { departmentId: { in: [4] } },
+            {
+              items: {
+                some: {
+                  saleItem: { product: { departmentId: { in: [4] } } },
+                },
+              },
+            },
+          ],
+        },
         { fulfillmentType: FulfillmentType.HOME, departmentId: null },
       ],
     });
@@ -77,6 +88,13 @@ describe('deliveries-scope', () => {
     expect(chefCanAccessDelivery(chef, { fulfillmentType: 'HOME', departmentId: 4 })).toBe(true);
     expect(chefCanAccessDelivery(chef, { fulfillmentType: 'ON_SITE', departmentId: 4 })).toBe(true);
     expect(chefCanAccessDelivery(chef, { fulfillmentType: 'ON_SITE', departmentId: 9 })).toBe(false);
+    expect(
+      chefCanAccessDelivery(chef, {
+        fulfillmentType: 'ON_SITE',
+        departmentId: 9,
+        productDepartmentIds: [4],
+      }),
+    ).toBe(true);
     expect(chefCanAccessDelivery(chefNoDept, { fulfillmentType: 'ON_SITE', departmentId: 4 })).toBe(
       false,
     );
