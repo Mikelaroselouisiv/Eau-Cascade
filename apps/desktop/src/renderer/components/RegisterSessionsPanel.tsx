@@ -2,19 +2,20 @@ import { useEffect, useState } from 'react';
 import { getDepartments, getUsers, listRegisterSessions } from '../services/api';
 import type { Department, RegisterSessionDetail, SessionUser } from '../types/api';
 import { formatMoney } from '../utils/currency';
-import { formatDateTime, formatYmd, defaultMonthStartYmd } from '../utils/datetime';
+import { formatDateTime, formatYmd, defaultHistoryFromYmd } from '../utils/datetime';
 import { formatRegisterCode } from '../utils/registerDisplay';
 import { formatUserLabel } from '../utils/userAttribution';
 
 type Props = {
   companyId: number;
   onSelect: (session: RegisterSessionDetail) => void;
+  minYmd?: string | null;
 };
 
-export function RegisterSessionsPanel({ companyId, onSelect }: Props) {
+export function RegisterSessionsPanel({ companyId, onSelect, minYmd }: Props) {
   const [sessions, setSessions] = useState<RegisterSessionDetail[]>([]);
   const [loading, setLoading] = useState(false);
-  const [dateFrom, setDateFrom] = useState(defaultMonthStartYmd);
+  const [dateFrom, setDateFrom] = useState(() => defaultHistoryFromYmd(minYmd));
   const [dateTo, setDateTo] = useState(() => formatYmd(new Date()));
   const [openedById, setOpenedById] = useState<number | ''>('');
   const [departmentId, setDepartmentId] = useState<number | ''>('');
@@ -31,6 +32,11 @@ export function RegisterSessionsPanel({ companyId, onSelect }: Props) {
       .then(setDepartments)
       .catch(() => setDepartments([]));
   }, [companyId]);
+
+  useEffect(() => {
+    if (!minYmd) return;
+    setDateFrom((prev) => (prev < minYmd ? minYmd : prev));
+  }, [minYmd]);
 
   async function load() {
     setLoading(true);
@@ -75,11 +81,30 @@ export function RegisterSessionsPanel({ companyId, onSelect }: Props) {
       >
         <label>
           Date début
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <input
+            type="date"
+            value={dateFrom}
+            min={minYmd ?? undefined}
+            max={formatYmd(new Date())}
+            onChange={(e) => {
+              const next = e.target.value;
+              setDateFrom(minYmd && next < minYmd ? minYmd : next);
+            }}
+          />
         </label>
         <label>
           Date fin
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          <input
+            type="date"
+            value={dateTo}
+            min={minYmd ?? undefined}
+            max={formatYmd(new Date())}
+            onChange={(e) => {
+              const today = formatYmd(new Date());
+              const next = e.target.value;
+              setDateTo(next > today ? today : next);
+            }}
+          />
         </label>
         <label>
           Utilisateur

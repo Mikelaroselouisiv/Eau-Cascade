@@ -3,20 +3,21 @@ import { getDepartments, getUsers, listAuditLogs } from '../services/api';
 import type { AuditLogRow, Department, SessionUser } from '../types/api';
 import { auditActionLabel } from '../utils/auditActionLabel';
 import { formatUserLabel } from '../utils/userAttribution';
-import { formatDateTime, formatYmd, defaultMonthStartYmd } from '../utils/datetime';
+import { formatDateTime, formatYmd, defaultHistoryFromYmd } from '../utils/datetime';
 
 type Props = {
   companyId: number;
+  minYmd?: string | null;
 };
 
-export function AuditJournalPanel({ companyId }: Props) {
+export function AuditJournalPanel({ companyId, minYmd }: Props) {
   const [items, setItems] = useState<AuditLogRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [skip, setSkip] = useState(0);
   const take = 25;
 
-  const [dateFrom, setDateFrom] = useState(defaultMonthStartYmd);
+  const [dateFrom, setDateFrom] = useState(() => defaultHistoryFromYmd(minYmd));
   const [dateTo, setDateTo] = useState(() => formatYmd(new Date()));
   const [userId, setUserId] = useState<number | ''>('');
   const [departmentId, setDepartmentId] = useState<number | ''>('');
@@ -34,6 +35,11 @@ export function AuditJournalPanel({ companyId }: Props) {
       .then(setDepartments)
       .catch(() => setDepartments([]));
   }, [companyId]);
+
+  useEffect(() => {
+    if (!minYmd) return;
+    setDateFrom((prev) => (prev < minYmd ? minYmd : prev));
+  }, [minYmd]);
 
   async function load(reset = true) {
     setLoading(true);
@@ -86,11 +92,30 @@ export function AuditJournalPanel({ companyId }: Props) {
       >
         <label>
           Date début
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <input
+            type="date"
+            value={dateFrom}
+            min={minYmd ?? undefined}
+            max={formatYmd(new Date())}
+            onChange={(e) => {
+              const next = e.target.value;
+              setDateFrom(minYmd && next < minYmd ? minYmd : next);
+            }}
+          />
         </label>
         <label>
           Date fin
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          <input
+            type="date"
+            value={dateTo}
+            min={minYmd ?? undefined}
+            max={formatYmd(new Date())}
+            onChange={(e) => {
+              const today = formatYmd(new Date());
+              const next = e.target.value;
+              setDateTo(next > today ? today : next);
+            }}
+          />
         </label>
         <label>
           Utilisateur

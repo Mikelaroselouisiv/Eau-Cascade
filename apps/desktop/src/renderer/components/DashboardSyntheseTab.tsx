@@ -52,16 +52,17 @@ import type {
 
 import { formatMoney } from '../utils/currency';
 import { formatQuantity } from '../utils/formatQuantity';
-import { addDaysYmd, defaultMonthStartYmd, formatYmd } from '../utils/datetime';
+import { addDaysYmd, defaultMonthStartYmd, defaultHistoryFromYmd, formatYmd } from '../utils/datetime';
 
 const PIE_COLORS = ['#7a5230', '#a67c52', '#8b6914', '#c4a574', '#5c4033', '#9a7b4f', '#6b4423', '#b08968'];
 
 type Props = {
   companies: CompanyListItem[];
   onMessage: (msg: string, opts?: { persist?: boolean }) => void;
+  minYmd?: string | null;
 };
 
-export function DashboardSyntheseTab({ companies, onMessage }: Props) {
+export function DashboardSyntheseTab({ companies, onMessage, minYmd }: Props) {
 
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<number[]>([]);
 
@@ -69,7 +70,7 @@ export function DashboardSyntheseTab({ companies, onMessage }: Props) {
 
 
 
-  const [dateFrom, setDateFrom] = useState(defaultMonthStartYmd);
+  const [dateFrom, setDateFrom] = useState(() => defaultHistoryFromYmd(minYmd));
 
   const [dateTo, setDateTo] = useState(() => formatYmd(new Date()));
 
@@ -94,6 +95,15 @@ export function DashboardSyntheseTab({ companies, onMessage }: Props) {
   const [synthesisPdfLoading, setSynthesisPdfLoading] = useState(false);
 
 
+
+  useEffect(() => {
+    if (!minYmd) return;
+    setDateFrom((prev) => (prev < minYmd ? minYmd : prev));
+    setDateTo((prev) => {
+      const today = formatYmd(new Date());
+      return prev > today ? today : prev;
+    });
+  }, [minYmd]);
 
   useEffect(() => {
 
@@ -393,9 +403,12 @@ export function DashboardSyntheseTab({ companies, onMessage }: Props) {
     if (dateFrom === weekFrom && dateTo === today) return 'week';
 
     if (dateFrom === defaultMonthStartYmd() && dateTo === today) return 'month';
+    if (minYmd && dateFrom === minYmd && dateTo === today && minYmd > defaultMonthStartYmd()) {
+      return 'month';
+    }
 
     return null;
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, minYmd]);
 
   function applyDatePreset(preset: 'today' | 'week' | 'month') {
     const to = formatYmd(new Date());
@@ -407,12 +420,13 @@ export function DashboardSyntheseTab({ companies, onMessage }: Props) {
     }
 
     if (preset === 'week') {
-      setDateFrom(addDaysYmd(to, -6));
+      const from = addDaysYmd(to, -6);
+      setDateFrom(minYmd && from < minYmd ? minYmd : from);
       setDateTo(to);
       return;
     }
 
-    setDateFrom(defaultMonthStartYmd());
+    setDateFrom(defaultHistoryFromYmd(minYmd));
     setDateTo(to);
   }
 
@@ -463,11 +477,30 @@ export function DashboardSyntheseTab({ companies, onMessage }: Props) {
             <div className="synthese-date-fields">
               <label>
                 Date début
-                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+                <input
+                  type="date"
+                  value={dateFrom}
+                  min={minYmd ?? undefined}
+                  max={formatYmd(new Date())}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setDateFrom(minYmd && next < minYmd ? minYmd : next);
+                  }}
+                />
               </label>
               <label>
                 Date fin
-                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+                <input
+                  type="date"
+                  value={dateTo}
+                  min={minYmd ?? undefined}
+                  max={formatYmd(new Date())}
+                  onChange={(e) => {
+                    const today = formatYmd(new Date());
+                    const next = e.target.value;
+                    setDateTo(next > today ? today : next);
+                  }}
+                />
               </label>
               <label>
                 Département

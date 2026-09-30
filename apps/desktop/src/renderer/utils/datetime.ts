@@ -157,3 +157,16 @@ export function addDaysYmd(ymd: string, days: number): string {
   const noon = new Date(new Date(start).getTime() + days * 86400000 + 12 * 3600000);
   return formatYmd(noon);
 }
+
+/** Jours calendaires inclus (aujourd’hui compris) pour le gérant sans rapports complets. */
+export const RECENT_HISTORY_DAYS = 45;
+
+export function recentHistoryMinYmd(today = formatYmd(new Date())): string {
+  return addDaysYmd(today, -(RECENT_HISTORY_DAYS - 1));
+}
+
+export function defaultHistoryFromYmd(minYmd?: string | null, now: Date = new Date()): string {
+  const month = defaultMonthStartYmd(now);
+  if (minYmd && month < minYmd) return minYmd;
+  return month;
+}

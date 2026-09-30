@@ -59,7 +59,15 @@ import { StockZeroAlertsPanel } from '../components/StockZeroAlertsPanel';
 import { StockMovementsPanel } from '../components/StockMovementsPanel';
 import { InventoryPhysicalSection } from '../components/InventoryPhysicalSection';
 import { formatMoney } from '../utils/currency';
-import { formatDateTime, formatYmd, defaultMonthStartYmd, addDaysYmd, ymdStartIso, ymdEndIso } from '../utils/datetime';
+import {
+  formatDateTime,
+  formatYmd,
+  defaultHistoryFromYmd,
+  RECENT_HISTORY_DAYS,
+  recentHistoryMinYmd,
+  ymdStartIso,
+  ymdEndIso,
+} from '../utils/datetime';
 import {
   EXPENSE_LABEL_OPTIONS,
   EXPENSE_LABEL_OTHER,
@@ -76,7 +84,7 @@ export function DashboardPage() {
   const canManageFinance = canPerm('finance.write');
   /** Voir journal / totaux finance (pas seulement saisir une dépense). */
   const canViewFinance = canPerm('finance.view') || canManageFinance;
-  /** Journal des dépenses, même fenêtre 2 jours que les ventes. */
+  /** Journal des dépenses, même fenêtre récente que les ventes. */
   const canViewRecentExpenses = canPerm('finance.recent_expenses');
   const canViewExpenseJournal = canViewFinance || canViewRecentExpenses;
   /** Formulaire dépense seul — sans accès au reste de la finance. */
@@ -93,22 +101,25 @@ export function DashboardPage() {
   const canSeeSales = isAdmin || canPerm('sales.view');
   /** Historique ventes libre (rapports). */
   const canSeeUnlimitedSalesRange = isAdmin || canPerm('reports.view');
-  /** Totaux ventes : illimité via reports, ou fenêtre 2 jours via sales.recent_totals. */
+  /** Totaux ventes : illimité via reports, ou fenêtre récente via sales.recent_totals. */
   const canSeeSalesTotals =
     canSeeUnlimitedSalesRange || canPerm('sales.recent_totals');
+  const managerHistoryMinYmd = useMemo(() => {
+    if (canSeeUnlimitedSalesRange) return null;
+    return recentHistoryMinYmd();
+  }, [canSeeUnlimitedSalesRange]);
   const salesRecentMinYmd = useMemo(() => {
     if (canSeeUnlimitedSalesRange || !canSeeSalesTotals) return null;
-    return addDaysYmd(formatYmd(new Date()), -1);
+    return recentHistoryMinYmd();
   }, [canSeeUnlimitedSalesRange, canSeeSalesTotals]);
   const expensesRecentMinYmd = useMemo(() => {
     if (canViewFinance || !canViewExpenseJournal) return null;
-    return addDaysYmd(formatYmd(new Date()), -1);
+    return recentHistoryMinYmd();
   }, [canViewFinance, canViewExpenseJournal]);
   const canSeePurchasesInFinance = canViewFinance && canSeePurchases;
 
   function defaultExpenseFromYmd() {
-    if (expensesRecentMinYmd) return expensesRecentMinYmd;
-    return defaultMonthStartYmd();
+    return defaultHistoryFromYmd(expensesRecentMinYmd);
   }
 
   function clampExpenseRangeYmd(from: string, to: string): { from: string; to: string } {
@@ -124,8 +135,7 @@ export function DashboardPage() {
   }
 
   function defaultVentesFromYmd() {
-    if (salesRecentMinYmd) return salesRecentMinYmd;
-    return defaultMonthStartYmd();
+    return defaultHistoryFromYmd(salesRecentMinYmd);
   }
 
   function clampSalesRangeYmd(from: string, to: string): { from: string; to: string } {
@@ -238,11 +248,9 @@ export function DashboardPage() {
 
   const [salesByProductRows, setSalesByProductRows] = useState<DashboardSalesByProductRow[]>([]);
   const [salesByProductLoading, setSalesByProductLoading] = useState(false);
-  const [ventesDateFrom, setVentesDateFrom] = useState(() => {
-    const today = formatYmd(new Date());
-    if (!canSeeUnlimitedSalesRange && canSeeSalesTotals) return addDaysYmd(today, -1);
-    return defaultMonthStartYmd();
-  });
+  const [ventesDateFrom, setVentesDateFrom] = useState(() =>
+    defaultHistoryFromYmd(!canSeeUnlimitedSalesRange && canSeeSalesTotals ? recentHistoryMinYmd() : null),
+  );
   const [ventesDateTo, setVentesDateTo] = useState(() => formatYmd(new Date()));
   const [ventesPdfLoading, setVentesPdfLoading] = useState(false);
   const [ventesDeptModal, setVentesDeptModal] = useState<{
@@ -251,11 +259,9 @@ export function DashboardPage() {
     rows: DashboardSalesByProductRow[];
   } | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [txnDateFrom, setTxnDateFrom] = useState(() => {
-    const today = formatYmd(new Date());
-    if (!canSeeUnlimitedSalesRange && canSeeSalesTotals) return addDaysYmd(today, -1);
-    return defaultMonthStartYmd();
-  });
+  const [txnDateFrom, setTxnDateFrom] = useState(() =>
+    defaultHistoryFromYmd(!canSeeUnlimitedSalesRange && canSeeSalesTotals ? recentHistoryMinYmd() : null),
+  );
   const [txnDateTo, setTxnDateTo] = useState(() => formatYmd(new Date()));
 
   const [msg, setMsg] = useAutoClearMessage();
@@ -1091,7 +1097,11 @@ export function DashboardPage() {
           <p className="info-text" style={{ marginTop: '0.9rem' }}>Chargement…</p>
         ) : (
           <>
-            <DashboardSyntheseTab companies={companies} onMessage={setMsg} />
+            <DashboardSyntheseTab
+              companies={companies}
+              onMessage={setMsg}
+              minYmd={managerHistoryMinYmd}
+            />
             {companyId !== '' ? (
               <>
                 <div className="card" style={{ marginTop: '1rem', padding: '0.9rem 1.1rem' }}>
@@ -1112,12 +1122,14 @@ export function DashboardPage() {
                 <RegisterSessionsPanel
                   companyId={Number(companyId)}
                   onSelect={setRegisterSessionModal}
+                  minYmd={managerHistoryMinYmd}
                 />
                 <ProductionSessionsPanel
                   companyId={Number(companyId)}
                   onSelect={setProductionSessionModal}
+                  minYmd={managerHistoryMinYmd}
                 />
-                <AuditJournalPanel companyId={Number(companyId)} />
+                <AuditJournalPanel companyId={Number(companyId)} minYmd={managerHistoryMinYmd} />
               </>
             ) : null}
           </>
@@ -1133,8 +1145,7 @@ export function DashboardPage() {
                 <h2>Ventes</h2>
                 {salesRecentMinYmd ? (
                   <p className="dept-hint" style={{ marginTop: 0 }}>
-                    Totaux limités aux 2 derniers jours (depuis le {salesRecentMinYmd}). L’historique
-                    plus ancien n’est pas accessible pour ce rôle.
+                    Totaux limités aux {RECENT_HISTORY_DAYS} derniers jours (depuis le {salesRecentMinYmd}).
                   </p>
                 ) : null}
                 <div
@@ -1229,7 +1240,7 @@ export function DashboardPage() {
               ) : (
                 <p className="info-text" style={{ marginTop: '1rem' }}>
                   Les totaux de ventes ne sont pas autorisés pour ce rôle. Activez « Voir le total des
-                  ventes (2 derniers jours max) » ou les rapports complets dans Rôles & autorisations.
+                  ventes (45 derniers jours max) » ou les rapports complets dans Rôles & autorisations.
                 </p>
               )}
 
@@ -1528,7 +1539,7 @@ export function DashboardPage() {
                   <h2>{canSeePurchasesInFinance ? 'Totaux (achats & dépenses manuelles)' : 'Totaux (dépenses manuelles)'}</h2>
                   {expensesRecentMinYmd ? (
                     <p className="dept-hint" style={{ marginTop: 0 }}>
-                      Totaux limités aux 2 derniers jours (depuis le {expensesRecentMinYmd}).
+                      Totaux limités aux {RECENT_HISTORY_DAYS} derniers jours (depuis le {expensesRecentMinYmd}).
                     </p>
                   ) : null}
                   <div
@@ -1610,7 +1621,7 @@ export function DashboardPage() {
                 </h2>
                 {expensesRecentMinYmd ? (
                   <p className="dept-hint" style={{ marginTop: 0 }}>
-                    Totaux limités aux 2 derniers jours (depuis le {expensesRecentMinYmd}).
+                    Totaux limités aux {RECENT_HISTORY_DAYS} derniers jours (depuis le {expensesRecentMinYmd}).
                   </p>
                 ) : null}
                 <div
