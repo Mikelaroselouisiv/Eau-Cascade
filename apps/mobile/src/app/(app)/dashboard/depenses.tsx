@@ -29,11 +29,12 @@ import {
 } from '@/services/api';
 import type { DashboardBalanceSnapshot, FinanceLedgerRow } from '@/types/api';
 import {
-  addDaysYmd,
   businessTodayYmd,
   dashboardPresetRange,
   formatDateTime,
   formatYmdDisplay,
+  RECENT_HISTORY_DAYS,
+  recentHistoryMinYmd,
 } from '@/utils/datetime';
 
 type LedgerNature = 'all' | 'purchase' | 'sale' | 'expense';
@@ -55,15 +56,11 @@ export default function DepensesScreen() {
   const canViewFinance = isAdmin || canPerm('finance.view') || canPerm('finance.write');
   const canViewExpenseJournal = canViewFinance || canPerm('finance.recent_expenses');
   const expensesRecentMinYmd =
-    canViewFinance || !canViewExpenseJournal ? null : addDaysYmd(businessTodayYmd(), -1);
+    canViewFinance || !canViewExpenseJournal ? null : recentHistoryMinYmd();
   const canWriteFinance =
     user?.role !== 'CASHIER' &&
     (isAdmin || canPerm('finance.write') || canPerm('finance.expense'));
-  const [range, setRange] = useState(() =>
-    expensesRecentMinYmd
-      ? { dateFrom: expensesRecentMinYmd, dateTo: businessTodayYmd() }
-      : dashboardPresetRange('month'),
-  );
+  const [range, setRange] = useState(() => dashboardPresetRange('month'));
   const [snapshot, setSnapshot] = useState<DashboardBalanceSnapshot | null>(null);
   const [ledger, setLedger] = useState<FinanceLedgerRow[]>([]);
   const [ledgerTotal, setLedgerTotal] = useState(0);
@@ -206,7 +203,7 @@ export default function DepensesScreen() {
         />
         {expensesRecentMinYmd ? (
           <Text style={styles.sectionHint}>
-            Totaux limités aux 2 derniers jours (depuis {formatYmdDisplay(expensesRecentMinYmd)}).
+            Totaux limités aux {RECENT_HISTORY_DAYS} derniers jours (depuis {formatYmdDisplay(expensesRecentMinYmd)}).
           </Text>
         ) : null}
         {canViewExpenseJournal && snapshot ? (

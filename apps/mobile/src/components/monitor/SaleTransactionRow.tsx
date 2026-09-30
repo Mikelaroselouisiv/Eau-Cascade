@@ -6,7 +6,7 @@ import { Spacing } from '@/constants/theme';
 import type { Sale } from '@/types/api';
 import { formatDateTime } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
-import { isSaleDeleted, saleDisplayRef } from '@/utils/saleRef';
+import { isSaleDeleted, isSaleVoided, saleDisplayRef } from '@/utils/saleRef';
 
 type Props = {
   sale: Sale;
@@ -18,15 +18,18 @@ type Props = {
 
 function statusMeta(sale: Sale) {
   if (isSaleDeleted(sale)) {
-    return { label: 'Supprimée', tone: styles.statusDeleted, deleted: true };
+    return { label: 'Supprimée', tone: styles.statusDeleted, voided: true };
   }
   if (sale.status === 'COMPLETED') {
-    return { label: 'Complétée', tone: styles.statusCompleted, deleted: false };
+    return { label: 'Complétée', tone: styles.statusCompleted, voided: false };
   }
   if (sale.status === 'REFUNDED') {
-    return { label: 'Remboursée', tone: styles.statusRefunded, deleted: false };
+    return { label: 'Remboursée', tone: styles.statusRefunded, voided: true };
   }
-  return { label: 'Annulée', tone: styles.statusCancelled, deleted: false };
+  if (sale.status === 'CANCELLED') {
+    return { label: 'Annulée', tone: styles.statusCancelled, voided: true };
+  }
+  return { label: 'Annulée', tone: styles.statusCancelled, voided: isSaleVoided(sale) };
 }
 
 function itemName(item: NonNullable<Sale['items']>[number]) {
@@ -38,41 +41,45 @@ export function SaleTransactionRow({ sale, canCancel = false, cancelBusy = false
   const items = sale.items ?? [];
   const cashier = sale.user?.fullName?.trim() || sale.cashier || sale.user?.phone || '—';
   const showCancel =
-    canCancel && sale.status === 'COMPLETED' && !status.deleted && onCancel != null;
+    canCancel && sale.status === 'COMPLETED' && !status.voided && onCancel != null;
+  const strike = status.voided;
 
   return (
-    <View style={[styles.card, status.deleted && styles.cardDeleted]}>
+    <View style={[styles.card, strike && styles.cardDeleted]}>
       <Pressable
         style={({ pressed }) => [styles.body, pressed && styles.pressed]}
         onPress={() => onPress(sale)}>
         <View style={styles.top}>
-          <Text style={[styles.ref, status.deleted && styles.deletedText]}>
+          <Text style={[styles.ref, strike && styles.deletedText]}>
             #{saleDisplayRef(sale)}
           </Text>
           <View style={[styles.statusBadge, status.tone]}>
-            <Text style={[styles.statusText, status.deleted && styles.statusDeletedText]}>
+            <Text style={[styles.statusText, strike && styles.statusDeletedText]}>
               {status.label}
             </Text>
           </View>
         </View>
+        <Text style={[styles.client, strike && styles.deletedText]} numberOfLines={1}>
+          {sale.clientName?.trim() || 'Client'}
+        </Text>
 
         {items.length === 0 ? (
-          <Text style={[styles.emptyItems, status.deleted && styles.deletedText]}>Aucun article</Text>
+          <Text style={[styles.emptyItems, strike && styles.deletedText]}>Aucun article</Text>
         ) : (
           items.map((item, index) => (
             <View key={`${item.product?.id ?? 'line'}-${index}`} style={styles.itemRow}>
               <Text
-                style={[styles.itemName, status.deleted && styles.deletedText]}
+                style={[styles.itemName, strike && styles.deletedText]}
                 numberOfLines={2}>
                 {itemName(item)}
               </Text>
-              <Text style={[styles.itemQty, status.deleted && styles.deletedText]}>
+              <Text style={[styles.itemQty, strike && styles.deletedText]}>
                 × {formatQuantity(item.quantity)}
               </Text>
               <View style={styles.itemAmountWrap}>
                 <MoneyText
                   value={item.subtotal}
-                  style={[styles.itemAmount, status.deleted && styles.deletedText]}
+                  style={[styles.itemAmount, strike && styles.deletedText]}
                   numberOfLines={1}
                 />
               </View>
@@ -84,16 +91,16 @@ export function SaleTransactionRow({ sale, canCancel = false, cancelBusy = false
           <View style={styles.ticketTotal}>
             <MoneyText
               value={sale.total}
-              style={[styles.ticketTotalValue, status.deleted && styles.deletedText]}
+              style={[styles.ticketTotalValue, strike && styles.deletedText]}
             />
           </View>
         ) : null}
 
         <View style={styles.bottom}>
-          <Text style={[styles.meta, status.deleted && styles.deletedText]} numberOfLines={1}>
+          <Text style={[styles.meta, strike && styles.deletedText]} numberOfLines={1}>
             {cashier}
           </Text>
-          <Text style={[styles.metaRight, status.deleted && styles.deletedText]}>
+          <Text style={[styles.metaRight, strike && styles.deletedText]}>
             {formatDateTime(sale.createdAt)}
           </Text>
         </View>
@@ -127,6 +134,7 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.72 },
   top: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   ref: { color: BrandColors.text, fontSize: 15, fontWeight: '900' },
+  client: { color: BrandColors.text, fontSize: 14, fontWeight: '700' },
   statusBadge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   statusCompleted: { backgroundColor: '#DCFCE7' },
   statusRefunded: { backgroundColor: '#FEF3C7' },

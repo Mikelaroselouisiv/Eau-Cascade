@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
+  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +16,9 @@ import { useFocusEffect } from 'expo-router';
 
 import { ChipScroll } from '@/components/ChipScroll';
 import { MoneyText } from '@/components/MoneyText';
+import { PosCashGapsSheet } from '@/components/pos/PosCashGapsSheet';
+import { PosHomeFields, PosSideCart } from '@/components/pos/PosSideCart';
+import { emptyDraft, type SaleDraft } from '@/components/pos/posDraft';
 import { RegisterSessionBar } from '@/components/pos/RegisterSessionBar';
 import { makeRefreshControl } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
@@ -44,7 +48,6 @@ import type {
   CompanyListItem,
   CreateSalePayload,
   Department,
-  FulfillmentType,
   Product,
   RegisterSessionContext,
   RegisterSessionDetail,
@@ -53,7 +56,7 @@ import type {
 } from '@/types/api';
 import { DEFAULT_PRODUCT_TILE_COLOR, textColorForBackground } from '@/utils/colorContrast';
 import { emitPendingSalesChanged } from '@/utils/eventBus';
-import { formatMoney } from '@/utils/datetime';
+import { formatMoney, formatMoneyAmount } from '@/utils/datetime';
 import { paymentMethodLabel } from '@/utils/paymentLabels';
 import { saleDisplayRef } from '@/utils/saleRef';
 import {
@@ -63,10 +66,8 @@ import {
   effectiveUnitPrice,
   familyQtyByProduct,
   productSellable,
-  setCartLineManualPrice,
   setCartLineQty,
   specialPricesReady,
-  type CartLine,
 } from '@/utils/posCart';
 import {
   departmentsForUser,
@@ -75,43 +76,10 @@ import {
   isProductionKind,
   resolvedDepartmentIds,
 } from '@/utils/user-scope';
-import { posPaymentOptions, type PosCollectMethod } from '@/utils/posCollect';
+import { posPaymentOptions } from '@/utils/posCollect';
 
-const DANGER = BrandColors.danger;
 const WARNING = '#B45309';
 const WARNING_BG = '#FEF3C7';
-
-type PaymentMethod = PosCollectMethod;
-
-type SaleDraft = {
-  id: string;
-  cart: CartLine[];
-  paymentMethod: PaymentMethod;
-  name: string;
-  fulfillmentType: FulfillmentType;
-  clientPhone: string;
-  clientAddress: string;
-  deliveryStops: Array<{ address: string; quantity: string }>;
-  bankId: number | '';
-  bankAccountId: number | '';
-};
-
-function emptyDraft(id = `d${Date.now()}`): SaleDraft {
-  return {
-    id,
-    cart: [],
-    paymentMethod: 'CASH',
-    name: 'Client',
-    fulfillmentType: 'ON_SITE',
-    clientPhone: '',
-    clientAddress: '',
-    deliveryStops: [{ address: '', quantity: '' }],
-    bankId: '',
-    bankAccountId: '',
-  };
-}
-
-type PosPane = 'products' | 'cart' | 'change';
 
 type PosWorkspaceProps = {
   mode: 'classic' | 'special';
@@ -139,9 +107,12 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   const [drafts, setDrafts] = useState<SaleDraft[]>(() => [emptyDraft('d1')]);
   const [activeDraftId, setActiveDraftId] = useState('d1');
   const [amountReceived, setAmountReceived] = useState('');
+  const tenderFollowsTotal = useRef(true);
   const [nameDraft, setNameDraft] = useState('');
   const [printTicket, setPrintTicket] = useState(true);
-  const [posPane, setPosPane] = useState<PosPane>('products');
+  const [gapsOpen, setGapsOpen] = useState(false);
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [productQuery, setProductQuery] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [registerSession, setRegisterSession] = useState<RegisterSessionDetail | null>(null);
@@ -199,11 +170,8 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   );
   const cart = useMemo(() => activeDraft?.cart ?? [], [activeDraft?.cart]);
   const paymentMethod = activeDraft?.paymentMethod ?? 'CASH';
-  const clientName = activeDraft?.name ?? 'Client';
   const selectedBankId = activeDraft?.bankId ?? '';
   const selectedBankAccountId = activeDraft?.bankAccountId ?? '';
-  const selectedBank = banks.find((b) => b.id === selectedBankId);
-  const bankAccounts = (selectedBank?.accounts ?? []).filter((a) => a.isActive);
   const bankReady =
     paymentMethod !== 'BANK' ||
     (typeof selectedBankId === 'number' && typeof selectedBankAccountId === 'number');
@@ -328,8 +296,13 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
           }
           return true;
         });
-    return [...rows].sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
-  }, [products, posScopeLocked, companyId, departmentId]);
+    const sorted = [...rows].sort((a, b) =>
+      a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }),
+    );
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter((p) => p.name.toLowerCase().includes(q));
+  }, [products, posScopeLocked, companyId, departmentId, productQuery]);
 
   useEffect(() => {
     void loadProducts();
@@ -370,6 +343,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     const d = emptyDraft('d1');
     setDrafts([d]);
     setActiveDraftId(d.id);
+    tenderFollowsTotal.current = true;
     setAmountReceived('');
     setQtyDrafts({});
   }, [mode]);
@@ -384,13 +358,17 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     }
   }, [posScopeLocked]);
 
+  function resetTender() {
+    tenderFollowsTotal.current = true;
+    setAmountReceived('');
+  }
+
   function resetCartDrafts() {
     const d = emptyDraft('d1');
     setDrafts([d]);
     setActiveDraftId(d.id);
-    setAmountReceived('');
+    resetTender();
     setQtyDrafts({});
-    setPosPane('products');
   }
 
   function selectCompany(id: number) {
@@ -422,7 +400,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     const d = emptyDraft();
     setDrafts((prev) => [...prev, d]);
     setActiveDraftId(d.id);
-    setAmountReceived('');
+    resetTender();
     setNameDraft('');
     setQtyDrafts({});
   }
@@ -433,7 +411,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
       const remaining = prev.filter((d) => d.id !== id);
       if (activeDraftId === id) {
         setActiveDraftId(remaining[0].id);
-        setAmountReceived('');
+        resetTender();
         setQtyDrafts({});
       }
       return remaining;
@@ -441,7 +419,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   }
 
   function removeActiveDraftFromUI() {
-    setAmountReceived('');
+    resetTender();
     setQtyDrafts({});
     if (drafts.length <= 1) {
       setDrafts((prev) =>
@@ -470,7 +448,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     if (id === activeDraftId) return;
     commitNameDraft();
     setActiveDraftId(id);
-    setAmountReceived('');
+    resetTender();
     setQtyDrafts({});
   }
 
@@ -505,8 +483,18 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     [cart, productsById, familyQtyMap],
   );
 
-  const cartItemCount = cart.reduce((sum, line) => sum + line.quantity, 0);
   const cashGapCount = cashGaps.changeOwed.length + cashGaps.balanceOwed.length;
+  const activeDeptName = departments.find((d) => d.id === departmentId)?.name;
+  const activeCompanyName = companies.find((c) => c.id === companyId)?.name;
+  const fulfillment = activeDraft?.fulfillmentType ?? 'ON_SITE';
+  const selectedBank = banks.find((b) => b.id === selectedBankId);
+  const bankAccounts = (selectedBank?.accounts ?? []).filter((a) => a.isActive);
+
+  useEffect(() => {
+    if (!showTenderField) return;
+    if (!tenderFollowsTotal.current) return;
+    setAmountReceived(cartTotal > 0.009 ? formatMoneyAmount(cartTotal) : '');
+  }, [cartTotal, showTenderField]);
 
   const tenderPreview = useMemo(() => {
     if (!showTenderField) return null;
@@ -587,9 +575,22 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     }));
   }
 
+  function setLineQty(productSaleUnitId: number, qty: number) {
+    updateActiveDraft((d) => ({
+      ...d,
+      cart: setCartLineQty(
+        d.cart,
+        products,
+        productSaleUnitId,
+        qty,
+        d.fulfillmentType === 'HOME',
+      ),
+    }));
+  }
+
   function clearActiveCart() {
     updateActiveDraft((d) => ({ ...d, cart: [] }));
-    setAmountReceived('');
+    resetTender();
     setQtyDrafts({});
   }
 
@@ -814,44 +815,6 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
     }
   }
 
-  function renderCashGapRow(row: SaleCashGapRow, kind: 'change' | 'balance') {
-    const busy = cashGapBusyId === row.id;
-    return (
-      <View key={`${kind}-${row.id}`} style={styles.gapRow}>
-        <View style={styles.gapInfo}>
-          <Text style={styles.gapTitle}>
-            #{saleDisplayRef(row)} · {row.clientName?.trim() || 'Client'}
-          </Text>
-          <MoneyText
-            value={kind === 'change' ? row.changeDue : row.balanceDue}
-            style={styles.gapAmount}
-          />
-        </View>
-        <Pressable
-          style={[
-            styles.gapBtn,
-            kind === 'balance' && styles.gapBtnPrimary,
-            busy && styles.buttonDisabled,
-          ]}
-          disabled={!salesEnabled || busy}
-          onPress={() =>
-            kind === 'change' ? void onSettleChange(row) : void onCollectBalance(row)
-          }>
-          {busy ? (
-            <ActivityIndicator
-              color={kind === 'balance' ? '#fff' : BrandColors.primary}
-              size="small"
-            />
-          ) : (
-            <Text style={[styles.gapBtnText, kind === 'balance' && styles.gapBtnTextPrimary]}>
-              {kind === 'change' ? 'Remettre' : 'Encaisser'}
-            </Text>
-          )}
-        </Pressable>
-      </View>
-    );
-  }
-
   if (!canUsePos) {
     return (
       <Screen style={styles.container}>
@@ -877,7 +840,7 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
   }
 
   return (
-    <Screen style={styles.container} keyboard={posPane === 'cart'}>
+    <Screen style={styles.container}>
       <RegisterSessionBar
         companyId={companyId}
         departmentId={departmentId}
@@ -891,52 +854,55 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
 
       {!posScopeLocked ? (
         <View style={styles.scopeBlock}>
-          <Text style={styles.scopeLabel}>Entreprise</Text>
-          <ChipScroll>
-            {companies.length === 0 ? (
-              <Text style={styles.scopeHint}>Chargement…</Text>
-            ) : (
-              companies.map((c) => {
-                const active = companyId === c.id;
-                return (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => selectCompany(c.id)}
-                    style={[styles.scopeChip, active && styles.scopeChipActive]}>
-                    <Text
-                      style={[styles.scopeChipText, active && styles.scopeChipTextActive]}
-                      numberOfLines={1}>
-                      {c.name}
-                    </Text>
-                  </Pressable>
-                );
-              })
-            )}
-          </ChipScroll>
-          <Text style={styles.scopeLabel}>Département</Text>
-          <ChipScroll>
-            {departments.length === 0 ? (
-              <Text style={styles.scopeHint}>
-                {companyId == null ? 'Choisissez une entreprise' : 'Aucun département'}
-              </Text>
-            ) : (
-              departments.map((d) => {
-                const active = departmentId === d.id;
-                return (
-                  <Pressable
-                    key={d.id}
-                    onPress={() => selectDepartment(d.id)}
-                    style={[styles.scopeChip, active && styles.scopeChipActive]}>
-                    <Text
-                      style={[styles.scopeChipText, active && styles.scopeChipTextActive]}
-                      numberOfLines={1}>
-                      {d.name}
-                    </Text>
-                  </Pressable>
-                );
-              })
-            )}
-          </ChipScroll>
+          <Pressable style={styles.scopeToggle} onPress={() => setScopeOpen((v) => !v)}>
+            <Ionicons name="storefront-outline" size={16} color={BrandColors.primary} />
+            <Text style={styles.scopeToggleText} numberOfLines={1}>
+              {[activeCompanyName, activeDeptName].filter(Boolean).join(' · ') || 'Point de vente'}
+            </Text>
+            <Ionicons
+              name={scopeOpen ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={BrandColors.textMuted}
+            />
+          </Pressable>
+          {scopeOpen ? (
+            <>
+              <ChipScroll>
+                {companies.map((c) => {
+                  const active = companyId === c.id;
+                  return (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => selectCompany(c.id)}
+                      style={[styles.scopeChip, active && styles.scopeChipActive]}>
+                      <Text
+                        style={[styles.scopeChipText, active && styles.scopeChipTextActive]}
+                        numberOfLines={1}>
+                        {c.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ChipScroll>
+              <ChipScroll>
+                {departments.map((d) => {
+                  const active = departmentId === d.id;
+                  return (
+                    <Pressable
+                      key={d.id}
+                      onPress={() => selectDepartment(d.id)}
+                      style={[styles.scopeChip, active && styles.scopeChipActive]}>
+                      <Text
+                        style={[styles.scopeChipText, active && styles.scopeChipTextActive]}
+                        numberOfLines={1}>
+                        {d.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ChipScroll>
+            </>
+          ) : null}
         </View>
       ) : null}
 
@@ -958,546 +924,334 @@ export function PosWorkspace({ mode }: PosWorkspaceProps) {
 
       {mode === 'special' ? (
         <View style={styles.modeBanner}>
-          <Text style={styles.modeBannerText}>Mode vente spéciale — prix manuels</Text>
+          <Text style={styles.modeBannerText}>Prix manuels</Text>
         </View>
       ) : null}
 
-      <View style={styles.draftsBar}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.draftsRow}
-          keyboardShouldPersistTaps="handled">
-          {drafts.map((d, idx) => {
-            const active = d.id === activeDraftId;
-            const count = d.cart.reduce((s, l) => s + l.quantity, 0);
+      <View style={styles.entry}>
+        <View style={styles.entryRow}>
+          <View style={styles.field}>
+            <Ionicons name="person-outline" size={16} color={BrandColors.textMuted} />
+            <TextInput
+              style={styles.fieldInput}
+              placeholder="Client"
+              placeholderTextColor={BrandColors.textMuted}
+              value={nameDraft}
+              onChangeText={setNameDraft}
+              onBlur={commitNameDraft}
+              onSubmitEditing={commitNameDraft}
+              returnKeyType="next"
+              blurOnSubmit={false}
+            />
+          </View>
+          {showTenderField ? (
+            <View style={styles.field}>
+              <Ionicons name="cash-outline" size={16} color={BrandColors.textMuted} />
+              <TextInput
+                style={styles.fieldInput}
+                placeholder="Reçu"
+                placeholderTextColor={BrandColors.textMuted}
+                keyboardType="decimal-pad"
+                value={amountReceived}
+                onChangeText={(value) => {
+                  tenderFollowsTotal.current = false;
+                  setAmountReceived(value);
+                }}
+                returnKeyType="done"
+              />
+            </View>
+          ) : null}
+        </View>
+        <View style={styles.segRow}>
+          <Pressable
+            style={[styles.segBtn, fulfillment === 'ON_SITE' && styles.segBtnOn]}
+            onPress={() => updateActiveDraft((d) => ({ ...d, fulfillmentType: 'ON_SITE' }))}>
+            <Text style={[styles.segText, fulfillment === 'ON_SITE' && styles.segTextOn]}>
+              Sur place
+            </Text>
+          </Pressable>
+          {canSellHome ? (
+            <Pressable
+              style={[styles.segBtn, fulfillment === 'HOME' && styles.segBtnOn]}
+              onPress={() =>
+                updateActiveDraft((d) => ({
+                  ...d,
+                  fulfillmentType: 'HOME',
+                  deliveryStops: d.deliveryStops?.length
+                    ? d.deliveryStops
+                    : [{ address: '', quantity: '' }],
+                }))
+              }>
+              <Text style={[styles.segText, fulfillment === 'HOME' && styles.segTextOn]}>
+                À domicile
+              </Text>
+            </Pressable>
+          ) : null}
+          {paymentChoices.map(({ method, label, icon }) => {
+            const on = paymentMethod === method;
             return (
-              <View key={d.id} style={styles.draftChipWrap}>
-                <Pressable
-                  onPress={() => selectDraft(d.id)}
-                  style={[styles.draftChip, active && styles.draftChipActive]}>
-                  <Text
-                    style={[styles.draftChipText, active && styles.draftChipTextActive]}
-                    numberOfLines={1}>
-                    {d.name || `Fiche ${idx + 1}`}
-                    {count > 0 ? ` (${count})` : ''}
-                  </Text>
-                </Pressable>
-                {drafts.length > 1 ? (
-                  <Pressable onPress={() => deleteDraft(d.id)} hitSlop={8} style={styles.draftDel}>
-                    <Ionicons name="close" size={14} color={BrandColors.textMuted} />
-                  </Pressable>
-                ) : null}
-              </View>
+              <Pressable
+                key={method}
+                onPress={() =>
+                  updateActiveDraft((d) => ({
+                    ...d,
+                    paymentMethod: method,
+                    ...(method !== 'BANK'
+                      ? { bankId: '' as const, bankAccountId: '' as const }
+                      : {}),
+                  }))
+                }
+                style={[styles.segBtn, on && styles.segBtnOn]}>
+                <Ionicons name={icon} size={13} color={on ? '#fff' : BrandColors.textMuted} />
+                <Text style={[styles.segText, on && styles.segTextOn]}>{label}</Text>
+              </Pressable>
             );
           })}
-        </ScrollView>
-        <Pressable
-          style={[styles.addDraftBtn, !salesEnabled && styles.buttonDisabled]}
-          disabled={!salesEnabled}
-          onPress={createDraft}>
-          <Ionicons name="add" size={20} color="#fff" />
-          <Text style={styles.addDraftBtnText}>Fiche</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.paneTabs}>
-        {(
-          [
-            { id: 'products' as const, label: 'Produits' },
-            {
-              id: 'cart' as const,
-              label: cartItemCount > 0 ? `Panier (${cartItemCount})` : 'Panier',
-            },
-            {
-              id: 'change' as const,
-              label: cashGapCount > 0 ? `Monnaie (${cashGapCount})` : 'Monnaie',
-            },
-          ] as const
-        ).map((tab) => {
-          const active = posPane === tab.id;
-          return (
-            <Pressable
-              key={tab.id}
-              onPress={() => setPosPane(tab.id)}
-              style={[styles.paneTab, active && styles.paneTabActive]}>
-              <Text style={[styles.paneTabText, active && styles.paneTabTextActive]} numberOfLines={1}>
-                {tab.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {posPane === 'products' ? (
-      <View style={styles.productList}>
-      <FlatList
-        data={displayedProducts}
-        keyExtractor={(p) => String(p.id)}
-        numColumns={2}
-        style={styles.flex}
-        contentContainerStyle={styles.grid}
-        columnWrapperStyle={styles.gridRow}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        alwaysBounceVertical
-        refreshControl={makeRefreshControl(pullRefreshing, onPullRefresh)}
-        renderItem={({ item }) => {
-          const inCart = quantityInCart(item);
-          const sellable = productSellable(item, activeDraft?.fulfillmentType === 'HOME');
-          const tileColor = item.cardColor?.trim() || DEFAULT_PRODUCT_TILE_COLOR;
-          const fg = textColorForBackground(tileColor);
-          const disabled = !sellable || !salesEnabled;
-          return (
-            <Pressable
-              disabled={disabled}
-              style={({ pressed }) => [
-                styles.productCard,
-                { backgroundColor: tileColor, opacity: disabled ? 0.45 : pressed ? 0.85 : 1 },
-              ]}
-              onPress={() => addProduct(item)}>
-              {inCart > 0 ? (
-                <View style={[styles.productBadge, { backgroundColor: BrandColors.primary }]}>
-                  <Text style={styles.productBadgeText}>{inCart}</Text>
-                </View>
-              ) : null}
-              <Text style={[styles.productName, { color: fg }]} numberOfLines={2}>
-                {item.name}
-              </Text>
-              <MoneyText
-                value={defaultSaleUnit(item)?.salePrice ?? 0}
-                style={[styles.productPrice, { color: fg }]}
-              />
-            </Pressable>
-          );
-        }}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Ionicons name="storefront-outline" size={40} color="#9AA0A6" />
-            <Text style={styles.emptyStateText}>
-              {!posScopeLocked && departmentId == null
-                ? 'Choisissez une entreprise et un département'
-                : 'Aucun produit disponible'}
-            </Text>
+        </View>
+        {paymentMethod === 'BANK' ? (
+          <View style={styles.bankWrap}>
+            <ChipScroll>
+              {banks.length === 0 ? (
+                <Text style={styles.warn}>Aucune banque</Text>
+              ) : (
+                banks.map((bank) => {
+                  const on = selectedBankId === bank.id;
+                  return (
+                    <Pressable
+                      key={bank.id}
+                      onPress={() =>
+                        updateActiveDraft((d) => ({ ...d, bankId: bank.id, bankAccountId: '' }))
+                      }
+                      style={[styles.chip, on && styles.chipOn]}>
+                      <Text style={[styles.chipText, on && styles.chipTextOn]}>{bank.name}</Text>
+                    </Pressable>
+                  );
+                })
+              )}
+            </ChipScroll>
+            <ChipScroll>
+              {selectedBankId === '' ? (
+                <Text style={styles.warn}>Banque</Text>
+              ) : bankAccounts.length === 0 ? (
+                <Text style={styles.warn}>Aucun compte</Text>
+              ) : (
+                bankAccounts.map((account) => {
+                  const on = selectedBankAccountId === account.id;
+                  return (
+                    <Pressable
+                      key={account.id}
+                      onPress={() =>
+                        updateActiveDraft((d) => ({ ...d, bankAccountId: account.id }))
+                      }
+                      style={[styles.chip, on && styles.chipOn]}>
+                      <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                        {account.name}
+                        {account.accountNumber ? ` (${account.accountNumber})` : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })
+              )}
+            </ChipScroll>
           </View>
-        }
-      />
+        ) : null}
+        {fulfillment === 'HOME' && activeDraft ? (
+          <PosHomeFields draft={activeDraft} onUpdateDraft={updateActiveDraft} />
+        ) : null}
+        <View style={styles.draftsBar}>
+          <View style={styles.draftsRow}>
+            <ChipScroll>
+              {drafts.map((d, idx) => {
+                const active = d.id === activeDraftId;
+                const count = d.cart.reduce((s, l) => s + l.quantity, 0);
+                return (
+                  <Pressable
+                    key={d.id}
+                    onPress={() => selectDraft(d.id)}
+                    style={[styles.draftChip, active && styles.draftChipActive]}>
+                    <Text
+                      style={[styles.draftChipText, active && styles.draftChipTextActive]}
+                      numberOfLines={1}>
+                      {d.name === 'Client' ? `Fiche ${idx + 1}` : d.name}
+                      {count > 0 ? ` · ${count}` : ''}
+                    </Text>
+                    {drafts.length > 1 ? (
+                      <Pressable
+                        onPress={() => deleteDraft(d.id)}
+                        hitSlop={8}
+                        style={styles.draftDel}>
+                        <Ionicons
+                          name="close"
+                          size={12}
+                          color={active ? '#fff' : BrandColors.textMuted}
+                        />
+                      </Pressable>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+              <Pressable
+                style={[styles.addDraftBtn, !salesEnabled && styles.buttonDisabled]}
+                disabled={!salesEnabled}
+                onPress={createDraft}>
+                <Ionicons name="add" size={16} color="#fff" />
+              </Pressable>
+            </ChipScroll>
+          </View>
+          <Pressable style={styles.gapChip} onPress={() => setGapsOpen(true)}>
+            <Ionicons name="cash-outline" size={16} color={BrandColors.primary} />
+            {cashGapCount > 0 ? (
+              <View style={styles.gapDot}>
+                <Text style={styles.gapDotText}>{cashGapCount}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
       </View>
-      ) : posPane === 'cart' ? (
-        <View style={styles.cartPane}>
+
+      <View style={styles.split}>
+        <View style={styles.productsCol}>
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={16} color={BrandColors.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Produit"
+              placeholderTextColor={BrandColors.textMuted}
+              value={productQuery}
+              onChangeText={setProductQuery}
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+            {productQuery.length > 0 ? (
+              <Pressable onPress={() => setProductQuery('')} hitSlop={10}>
+                <Ionicons name="close-circle" size={16} color={BrandColors.textMuted} />
+              </Pressable>
+            ) : null}
+          </View>
           <FlatList
-            data={cart}
-            keyExtractor={(l) => String(l.productSaleUnitId)}
-            style={styles.cartList}
-            contentContainerStyle={styles.cartListContent}
+            data={displayedProducts}
+            keyExtractor={(p) => String(p.id)}
+            style={styles.flex}
+            contentContainerStyle={styles.productList}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             alwaysBounceVertical
             refreshControl={makeRefreshControl(pullRefreshing, onPullRefresh)}
             renderItem={({ item }) => {
-              const product = productsById.get(item.productId);
-              const price = effectiveUnitPrice(product, item, familyQtyMap);
+              const inCart = quantityInCart(item);
+              const sellable = productSellable(item, fulfillment === 'HOME');
+              const tileColor = item.cardColor?.trim() || DEFAULT_PRODUCT_TILE_COLOR;
+              const fg = textColorForBackground(tileColor);
+              const disabled = !sellable || !salesEnabled;
               return (
-                <View style={styles.cartRow}>
-                  <Text style={styles.cartRowLabel} numberOfLines={2}>
-                    {item.label}
-                  </Text>
-                  {mode === 'special' ? (
-                    <TextInput
-                      style={styles.priceInput}
-                      keyboardType="decimal-pad"
-                      placeholder="Prix unitaire"
-                      placeholderTextColor={BrandColors.textMuted}
-                      value={item.manualUnitPrice != null ? String(item.manualUnitPrice) : ''}
-                      onChangeText={(v) =>
-                        updateActiveDraft((d) => ({
-                          ...d,
-                          cart: setCartLineManualPrice(d.cart, item.productSaleUnitId, v),
-                        }))
-                      }
-                    />
-                  ) : (
-                    <Text style={styles.cartRowMeta}>{formatMoney(price)} / unité</Text>
-                  )}
-                  <View style={styles.cartRowActions}>
-                    <View style={styles.qtyControls}>
-                      <Pressable onPress={() => bumpQty(item.productSaleUnitId, -0.5)} hitSlop={10}>
-                        <Ionicons name="remove-circle-outline" size={28} color={BrandColors.primary} />
-                      </Pressable>
-                      <TextInput
-                        style={styles.qtyInput}
-                        keyboardType="decimal-pad"
-                        value={qtyDrafts[item.productSaleUnitId] ?? String(item.quantity)}
-                        onChangeText={(v) =>
-                          setQtyDrafts((prev) => ({ ...prev, [item.productSaleUnitId]: v }))
-                        }
-                        onBlur={() => {
-                          const raw = (qtyDrafts[item.productSaleUnitId] ?? '').replace(',', '.');
-                          const n = Number(raw);
-                          if (Number.isFinite(n)) {
-                            updateActiveDraft((d) => ({
-                              ...d,
-                              cart: setCartLineQty(
-                                d.cart,
-                                products,
-                                item.productSaleUnitId,
-                                n,
-                                d.fulfillmentType === 'HOME',
-                              ),
-                            }));
-                          }
-                          setQtyDrafts((prev) => {
-                            const next = { ...prev };
-                            delete next[item.productSaleUnitId];
-                            return next;
-                          });
-                        }}
-                      />
-                      <Pressable onPress={() => bumpQty(item.productSaleUnitId, 0.5)} hitSlop={10}>
-                        <Ionicons name="add-circle-outline" size={28} color={BrandColors.primary} />
-                      </Pressable>
+                <Pressable
+                  disabled={disabled}
+                  style={({ pressed }) => [
+                    styles.productRow,
+                    { backgroundColor: tileColor, opacity: disabled ? 0.45 : pressed ? 0.85 : 1 },
+                  ]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    addProduct(item);
+                  }}>
+                  {inCart > 0 ? (
+                    <View style={styles.productBadge}>
+                      <Text style={styles.productBadgeText}>{inCart}</Text>
                     </View>
-                    <MoneyText value={price * item.quantity} style={styles.cartRowTotal} />
-                  </View>
-                </View>
+                  ) : null}
+                  <Text style={[styles.productName, { color: fg }]} numberOfLines={2}>
+                    {item.name}
+                  </Text>
+                  <MoneyText
+                    value={defaultSaleUnit(item)?.salePrice ?? 0}
+                    style={[styles.productPrice, { color: fg }]}
+                  />
+                </Pressable>
               );
             }}
             ListEmptyComponent={
-              <View style={styles.emptyCart}>
-                <Ionicons name="cart-outline" size={36} color="#9AA0A6" />
-                <Text style={styles.emptyStateText}>Panier vide</Text>
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>
+                  {productQuery.trim()
+                    ? 'Aucun résultat'
+                    : !posScopeLocked && departmentId == null
+                      ? 'Aucun département'
+                      : 'Aucun produit'}
+                </Text>
               </View>
             }
           />
-          <ScrollView
-            style={styles.checkoutScroll}
-            contentContainerStyle={styles.checkoutScrollContent}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag">
-            <View style={styles.inputWrapper}>
-              <Ionicons name="person-outline" size={18} color="#9AA0A6" />
-              <TextInput
-                style={styles.input}
-                placeholder="Nom fiche / client"
-                placeholderTextColor={BrandColors.textMuted}
-                value={nameDraft}
-                onChangeText={setNameDraft}
-                onBlur={commitNameDraft}
-                onSubmitEditing={commitNameDraft}
-                returnKeyType="done"
-                blurOnSubmit
-              />
-            </View>
-            <View style={styles.fulfillRow}>
-              <Pressable
-                style={[
-                  styles.fulfillBtn,
-                  (activeDraft?.fulfillmentType ?? 'ON_SITE') === 'ON_SITE' && styles.fulfillBtnActive,
-                ]}
-                onPress={() => updateActiveDraft((d) => ({ ...d, fulfillmentType: 'ON_SITE' }))}>
-                <Text
-                  style={[
-                    styles.fulfillBtnText,
-                    (activeDraft?.fulfillmentType ?? 'ON_SITE') === 'ON_SITE' &&
-                      styles.fulfillBtnTextActive,
-                  ]}>
-                  Sur place
-                </Text>
-              </Pressable>
-              {canSellHome ? (
-                <Pressable
-                  style={[
-                    styles.fulfillBtn,
-                    activeDraft?.fulfillmentType === 'HOME' && styles.fulfillBtnActive,
-                  ]}
-                  onPress={() =>
-                    updateActiveDraft((d) => ({
-                      ...d,
-                      fulfillmentType: 'HOME',
-                      deliveryStops: d.deliveryStops?.length
-                        ? d.deliveryStops
-                        : [{ address: '', quantity: '' }],
-                    }))
-                  }>
-                  <Text
-                    style={[
-                      styles.fulfillBtnText,
-                      activeDraft?.fulfillmentType === 'HOME' && styles.fulfillBtnTextActive,
-                    ]}>
-                    À domicile
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
-            {activeDraft?.fulfillmentType === 'HOME' ? (
-              <>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="call-outline" size={18} color="#9AA0A6" />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Téléphone client *"
-                    placeholderTextColor={BrandColors.textMuted}
-                    keyboardType="phone-pad"
-                    value={activeDraft.clientPhone}
-                    onChangeText={(v) => updateActiveDraft((d) => ({ ...d, clientPhone: v }))}
-                  />
-                </View>
-                {(activeDraft.deliveryStops ?? [{ address: '', quantity: '' }]).map((stop, idx) => (
-                  <View key={idx} style={styles.stopRow}>
-                    <View style={[styles.inputWrapper, styles.stopAddress]}>
-                      <Ionicons name="location-outline" size={18} color="#9AA0A6" />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Adresse"
-                        placeholderTextColor={BrandColors.textMuted}
-                        value={stop.address}
-                        onChangeText={(v) =>
-                          updateActiveDraft((d) => {
-                            const rows = [
-                              ...(d.deliveryStops?.length
-                                ? d.deliveryStops
-                                : [{ address: '', quantity: '' }]),
-                            ];
-                            rows[idx] = { ...rows[idx], address: v };
-                            return {
-                              ...d,
-                              deliveryStops: rows,
-                              clientAddress: rows[0]?.address ?? '',
-                            };
-                          })
-                        }
-                      />
-                    </View>
-                    <View style={styles.stopQtyBox}>
-                      <TextInput
-                        style={styles.stopQty}
-                        placeholder="Qté"
-                        placeholderTextColor={BrandColors.textMuted}
-                        keyboardType="decimal-pad"
-                        value={stop.quantity}
-                        onChangeText={(v) =>
-                          updateActiveDraft((d) => {
-                            const rows = [
-                              ...(d.deliveryStops?.length
-                                ? d.deliveryStops
-                                : [{ address: '', quantity: '' }]),
-                            ];
-                            rows[idx] = { ...rows[idx], quantity: v };
-                            return { ...d, deliveryStops: rows };
-                          })
-                        }
-                      />
-                    </View>
-                    {(activeDraft.deliveryStops?.length ?? 0) > 1 ? (
-                      <Pressable
-                        onPress={() =>
-                          updateActiveDraft((d) => {
-                            const rows = (d.deliveryStops ?? []).filter((_, i) => i !== idx);
-                            return {
-                              ...d,
-                              deliveryStops: rows,
-                              clientAddress: rows[0]?.address ?? '',
-                            };
-                          })
-                        }>
-                        <Text style={styles.stopRemove}>−</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-                ))}
-                <Pressable
-                  onPress={() =>
-                    updateActiveDraft((d) => ({
-                      ...d,
-                      deliveryStops: [
-                        ...(d.deliveryStops?.length ? d.deliveryStops : [{ address: '', quantity: '' }]),
-                        { address: '', quantity: '' },
-                      ],
-                    }))
-                  }>
-                  <Text style={styles.addStop}>+ Adresse</Text>
-                </Pressable>
-              </>
-            ) : null}
-            <View style={styles.paymentRow}>
-              {paymentChoices.map(({ method, label, icon }) => {
-                const active = paymentMethod === method;
-                return (
-                  <Pressable
-                    key={method}
-                    onPress={() =>
-                      updateActiveDraft((d) => ({
-                        ...d,
-                        paymentMethod: method,
-                        ...(method !== 'BANK' ? { bankId: '' as const, bankAccountId: '' as const } : {}),
-                      }))
-                    }
-                    style={[styles.paymentButton, active && styles.paymentButtonActive]}>
-                    <Ionicons name={icon} size={16} color={active ? '#ffffff' : '#60646C'} />
-                    <Text style={[styles.paymentLabel, active && styles.paymentLabelActive]}>
-                      {label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            {paymentMethod === 'BANK' ? (
-              <View style={styles.bankBlock}>
-                <Text style={styles.bankLabel}>Banque</Text>
-                <View style={styles.paymentRow}>
-                  {banks.length === 0 ? (
-                    <Text style={styles.tenderWarn}>Aucune banque configurée</Text>
-                  ) : (
-                    banks.map((bank) => {
-                      const active = selectedBankId === bank.id;
-                      return (
-                        <Pressable
-                          key={bank.id}
-                          onPress={() =>
-                            updateActiveDraft((d) => ({ ...d, bankId: bank.id, bankAccountId: '' }))
-                          }
-                          style={[styles.bankChip, active && styles.bankChipActive]}>
-                          <Text style={[styles.bankChipText, active && styles.bankChipTextActive]}>
-                            {bank.name}
-                          </Text>
-                        </Pressable>
-                      );
-                    })
-                  )}
-                </View>
-                <Text style={styles.bankLabel}>Compte</Text>
-                <View style={styles.paymentRow}>
-                  {selectedBankId === '' ? (
-                    <Text style={styles.tenderWarn}>Choisissez une banque</Text>
-                  ) : bankAccounts.length === 0 ? (
-                    <Text style={styles.tenderWarn}>Aucun compte actif</Text>
-                  ) : (
-                    bankAccounts.map((account) => {
-                      const active = selectedBankAccountId === account.id;
-                      return (
-                        <Pressable
-                          key={account.id}
-                          onPress={() =>
-                            updateActiveDraft((d) => ({ ...d, bankAccountId: account.id }))
-                          }
-                          style={[styles.bankChip, active && styles.bankChipActive]}>
-                          <Text style={[styles.bankChipText, active && styles.bankChipTextActive]}>
-                            {account.name}
-                            {account.accountNumber ? ` (${account.accountNumber})` : ''}
-                          </Text>
-                        </Pressable>
-                      );
-                    })
-                  )}
-                </View>
-              </View>
-            ) : null}
-            {showTenderField ? (
-              <View style={styles.inputWrapper}>
-                <Ionicons name="cash-outline" size={18} color="#9AA0A6" />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Montant reçu"
-                  placeholderTextColor={BrandColors.textMuted}
-                  keyboardType="decimal-pad"
-                  value={amountReceived}
-                  onChangeText={setAmountReceived}
-                />
-              </View>
-            ) : null}
-            {tenderPreview ? (
-              <View style={styles.tenderMeta}>
-                {tenderPreview.changeDue > 0.009 ? (
-                  <Text style={styles.tenderOk}>Monnaie : {formatMoney(tenderPreview.changeDue)}</Text>
-                ) : null}
-                {tenderPreview.balanceDue > 0.009 ? (
-                  <Text style={styles.tenderWarn}>
-                    Reste dû : {formatMoney(tenderPreview.balanceDue)}
-                  </Text>
-                ) : null}
-              </View>
-            ) : null}
-            <Pressable onPress={() => setPrintTicket((v) => !v)} style={styles.printToggle}>
-              <Ionicons
-                name={printTicket ? 'checkbox' : 'square-outline'}
-                size={20}
-                color={BrandColors.primary}
-              />
-              <Text style={styles.printToggleLabel}>Imprimer le ticket</Text>
-            </Pressable>
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Total</Text>
-              <MoneyText value={cartTotal} style={styles.totalValue} />
-            </View>
-            <View style={styles.actionsRow}>
-              <Pressable style={styles.clearButton} onPress={clearActiveCart}>
-                <Ionicons name="trash-outline" size={18} color={DANGER} />
-                <Text style={styles.clearButtonText}>Vider</Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.checkoutButton,
-                  (submitting || cart.length === 0 || !salesEnabled || !bankReady) &&
-                    styles.buttonDisabled,
-                ]}
-                onPress={() => void checkout()}
-                disabled={submitting || cart.length === 0 || !salesEnabled || !bankReady}>
-                <Ionicons name="checkmark-circle-outline" size={20} color="#ffffff" />
-                <Text style={styles.checkoutButtonText}>
-                  {submitting ? 'Encaissement…' : 'Encaisser'}
-                </Text>
-              </Pressable>
-            </View>
-          </ScrollView>
         </View>
-      ) : (
-        <ScrollView
-          style={styles.changePane}
-          contentContainerStyle={styles.changePaneContent}
-          keyboardShouldPersistTaps="handled"
-          alwaysBounceVertical
-          refreshControl={makeRefreshControl(pullRefreshing, onPullRefresh)}>
-          <TextInput
-            style={styles.gapsSearch}
-            placeholder="Rechercher (#fiche, client…)"
-            placeholderTextColor={BrandColors.textMuted}
-            value={cashGapQuery}
-            onChangeText={setCashGapQuery}
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-          />
-          <View style={styles.gapsBlock}>
-            <Text style={styles.gapsTitle}>Monnaie à rendre</Text>
-            {cashGaps.changeOwed.length === 0 ? (
-              <Text style={styles.gapsEmpty}>Aucune</Text>
-            ) : filteredCashGaps.changeOwed.length === 0 ? (
-              <Text style={styles.gapsEmpty}>Aucun résultat</Text>
-            ) : (
-              filteredCashGaps.changeOwed.map((row) => renderCashGapRow(row, 'change'))
-            )}
-          </View>
-          <View style={styles.gapsBlock}>
-            <Text style={styles.gapsTitle}>Restes à encaisser</Text>
-            {cashGaps.balanceOwed.length === 0 ? (
-              <Text style={styles.gapsEmpty}>Aucun</Text>
-            ) : filteredCashGaps.balanceOwed.length === 0 ? (
-              <Text style={styles.gapsEmpty}>Aucun résultat</Text>
-            ) : (
-              filteredCashGaps.balanceOwed.map((row) => renderCashGapRow(row, 'balance'))
-            )}
-          </View>
-        </ScrollView>
-      )}
+        <PosSideCart
+          mode={mode}
+          cart={cart}
+          productsById={productsById}
+          familyQtyMap={familyQtyMap}
+          qtyDrafts={qtyDrafts}
+          setQtyDrafts={setQtyDrafts}
+          onUpdateDraft={updateActiveDraft}
+          onBumpQty={bumpQty}
+          onSetQty={setLineQty}
+        />
+      </View>
 
-      {posPane === 'products' && cart.length > 0 ? (
-        <Pressable style={styles.cartPeek} onPress={() => setPosPane('cart')}>
-          <Ionicons name="cart-outline" size={20} color="#fff" />
-          <Text style={styles.cartPeekText} numberOfLines={1}>
-            {clientName || 'Panier'} · {cartItemCount} · {formatMoney(cartTotal)}
-          </Text>
-          <Ionicons name="chevron-forward" size={18} color="#fff" />
-        </Pressable>
-      ) : null}
+      <View style={styles.totals}>
+        {tenderPreview?.changeDue ? (
+          <Text style={styles.ok}>Monnaie {formatMoney(tenderPreview.changeDue)}</Text>
+        ) : null}
+        {tenderPreview?.balanceDue ? (
+          <Text style={styles.warn}>Reste {formatMoney(tenderPreview.balanceDue)}</Text>
+        ) : null}
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Total</Text>
+          <MoneyText value={cartTotal} style={styles.totalValue} />
+        </View>
+        <View style={styles.actions}>
+          <Pressable onPress={() => setPrintTicket((v) => !v)} style={styles.printBtn}>
+            <Ionicons
+              name={printTicket ? 'checkbox' : 'square-outline'}
+              size={18}
+              color={BrandColors.primary}
+            />
+            <Text style={styles.printLabel}>Ticket</Text>
+          </Pressable>
+          <Pressable style={styles.clear} onPress={clearActiveCart}>
+            <Text style={styles.clearText}>Vider</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.pay,
+              (submitting || cart.length === 0 || !salesEnabled || !bankReady) &&
+                styles.buttonDisabled,
+            ]}
+            disabled={submitting || cart.length === 0 || !salesEnabled || !bankReady}
+            onPress={() => {
+              Keyboard.dismiss();
+              void checkout();
+            }}>
+            {submitting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.payText}>Encaisser</Text>
+            )}
+          </Pressable>
+        </View>
+      </View>
+
+      <PosCashGapsSheet
+        visible={gapsOpen}
+        salesEnabled={salesEnabled}
+        query={cashGapQuery}
+        onQueryChange={setCashGapQuery}
+        cashGaps={cashGaps}
+        filtered={filteredCashGaps}
+        busyId={cashGapBusyId}
+        onSettleChange={(row) => void onSettleChange(row)}
+        onCollectBalance={(row) => void onCollectBalance(row)}
+        onClose={() => setGapsOpen(false)}
+      />
     </Screen>
   );
 }
@@ -1512,29 +1266,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    padding: Spacing.two,
     marginHorizontal: Spacing.three,
     marginTop: Spacing.two,
-    borderRadius: Spacing.two,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
     backgroundColor: BrandColors.surface,
   },
-  statusText: { flex: 1, color: BrandColors.text, fontSize: 13 },
+  statusText: { flex: 1, color: BrandColors.text, fontSize: 12 },
   pendingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
     marginHorizontal: Spacing.three,
     marginTop: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.two,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
     backgroundColor: WARNING_BG,
   },
   pendingBadgeText: { color: WARNING, flex: 1, fontSize: 13 },
   modeBanner: {
     marginHorizontal: Spacing.three,
     marginTop: Spacing.two,
-    padding: Spacing.two,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: 10,
     backgroundColor: BrandColors.primarySoft,
   },
@@ -1542,10 +1298,20 @@ const styles = StyleSheet.create({
   scopeBlock: {
     marginHorizontal: Spacing.three,
     marginTop: Spacing.two,
-    gap: 6,
+    gap: 8,
   },
-  scopeLabel: { fontSize: 12, fontWeight: '700', color: BrandColors.textMuted },
-  scopeHint: { color: BrandColors.textMuted, fontSize: 13, paddingVertical: 6 },
+  scopeToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: BrandColors.surface,
+    borderWidth: 1,
+    borderColor: BrandColors.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  scopeToggleText: { flex: 1, color: BrandColors.text, fontWeight: '700', fontSize: 13 },
   scopeChip: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -1558,365 +1324,186 @@ const styles = StyleSheet.create({
   scopeChipActive: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
   scopeChipText: { color: BrandColors.text, fontSize: 13, fontWeight: '600' },
   scopeChipTextActive: { color: '#fff' },
-  productList: { flex: 1 },
-  paneTabs: {
-    flexDirection: 'row',
+  entry: {
     marginHorizontal: Spacing.three,
     marginTop: Spacing.two,
-    padding: 3,
-    borderRadius: 12,
-    backgroundColor: BrandColors.surfaceSoft,
-    borderWidth: 1,
-    borderColor: BrandColors.border,
-    gap: 3,
+    gap: 8,
   },
-  paneTab: {
+  entryRow: { flexDirection: 'row', gap: 8 },
+  field: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  paneTabActive: { backgroundColor: BrandColors.primary },
-  paneTabText: { fontWeight: '700', fontSize: 13, color: BrandColors.textMuted },
-  paneTabTextActive: { color: '#fff' },
-  cartPane: { flex: 1, minHeight: 0 },
-  checkoutScroll: {
-    flexGrow: 0,
-    flexShrink: 1,
-    maxHeight: 340,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: BrandColors.border,
-    backgroundColor: BrandColors.bg,
-  },
-  checkoutScrollContent: {
-    paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.two,
-    paddingBottom: Spacing.three,
-    gap: Spacing.two,
-  },
-  changePane: { flex: 1 },
-  changePaneContent: {
-    paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.two,
-    paddingBottom: Spacing.five,
-    gap: Spacing.two,
-  },
-  cartPeek: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
-    backgroundColor: BrandColors.primary,
-    marginHorizontal: Spacing.three,
-    marginBottom: Spacing.two,
-    marginTop: Spacing.one,
-    paddingVertical: 12,
-    paddingHorizontal: Spacing.three,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
     borderRadius: 12,
+    paddingHorizontal: 10,
+    backgroundColor: BrandColors.surface,
   },
-  cartPeekText: { flex: 1, color: '#fff', fontWeight: '700', fontSize: 15 },
-  grid: { padding: Spacing.three, flexGrow: 1 },
-  gridRow: { gap: Spacing.three },
-  productCard: {
+  fieldInput: { flex: 1, paddingVertical: Platform.OS === 'ios' ? 10 : 8, color: BrandColors.text, fontSize: 15 },
+  segRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  segBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: BrandColors.surface,
+  },
+  segBtnOn: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
+  segText: { fontWeight: '700', color: BrandColors.text, fontSize: 12 },
+  segTextOn: { color: '#fff' },
+  bankWrap: { gap: 6 },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    backgroundColor: BrandColors.surface,
+  },
+  chipOn: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
+  chipText: { color: BrandColors.text, fontWeight: '700', fontSize: 12 },
+  chipTextOn: { color: '#fff' },
+  draftsBar: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  draftsRow: { flex: 1, minWidth: 0 },
+  draftChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: BrandColors.borderStrong,
+    backgroundColor: BrandColors.surface,
+    maxWidth: 140,
+  },
+  draftChipActive: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
+  draftChipText: { fontWeight: '700', color: BrandColors.text, fontSize: 12 },
+  draftChipTextActive: { color: '#fff' },
+  draftDel: { padding: 2 },
+  addDraftBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: BrandColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gapChip: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: BrandColors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gapDot: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: BrandColors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  gapDotText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+  split: {
     flex: 1,
-    marginBottom: Spacing.three,
-    padding: Spacing.three,
-    borderRadius: Spacing.three,
-    minHeight: 110,
-    justifyContent: 'space-between',
+    flexDirection: 'row',
+    gap: 8,
+    marginHorizontal: Spacing.three,
+    marginTop: 8,
+    minHeight: 0,
+  },
+  productsCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 2,
+    borderRadius: 12,
+    backgroundColor: BrandColors.surface,
+    borderWidth: 1,
+    borderColor: BrandColors.border,
+  },
+  searchInput: { flex: 1, color: BrandColors.text, fontSize: 14, paddingVertical: 6 },
+  productList: { paddingBottom: 8, gap: 6, flexGrow: 1 },
+  productRow: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    minHeight: 56,
+    justifyContent: 'center',
   },
   productBadge: {
     position: 'absolute',
-    top: Spacing.two,
-    right: Spacing.two,
-    minWidth: 22,
-    height: 22,
+    top: 6,
+    right: 6,
+    minWidth: 20,
+    height: 20,
     paddingHorizontal: 5,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  productBadgeText: { color: '#ffffff', fontSize: 12, fontWeight: '700' },
-  productName: { fontWeight: '700', fontSize: 15 },
-  productPrice: { fontWeight: '700', marginTop: Spacing.two },
-  emptyState: { alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.six },
-  emptyStateText: { textAlign: 'center', color: BrandColors.textMuted },
-  cartButton: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: Spacing.two,
-    backgroundColor: BrandColors.primary,
-    margin: Spacing.three,
-    paddingVertical: Spacing.three,
-    borderRadius: Spacing.three,
-  },
-  cartButtonEmpty: { backgroundColor: '#9AA0A6' },
-  cartButtonText: { color: '#ffffff', fontWeight: '600', fontSize: 16 },
-  cartHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.three,
-  },
-  cartTitle: { fontSize: 20, fontWeight: '700', color: BrandColors.text },
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#0000000A',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cartList: { flex: 1 },
-  cartListContent: { paddingHorizontal: Spacing.three, gap: Spacing.two, flexGrow: 1 },
-  emptyCart: { alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.six },
-  cartRow: {
-    padding: Spacing.three,
-    borderRadius: Spacing.three,
-    gap: 8,
-    backgroundColor: BrandColors.surface,
-    borderWidth: 1,
-    borderColor: BrandColors.border,
-    marginBottom: Spacing.two,
-  },
-  cartRowLabel: { fontWeight: '700', color: BrandColors.text, fontSize: 15 },
-  cartRowMeta: { fontSize: 13, color: BrandColors.textMuted },
-  cartRowActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
-  cartRowTotal: { textAlign: 'right', fontWeight: '700', color: BrandColors.text, fontSize: 16 },
-  priceInput: {
-    borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    fontSize: 14,
-    color: BrandColors.text,
-  },
-  qtyControls: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  qtyInput: {
-    minWidth: 52,
-    textAlign: 'center',
-    fontWeight: '700',
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: BrandColors.border,
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    color: BrandColors.text,
-  },
-  cartFooter: {
-    paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.three,
-    paddingBottom: Spacing.two,
-    gap: Spacing.three,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: BrandColors.border,
-    backgroundColor: BrandColors.bg,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-    borderRadius: Spacing.three,
-    paddingHorizontal: Spacing.three,
-    gap: Spacing.two,
-    backgroundColor: BrandColors.surface,
-  },
-  input: { flex: 1, paddingVertical: Spacing.three, color: BrandColors.text },
-  stopRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  stopAddress: { flex: 1 },
-  stopQtyBox: {
-    width: 72,
-    flex: 0,
-    borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-    borderRadius: Spacing.three,
-    paddingHorizontal: Spacing.two,
-    backgroundColor: BrandColors.surface,
-    justifyContent: 'center',
-  },
-  stopQty: { paddingVertical: Spacing.three, color: BrandColors.text },
-  stopRemove: { color: BrandColors.danger, fontWeight: '700', fontSize: 22, paddingHorizontal: 6 },
-  addStop: { color: BrandColors.primary, fontWeight: '700', paddingVertical: 6 },
-  fulfillRow: { flexDirection: 'row', gap: Spacing.two },
-  fulfillBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-    borderRadius: Spacing.three,
-    paddingVertical: Spacing.two,
-    alignItems: 'center',
-    backgroundColor: BrandColors.surface,
-  },
-  fulfillBtnActive: {
-    backgroundColor: BrandColors.primary,
-    borderColor: BrandColors.primary,
-  },
-  fulfillBtnText: { fontWeight: '700', color: BrandColors.text },
-  fulfillBtnTextActive: { color: '#fff' },
-  paymentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  paymentButton: {
-    flexGrow: 1,
-    flexBasis: '22%',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.three,
-    borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-  },
-  paymentButtonActive: {
-    backgroundColor: BrandColors.primary,
-    borderColor: BrandColors.primary,
-  },
-  paymentLabel: { fontSize: 12, color: BrandColors.text },
-  paymentLabelActive: { color: '#ffffff', fontWeight: '600' },
-  bankBlock: { gap: Spacing.two },
-  bankLabel: { fontSize: 12, fontWeight: '700', color: BrandColors.textMuted },
-  bankChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-    backgroundColor: BrandColors.surface,
-  },
-  bankChipActive: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
-  bankChipText: { color: BrandColors.text, fontWeight: '600', fontSize: 12 },
-  bankChipTextActive: { color: '#fff' },
-  tenderMeta: { gap: 4 },
-  tenderOk: { color: BrandColors.ok, fontWeight: '600' },
-  tenderWarn: { color: BrandColors.primaryHover, fontWeight: '600' },
-  printToggle: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  printToggleLabel: { color: BrandColors.text, fontWeight: '600' },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  totalLabel: { color: BrandColors.textMuted, fontSize: 16 },
-  totalValue: { fontSize: 28, fontWeight: '700', color: BrandColors.text },
-  actionsRow: { flexDirection: 'row', gap: Spacing.two },
-  clearButton: {
-    flex: 1,
-    flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingVertical: Spacing.three,
-    borderRadius: Spacing.three,
-    borderWidth: 1,
-    borderColor: DANGER,
-  },
-  clearButtonText: { color: DANGER, fontWeight: '600' },
-  checkoutButton: {
-    flex: 2,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: Spacing.two,
-    paddingVertical: Spacing.three,
-    borderRadius: Spacing.three,
     backgroundColor: BrandColors.primary,
   },
-  buttonDisabled: { opacity: 0.5 },
-  checkoutButtonText: { color: '#ffffff', fontWeight: '600', fontSize: 16 },
-  draftsBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.two,
-  },
-  draftsRow: { alignItems: 'center', gap: Spacing.two, paddingRight: Spacing.two },
-  draftChipWrap: { flexDirection: 'row', alignItems: 'center' },
-  draftChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-    backgroundColor: BrandColors.surface,
-    maxWidth: 160,
-  },
-  draftChipActive: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
-  draftChipAdd: { borderStyle: 'dashed' },
-  draftChipText: { fontWeight: '600', color: BrandColors.text, fontSize: 13 },
-  draftChipTextActive: { color: '#fff' },
-  draftDel: { marginLeft: 2, padding: 4 },
-  addDraftBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: BrandColors.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  addDraftBtnSm: {
-    backgroundColor: BrandColors.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    marginRight: 8,
-  },
-  addDraftBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  cartHeaderActions: { flexDirection: 'row', alignItems: 'center' },
-  cartListHeader: { marginBottom: Spacing.two },
-  gapsBlock: {
-    marginTop: Spacing.four,
+  productBadgeText: { color: '#ffffff', fontSize: 11, fontWeight: '800' },
+  productName: { fontWeight: '800', fontSize: 13, paddingRight: 22 },
+  productPrice: { fontWeight: '800', marginTop: 2, fontSize: 12 },
+  emptyState: { alignItems: 'center', paddingVertical: Spacing.four },
+  emptyStateText: { textAlign: 'center', color: BrandColors.textMuted, fontSize: 13 },
+  totals: {
+    marginHorizontal: Spacing.three,
+    marginTop: 8,
     marginBottom: Spacing.three,
-    padding: Spacing.three,
-    borderRadius: 14,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: BrandColors.surface,
     borderWidth: 1,
     borderColor: BrandColors.border,
-    backgroundColor: BrandColors.surface,
-    gap: Spacing.two,
+    gap: 6,
   },
-  gapsSearch: {
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  totalLabel: { color: BrandColors.textMuted, fontSize: 14, fontWeight: '700' },
+  totalValue: { fontSize: 26, fontWeight: '900', color: BrandColors.text },
+  ok: { color: BrandColors.ok, fontWeight: '700', fontSize: 13 },
+  warn: { color: BrandColors.primaryHover, fontWeight: '700', fontSize: 13 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  printBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingRight: 4 },
+  printLabel: { color: BrandColors.text, fontWeight: '700', fontSize: 12 },
+  clear: {
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: BrandColors.text,
-    backgroundColor: BrandColors.surface,
-    marginBottom: Spacing.one,
-  },
-  gapsTitle: { fontWeight: '700', color: BrandColors.text, fontSize: 15 },
-  gapsEmpty: { color: BrandColors.textMuted, fontSize: 13 },
-  gapRow: {
-    flexDirection: 'row',
+    borderColor: BrandColors.danger,
     alignItems: 'center',
-    gap: Spacing.two,
-    paddingVertical: 6,
-  },
-  gapInfo: { flex: 1, gap: 2 },
-  gapTitle: { fontWeight: '600', color: BrandColors.text },
-  gapAmount: { fontWeight: '700', color: BrandColors.primaryHover },
-  gapBtn: {
-    borderWidth: 1,
-    borderColor: BrandColors.borderStrong,
-    borderRadius: 10,
+    justifyContent: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    minWidth: 88,
-    alignItems: 'center',
-    backgroundColor: BrandColors.bg,
+    paddingVertical: 12,
   },
-  gapBtnPrimary: { backgroundColor: BrandColors.primary, borderColor: BrandColors.primary },
-  gapBtnText: { fontWeight: '700', color: BrandColors.text, fontSize: 13 },
-  gapBtnTextPrimary: { color: '#fff' },
-
+  clearText: { color: BrandColors.danger, fontWeight: '800', fontSize: 13 },
+  pay: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: BrandColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  payText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  buttonDisabled: { opacity: 0.45 },
 });

@@ -9,7 +9,7 @@ import type { Sale } from '@/types/api';
 import { formatDateTime } from '@/utils/datetime';
 import { paymentMethodLabel } from '@/utils/paymentLabels';
 import { formatQuantity } from '@/utils/quantity';
-import { isSaleDeleted, saleDisplayRef } from '@/utils/saleRef';
+import { isSaleDeleted, isSaleVoided, saleDisplayRef } from '@/utils/saleRef';
 
 type Props = {
   sale: Sale | null;
@@ -43,7 +43,8 @@ export function SaleDetailModal({
   onClose,
 }: Props) {
   const deleted = sale != null && isSaleDeleted(sale);
-  const completed = sale?.status === 'COMPLETED' && !deleted;
+  const voided = sale != null && isSaleVoided(sale);
+  const completed = sale?.status === 'COMPLETED' && !voided;
 
   return (
     <ModalShell
@@ -61,7 +62,7 @@ export function SaleDetailModal({
               <InfoLine
                 label="Statut"
                 value={deleted ? 'Supprimée' : STATUS_LABEL[sale.status]}
-                danger={deleted}
+                danger={voided}
               />
             </View>
 
@@ -137,7 +138,7 @@ export function SaleDetailModal({
       <View style={styles.header}>
         <View style={styles.headerInfo}>
           <Text style={styles.eyebrow}>TRANSACTION DE VENTE</Text>
-          <Text style={[styles.title, deleted && styles.titleDeleted]}>
+          <Text style={[styles.title, voided && styles.titleDeleted]}>
             Vente #{sale ? saleDisplayRef(sale) : ''}
           </Text>
           <Text style={styles.date}>{formatDateTime(sale?.createdAt)}</Text>

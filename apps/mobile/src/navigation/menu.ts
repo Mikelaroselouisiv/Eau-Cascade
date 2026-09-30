@@ -218,13 +218,6 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
   ],
   stock: [
     {
-      name: 'achats',
-      title: 'Achats',
-      icon: 'cart-outline',
-      permission: 'purchasing.manage',
-      roles: ['ADMIN', 'MANAGER', 'STOCK_MANAGER'],
-    },
-    {
       name: 'produits',
       title: 'Produits',
       icon: 'pricetags-outline',
@@ -244,6 +237,13 @@ export const SECTION_TABS: Record<string, SectionTab[]> = {
       icon: 'swap-vertical-outline',
       permission: 'stock.adjust',
       roles: ['ADMIN', 'MANAGER', 'STOCK_MANAGER', 'CASHIER'],
+    },
+    {
+      name: 'achats',
+      title: 'Achats',
+      icon: 'cart-outline',
+      permission: 'purchasing.manage',
+      roles: ['ADMIN', 'MANAGER', 'STOCK_MANAGER'],
     },
   ],
   config: [
@@ -424,7 +424,8 @@ export function canAccessTab(tab: SectionTab, access: AccessFns): boolean {
     if (access.canPerm('stock.adjust') || access.canPerm('stock.manage')) return true;
     return access.canPerm('stock.raw_in') && (access.productionDepartmentIds?.length ?? 0) > 0;
   }
-  if (tab.name === 'produits' || tab.name === 'familles') {
+  if (tab.name === 'familles') return false;
+  if (tab.name === 'produits') {
     if (access.role === 'CHEF_PRODUCTION' || access.role === 'CASHIER') return false;
     return (
       access.canPerm('products.manage') ||

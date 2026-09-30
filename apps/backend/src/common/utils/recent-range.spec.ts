@@ -20,10 +20,10 @@ describe('recent-range', () => {
     expect(mustClampRecentExpenses(['dashboard.view', 'finance.recent_expenses'])).toBe(true);
   });
 
-  it('clamps an old range to today + yesterday (Port-au-Prince)', () => {
+  it('clamps an old range to the recent window (Port-au-Prince)', () => {
     const now = new Date('2026-09-05T16:00:00.000Z');
-    expect(clampToRecentTotalsRange('2026-08-01', '2026-09-05', now)).toEqual({
-      dateFrom: '2026-09-04',
+    expect(clampToRecentTotalsRange('2026-01-01', '2026-09-05', now)).toEqual({
+      dateFrom: '2026-07-23',
       dateTo: '2026-09-05',
     });
   });

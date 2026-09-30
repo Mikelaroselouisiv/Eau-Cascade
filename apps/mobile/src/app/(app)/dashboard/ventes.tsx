@@ -25,14 +25,15 @@ import {
 } from '@/services/api';
 import type { DashboardSalesByProductRow, Sale } from '@/types/api';
 import {
-  addDaysYmd,
   businessDayEndIso,
   businessDayStartIso,
   businessTodayYmd,
   dashboardPresetRange,
   formatYmdDisplay,
+  RECENT_HISTORY_DAYS,
+  recentHistoryMinYmd,
 } from '@/utils/datetime';
-import { isSaleDeleted, saleDisplayRef } from '@/utils/saleRef';
+import { isSaleVoided, saleDisplayRef } from '@/utils/saleRef';
 import { formatQuantity } from '@/utils/quantity';
 import { salesQueryDepartmentParams } from '@/utils/user-scope';
 
@@ -55,14 +56,16 @@ export default function VentesScreen() {
   const [actionBusy, setActionBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [deptRefreshKey, setDeptRefreshKey] = useState(0);
+  const [voidedSalesById, setVoidedSalesById] = useState<Record<number, Sale>>({});
   const [error, setError] = useState<string | null>(null);
 
-  const canManageSales = canPerm('sales.cancel');
+  const voidedSales = useMemo(() => Object.values(voidedSalesById), [voidedSalesById]);
+  const canManageSales = canPerm('sales.cancel') || can(['ADMIN', 'MANAGER']);
   const canDeleteSales = canPerm('sales.delete');
   const canSeeUnlimitedSalesRange = can(['ADMIN']) || canPerm('reports.view');
   const canSeeSalesTotals = canSeeUnlimitedSalesRange || canPerm('sales.recent_totals');
   const salesRecentMinYmd =
-    canSeeUnlimitedSalesRange || !canSeeSalesTotals ? null : addDaysYmd(businessTodayYmd(), -1);
+    canSeeUnlimitedSalesRange || !canSeeSalesTotals ? null : recentHistoryMinYmd();
 
   const load = useCallback(async () => {
     if (companyId == null) return;
@@ -186,16 +189,29 @@ export default function VentesScreen() {
     ]);
   }
 
+  function markSaleVoided(sale: Sale, patch: Partial<Sale>) {
+    setVoidedSalesById((previous) => ({
+      ...previous,
+      [sale.id]: { ...sale, ...previous[sale.id], ...patch },
+    }));
+  }
+
   async function runSaleAction(kind: 'cancel' | 'refund' | 'delete', sale: Sale) {
     if (companyId == null) return;
     setActionBusy(true);
     try {
-      if (kind === 'cancel') await cancelSale(sale.id);
-      else if (kind === 'refund') await refundSale(sale.id);
-      else await deleteSalePermanently(sale.id, companyId);
+      if (kind === 'cancel') {
+        await cancelSale(sale.id);
+        markSaleVoided(sale, { status: 'CANCELLED' });
+      } else if (kind === 'refund') {
+        await refundSale(sale.id);
+        markSaleVoided(sale, { status: 'REFUNDED' });
+      } else {
+        await deleteSalePermanently(sale.id, companyId);
+        markSaleVoided(sale, { deletedAt: new Date().toISOString() });
+      }
       setSelectedSale(null);
       await load();
-      setDeptRefreshKey((key) => key + 1);
     } catch {
       Alert.alert('Action impossible', 'La transaction n’a pas pu être modifiée.');
     } finally {
@@ -234,7 +250,7 @@ export default function VentesScreen() {
         />
         {salesRecentMinYmd ? (
           <Text style={styles.sectionHint}>
-            Totaux limités aux 2 derniers jours (depuis {formatYmdDisplay(salesRecentMinYmd)}).
+            Totaux limités aux {RECENT_HISTORY_DAYS} derniers jours (depuis {formatYmdDisplay(salesRecentMinYmd)}).
           </Text>
         ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -295,8 +311,9 @@ export default function VentesScreen() {
         dateTo={dateTo}
         refreshKey={deptRefreshKey}
         salesDeptParams={salesDeptParams}
-        canCancel={can(['ADMIN'])}
+        canCancel={canManageSales}
         cancelBusy={actionBusy}
+        voidedSales={voidedSales}
         onOpenSale={(sale) => void openSale(sale)}
         onCancelSale={(sale) => confirmAction('cancel', sale)}
         onClose={() => {
@@ -307,8 +324,8 @@ export default function VentesScreen() {
       <SaleDetailModal
         sale={selectedSale}
         busy={actionBusy}
-        canManage={canManageSales && selectedSale != null && !isSaleDeleted(selectedSale)}
-        canDelete={canDeleteSales && selectedSale != null && !isSaleDeleted(selectedSale)}
+        canManage={canManageSales && selectedSale != null && !isSaleVoided(selectedSale)}
+        canDelete={canDeleteSales && selectedSale != null && !isSaleVoided(selectedSale)}
         onCancel={(sale) => confirmAction('cancel', sale)}
         onRefund={(sale) => confirmAction('refund', sale)}
         onDelete={(sale) => confirmAction('delete', sale)}

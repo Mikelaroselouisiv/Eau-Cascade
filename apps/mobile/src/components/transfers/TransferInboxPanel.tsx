@@ -4,7 +4,12 @@ import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { confirmInternalTransfer, rejectInternalTransfer } from '@/services/api';
 import type { InternalTransferRow } from '@/types/api';
+import { formatDateTime } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
+
+function whoLabel(u?: { fullName?: string | null; phone?: string | null } | null) {
+  return u?.fullName?.trim() || u?.phone?.trim() || '';
+}
 
 export function TransferInboxPanel({
   inbox,
@@ -29,24 +34,33 @@ export function TransferInboxPanel({
 
   return (
     <>
-      {inbox.map((t) => (
-        <View key={t.id} style={styles.row}>
-          <Text style={styles.title}>
-            {t.fromDepartment.name} → {t.toDepartment.name}
-          </Text>
-          <Text style={styles.meta}>
-            {t.items.map((i) => `${i.product.name} ${formatQuantity(i.quantity)}`).join(', ')}
-          </Text>
-          <View style={styles.actions}>
-            <Pressable style={styles.confirm} onPress={() => void confirm(t.id)}>
-              <Text style={styles.confirmText}>Confirmer</Text>
-            </Pressable>
-            <Pressable style={styles.reject} onPress={() => void reject(t.id)}>
-              <Text style={styles.rejectText}>Refuser</Text>
-            </Pressable>
+      {inbox.map((t) => {
+        const sentBy = whoLabel(t.createdBy);
+        return (
+          <View key={t.id} style={styles.row}>
+            <Text style={styles.title}>
+              {t.fromDepartment.name} → {t.toDepartment.name}
+            </Text>
+            <Text style={styles.meta} numberOfLines={2}>
+              Envoyé {formatDateTime(t.createdAt)}
+              {sentBy ? ` · ${sentBy}` : ''}
+            </Text>
+            {t.items.map((i) => (
+              <Text key={i.id} style={styles.item}>
+                {i.product.name} · {formatQuantity(i.quantity)}
+              </Text>
+            ))}
+            <View style={styles.actions}>
+              <Pressable style={styles.confirm} onPress={() => void confirm(t.id)}>
+                <Text style={styles.confirmText}>Confirmer</Text>
+              </Pressable>
+              <Pressable style={styles.reject} onPress={() => void reject(t.id)}>
+                <Text style={styles.rejectText}>Refuser</Text>
+              </Pressable>
+            </View>
           </View>
-        </View>
-      ))}
+        );
+      })}
     </>
   );
 }
@@ -54,7 +68,8 @@ export function TransferInboxPanel({
 const styles = StyleSheet.create({
   row: { gap: 6, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BrandColors.border },
   title: { color: BrandColors.text, fontWeight: '800', fontSize: 14 },
-  meta: { color: BrandColors.textMuted, fontSize: 12 },
+  meta: { color: BrandColors.textMuted, fontSize: 12, fontWeight: '600' },
+  item: { color: BrandColors.text, fontSize: 13, fontWeight: '600' },
   actions: { flexDirection: 'row', gap: 8, marginTop: 4 },
   confirm: {
     backgroundColor: BrandColors.primary,

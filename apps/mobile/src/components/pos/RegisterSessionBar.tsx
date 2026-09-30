@@ -263,7 +263,10 @@ export function RegisterSessionBar({
       setError('Aucun produit suivi en stock dans ce département');
       return;
     }
-    const expected = Number(closingExpected.replace(',', '.'));
+    const expected =
+      closingPreview != null
+        ? Number(closingPreview.expected)
+        : Number(closingExpected.replace(',', '.'));
     const counted = Number(closingCounted.replace(',', '.'));
     if (!Number.isFinite(expected) || expected < 0 || !Number.isFinite(counted) || counted < 0) {
       setError('Montants invalides');
@@ -465,12 +468,14 @@ export function RegisterSessionBar({
                       </View>
                     ) : null}
                     <Text style={styles.fieldLabel}>Espèces attendues</Text>
-                    <TextInput
-                      style={styles.fieldInput}
-                      keyboardType="decimal-pad"
-                      value={closingExpected}
-                      onChangeText={setClosingExpected}
-                    />
+                    <View style={styles.lockedField}>
+                      <Text style={styles.lockedFieldText}>
+                        {formatMoney(
+                          closingPreview?.expected ??
+                            (Number(closingExpected.replace(',', '.')) || 0),
+                        )}
+                      </Text>
+                    </View>
                     <Text style={styles.fieldLabel}>Espèces comptées</Text>
                     <TextInput
                       style={styles.fieldInput}
@@ -478,32 +483,65 @@ export function RegisterSessionBar({
                       value={closingCounted}
                       onChangeText={setClosingCounted}
                     />
+                    {(() => {
+                      const expected =
+                        closingPreview != null
+                          ? Number(closingPreview.expected)
+                          : Number(closingExpected.replace(',', '.'));
+                      const counted = Number(closingCounted.replace(',', '.'));
+                      if (!Number.isFinite(expected) || !Number.isFinite(counted)) return null;
+                      const gap = Math.round((counted - expected) * 100) / 100;
+                      if (Math.abs(gap) <= 0.009) return null;
+                      return (
+                        <Text style={gap > 0 ? styles.gapOk : styles.gapWarn}>
+                          Écart {formatMoney(gap)}
+                        </Text>
+                      );
+                    })()}
                   </>
                 )}
-                <Text style={styles.sectionLabel}>Comptage stock</Text>
+                <Text style={styles.sectionLabel}>
+                  {panel === 'close' ? 'Stock compté' : 'Comptage stock'}
+                </Text>
                 {countProducts.length === 0 ? (
                   <Text style={styles.hint}>Aucun produit suivi dans ce département.</Text>
                 ) : null}
               </View>
             }
-            renderItem={({ item }) => (
-              <View style={styles.countRow}>
-                <View style={styles.countInfo}>
-                  <Text style={styles.countName} numberOfLines={2}>
-                    {item.name}
-                  </Text>
-                  <Text style={styles.countMeta}>
-                    Système : {item.stock} {item.unitLabel}
-                  </Text>
+            renderItem={({ item }) => {
+              const counted = parseQty(counts[item.id] ?? '');
+              const gap =
+                panel === 'close' && counted != null
+                  ? Math.round((counted - item.stock) * 1000) / 1000
+                  : null;
+              return (
+                <View style={styles.countRow}>
+                  <View style={styles.countInfo}>
+                    <Text style={styles.countName} numberOfLines={2}>
+                      {item.name}
+                    </Text>
+                    <Text style={styles.countMeta}>
+                      Système : {item.stock} {item.unitLabel}
+                    </Text>
+                    {gap != null && Math.abs(gap) > 0.0001 ? (
+                      <Text style={gap > 0 ? styles.gapOk : styles.gapWarn}>
+                        Écart {gap > 0 ? '+' : ''}
+                        {gap} {item.unitLabel}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.countInputCol}>
+                    {panel === 'close' ? <Text style={styles.countInputLabel}>Compté</Text> : null}
+                    <TextInput
+                      style={styles.countInput}
+                      keyboardType="decimal-pad"
+                      value={counts[item.id] ?? ''}
+                      onChangeText={(v) => setCounts((prev) => ({ ...prev, [item.id]: v }))}
+                    />
+                  </View>
                 </View>
-                <TextInput
-                  style={styles.countInput}
-                  keyboardType="decimal-pad"
-                  value={counts[item.id] ?? ''}
-                  onChangeText={(v) => setCounts((prev) => ({ ...prev, [item.id]: v }))}
-                />
-              </View>
-            )}
+              );
+            }}
           />
         }
         footer={
@@ -637,6 +675,19 @@ const styles = StyleSheet.create({
   countInfo: { flex: 1, gap: 2 },
   countName: { fontWeight: '600', color: BrandColors.text },
   countMeta: { fontSize: 12, color: BrandColors.textMuted },
+  countInputCol: { alignItems: 'flex-end', gap: 4 },
+  countInputLabel: { fontSize: 10, fontWeight: '800', color: BrandColors.textMuted },
+  lockedField: {
+    borderWidth: 1,
+    borderColor: BrandColors.border,
+    borderRadius: 10,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 12,
+    backgroundColor: BrandColors.surfaceSoft,
+  },
+  lockedFieldText: { fontSize: 16, fontWeight: '700', color: BrandColors.text },
+  gapOk: { color: BrandColors.ok, fontSize: 12, fontWeight: '700' },
+  gapWarn: { color: BrandColors.danger, fontSize: 12, fontWeight: '700' },
   countInput: {
     width: 88,
     borderWidth: 1,

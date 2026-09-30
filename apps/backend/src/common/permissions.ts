@@ -20,7 +20,7 @@ export const PERMISSIONS = [
   { code: 'sales.view', label: 'Consulter les ventes' },
   {
     code: 'sales.recent_totals',
-    label: 'Voir le total des ventes (2 derniers jours max)',
+    label: 'Voir le total des ventes (45 derniers jours max)',
   },
   { code: 'sales.cancel', label: 'Annuler ou rembourser des ventes' },
   { code: 'sales.delete', label: 'Supprimer définitivement des ventes' },
@@ -40,7 +40,7 @@ export const PERMISSIONS = [
   { code: 'finance.expense', label: 'Enregistrer des dépenses uniquement (sans voir la finance)' },
   {
     code: 'finance.recent_expenses',
-    label: 'Voir le journal des dépenses (2 derniers jours max)',
+    label: 'Voir le journal des dépenses (45 derniers jours max)',
   },
   { code: 'accounting.view', label: 'Consulter la comptabilité' },
   { code: 'accounting.write', label: 'Saisir des écritures comptables' },
@@ -171,9 +171,9 @@ export const SYSTEM_ROLE_LABELS: Record<string, string> = {
 
 /**
  * Nombre de jours calendaires (fuseau Port-au-Prince) pour `sales.recent_totals`
- * et `finance.recent_expenses` : aujourd’hui + veille = 2 jours.
+ * et `finance.recent_expenses` : aujourd’hui compris = 45 jours.
  */
-export const SALES_RECENT_TOTALS_DAYS = 2;
+export const SALES_RECENT_TOTALS_DAYS = 45;
 
 /**
  * Valeurs initiales **uniquement** à la création d’un rôle système manquant.

@@ -1,4 +1,4 @@
-import type { Delivery, DeliveryStatus } from '@/types/api';
+import type { Delivery, DeliveryDrop, DeliveryStatus } from '@/types/api';
 import { BrandColors } from '@/constants/brand';
 
 export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
@@ -19,4 +19,18 @@ export function isHomeDelivery(d: Delivery) {
 
 export function deliverySaleRef(d: Delivery) {
   return d.saleRef ?? d.sale?.txnNumber ?? d.sale?.id ?? d.saleId;
+}
+
+function userShortName(u?: { fullName?: string | null; phone?: string | null } | null) {
+  return u?.fullName?.trim() || u?.phone?.trim() || '';
+}
+
+/** Livreur saisi, sinon l’utilisateur qui a enregistré le passage. */
+export function deliveryDropWho(drop: DeliveryDrop) {
+  const named = drop.executorName?.trim() || '';
+  const recorded = userShortName(drop.deliveredBy) || userShortName(drop.createdBy);
+  if (named && recorded && named.toLowerCase() !== recorded.toLowerCase()) {
+    return `${named} · ${recorded}`;
+  }
+  return named || recorded;
 }

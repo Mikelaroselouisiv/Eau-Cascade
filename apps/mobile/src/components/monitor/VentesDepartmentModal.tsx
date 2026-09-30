@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ModalShell } from '@/components/ModalShell';
@@ -9,8 +9,9 @@ import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { listSales } from '@/services/api';
 import type { DashboardSalesByProductRow, Sale } from '@/types/api';
-import { businessDayEndIso, businessDayStartIso, formatYmdDisplay } from '@/utils/datetime';
+import { businessDayEndIso, businessDayStartIso, formatYmdDisplay, ymdFromIso } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
+import { isSaleVoided } from '@/utils/saleRef';
 
 type DepartmentGroup = {
   key: string;
@@ -28,10 +29,48 @@ type Props = {
   salesDeptParams?: { departmentId?: number; departmentIds?: number[] };
   canCancel?: boolean;
   cancelBusy?: boolean;
+  voidedSales?: Sale[];
   onOpenSale: (sale: Sale) => void;
   onCancelSale?: (sale: Sale) => void;
   onClose: () => void;
 };
+
+function saleMatchesGroup(sale: Sale, group: DepartmentGroup): boolean {
+  const departmentIds = (sale.items ?? [])
+    .map((item) => item.product?.departmentId)
+    .filter((id): id is number => id != null);
+  if (group.departmentId == null) {
+    return departmentIds.length === 0;
+  }
+  if (departmentIds.length === 0) return true;
+  return departmentIds.includes(group.departmentId);
+}
+
+function saleInRange(sale: Sale, dateFrom: string, dateTo: string): boolean {
+  const ymd = ymdFromIso(sale.createdAt);
+  return Boolean(ymd) && ymd >= dateFrom && ymd <= dateTo;
+}
+
+function mergeVoidedSales(
+  apiSales: Sale[],
+  voidedSales: Sale[],
+  group: DepartmentGroup | null,
+  dateFrom: string,
+  dateTo: string,
+): Sale[] {
+  if (!group) return apiSales;
+  const byId = new Map(voidedSales.map((sale) => [sale.id, sale]));
+  const merged = apiSales.map((sale) => byId.get(sale.id) ?? sale);
+  const seen = new Set(merged.map((sale) => sale.id));
+  const extras = voidedSales.filter(
+    (sale) =>
+      !seen.has(sale.id) &&
+      isSaleVoided(sale) &&
+      saleMatchesGroup(sale, group) &&
+      saleInRange(sale, dateFrom, dateTo),
+  );
+  return [...extras, ...merged];
+}
 
 const PAGE_SIZE = 20;
 
@@ -44,16 +83,22 @@ export function VentesDepartmentModal({
   salesDeptParams,
   canCancel = false,
   cancelBusy = false,
+  voidedSales = [],
   onOpenSale,
   onCancelSale,
   onClose,
 }: Props) {
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [apiSales, setApiSales] = useState<Sale[]>([]);
   const [salesTotal, setSalesTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadLock = useRef(false);
+  const sales = useMemo(
+    () => mergeVoidedSales(apiSales, voidedSales, group, dateFrom, dateTo),
+    [apiSales, dateFrom, dateTo, group, voidedSales],
+  );
+  const extraVoidedCount = Math.max(0, sales.length - apiSales.length);
 
   const total = group?.rows.reduce((sum, row) => sum + Number(row.totalSubtotal), 0) ?? 0;
   const quantity = group?.rows.reduce((sum, row) => sum + Number(row.quantity), 0) ?? 0;
@@ -66,7 +111,7 @@ export function VentesDepartmentModal({
       if (append) setLoadingMore(true);
       else {
         setLoading(true);
-        setSales([]);
+        setApiSales([]);
         setSalesTotal(0);
       }
       setError(null);
@@ -82,7 +127,7 @@ export function VentesDepartmentModal({
             : salesDeptParams),
         });
         setSalesTotal(page.total);
-        setSales((previous) => {
+        setApiSales((previous) => {
           const base = append ? previous : [];
           const seen = new Set(base.map((sale) => sale.id));
           const next = [...base];
@@ -94,7 +139,7 @@ export function VentesDepartmentModal({
           return next;
         });
       } catch {
-        if (!append) setSales([]);
+        if (!append) setApiSales([]);
         setError('Impossible de charger les transactions.');
       } finally {
         loadLock.current = false;
@@ -107,7 +152,7 @@ export function VentesDepartmentModal({
 
   useEffect(() => {
     if (!group || companyId == null) {
-      setSales([]);
+      setApiSales([]);
       setSalesTotal(0);
       setError(null);
       return;
@@ -116,8 +161,8 @@ export function VentesDepartmentModal({
   }, [companyId, dateFrom, dateTo, group, loadSales, refreshKey]);
 
   function onEndReached() {
-    if (loading || loadingMore || sales.length >= salesTotal) return;
-    void loadSales(true, sales.length);
+    if (loading || loadingMore || apiSales.length >= salesTotal) return;
+    void loadSales(true, apiSales.length);
   }
 
   return (
@@ -168,7 +213,7 @@ export function VentesDepartmentModal({
               )}
               <View style={styles.txnHeader}>
                 <Text style={styles.section}>Transactions</Text>
-                <Text style={styles.txnCount}>{salesTotal}</Text>
+                <Text style={styles.txnCount}>{salesTotal + extraVoidedCount}</Text>
               </View>
               {error ? <Text style={styles.error}>{error}</Text> : null}
               {loading && sales.length === 0 ? (

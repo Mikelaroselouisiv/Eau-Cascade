@@ -199,6 +199,13 @@ export function addDaysYmd(ymd: string, days: number): string {
   }).format(noon);
 }
 
+/** Jours calendaires inclus (aujourd’hui compris) pour le gérant sans rapports complets. */
+export const RECENT_HISTORY_DAYS = 45;
+
+export function recentHistoryMinYmd(today = businessTodayYmd()): string {
+  return addDaysYmd(today, -(RECENT_HISTORY_DAYS - 1));
+}
+
 export function monthEndYmd(ymd: string): string {
   const parts = parseYmd(ymd);
   if (!parts) return ymd;

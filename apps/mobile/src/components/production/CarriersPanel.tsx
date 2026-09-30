@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { ModalShell } from '@/components/ModalShell';
+import { DashboardDateFilter } from '@/components/monitor/DashboardDateFilter';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import { createCarrier, getCarrier, listCarriers, updateCarrier } from '@/services/api';
@@ -284,22 +285,13 @@ export function CarriersPanel({ departmentId, plants, finishedGoods, canManage, 
                   {fiche.phone} · {ymdFromIso(fiche.startedAt)}
                 </Text>
               )}
-              <Text style={styles.meta}>Du</Text>
-              <TextInput
-                style={styles.qtyInput}
-                value={dateFrom}
-                onChangeText={(v) => {
-                  setDateFrom(v);
-                  void openFiche(fiche.id, v, dateTo);
-                }}
-              />
-              <Text style={styles.meta}>Au</Text>
-              <TextInput
-                style={styles.qtyInput}
-                value={dateTo}
-                onChangeText={(v) => {
-                  setDateTo(v);
-                  void openFiche(fiche.id, dateFrom, v);
+              <DashboardDateFilter
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                onChange={(from, to) => {
+                  setDateFrom(from);
+                  setDateTo(to);
+                  void openFiche(fiche.id, from, to);
                 }}
               />
               <Text style={{ color: BrandColors.text }}>

@@ -1,7 +1,7 @@
 import { SALES_RECENT_TOTALS_DAYS, permissionsSatisfy } from '../permissions';
 import { nowBusinessYmd, shiftBusinessYmd } from './business-timezone';
 
-/** Aujourd’hui + veille (fuseau Port-au-Prince). */
+/** Fenêtre récente (fuseau Port-au-Prince), aujourd’hui compris. */
 export function recentTotalsWindow(now: Date = new Date()): { minFrom: string; today: string } {
   const today = nowBusinessYmd(now);
   return {
@@ -18,7 +18,7 @@ export function mustClampRecentTotals(perms: string[] | null | undefined): boole
   return !permissionsSatisfy(perms ?? [], ['reports.view']);
 }
 
-/** Sans `finance.view` / `finance.write` (ni `*`), le journal dépenses reste dans la fenêtre 2 jours. */
+/** Sans `finance.view` / `finance.write` (ni `*`), le journal dépenses reste dans la fenêtre récente. */
 export function mustClampRecentExpenses(perms: string[] | null | undefined): boolean {
   return (
     !permissionsSatisfy(perms ?? [], ['finance.view']) &&

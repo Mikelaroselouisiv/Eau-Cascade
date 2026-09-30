@@ -28,7 +28,7 @@ export class ReportsController {
 
   /**
    * `reports.view` = historique libre.
-   * `sales.recent_totals` seul = fenêtre des N derniers jours métier (aujourd’hui + veille).
+   * `sales.recent_totals` seul = fenêtre des N derniers jours métier (aujourd’hui compris).
    */
   private async resolveSalesByProductRange(
     role: string | undefined,

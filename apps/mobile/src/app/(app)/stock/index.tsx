@@ -11,6 +11,6 @@ export default function Index() {
       canPerm,
       role: user?.role,
       productionDepartmentIds: user?.productionDepartmentIds,
-    })[0]?.name ?? 'achats';
+    })[0]?.name ?? 'produits';
   return <Redirect href={`/(app)/stock/${first}` as never} />;
 }

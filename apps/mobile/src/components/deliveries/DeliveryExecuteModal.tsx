@@ -25,10 +25,15 @@ import { formatApiError } from '@/services/api-errors';
 import { printReceipt } from '@/services/bluetooth-printer';
 import { buildSaleReceiptDataFromSale } from '@/services/receipt';
 import type { CarrierRow, Delivery, Department } from '@/types/api';
-import { formatMoney } from '@/utils/datetime';
+import { formatDateTime, formatMoney } from '@/utils/datetime';
 import { formatQuantity } from '@/utils/quantity';
 import { departmentsForUser } from '@/utils/user-scope';
-import { DELIVERY_STATUS_LABEL, deliverySaleRef, isHomeDelivery } from './deliveryFiche';
+import {
+  DELIVERY_STATUS_LABEL,
+  deliveryDropWho,
+  deliverySaleRef,
+  isHomeDelivery,
+} from './deliveryFiche';
 
 type Props = {
   deliveryId: number | null;
@@ -450,25 +455,6 @@ export function DeliveryExecuteModal({
                 ) : null}
               </View>
             }
-            ListFooterComponent={
-              (detail.drops ?? []).length ? (
-                <View style={styles.dropsBlock}>
-                  {(detail.drops ?? []).map((drop) => {
-                    const item = (detail.items ?? []).find((it) => it.saleItemId === drop.saleItemId);
-                    const label =
-                      item?.saleItem?.lineLabel || item?.saleItem?.product?.name || 'Article';
-                    return (
-                      <Text key={drop.id} style={styles.dropLine}>
-                        {formatQuantity(Number(drop.quantity))} {label}
-                        {drop.department?.name ? ` · ${drop.department.name}` : ''}
-                        {drop.executorName?.trim() ? ` · ${drop.executorName.trim()}` : ''}
-                        {drop.stop?.address ? ` · ${drop.stop.address}` : ''}
-                      </Text>
-                    );
-                  })}
-                </View>
-              ) : null
-            }
             renderItem={({ item: it }) => {
               const label =
                 it.saleItem?.lineLabel || it.saleItem?.product?.name || `Article #${it.saleItemId}`;
@@ -478,23 +464,57 @@ export function DeliveryExecuteModal({
               );
               const selectedLine = dropSaleItemId === it.saleItemId;
               const editable = canManage(detail) && detail.status !== 'DELIVERED';
+              const lineDrops = (detail.drops ?? [])
+                .filter((d) => d.saleItemId === it.saleItemId)
+                .slice()
+                .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
               return (
-                <Pressable
-                  style={[styles.lineRow, selectedLine && editable && styles.lineRowSelected]}
-                  disabled={!editable}
-                  onPress={() => {
-                    setDropSaleItemId(it.saleItemId);
-                    setDropQty(String(remaining));
-                  }}>
-                  <View style={styles.rowInfo}>
+                <View style={[styles.lineRow, selectedLine && editable && styles.lineRowSelected]}>
+                  <Pressable
+                    style={styles.rowInfo}
+                    disabled={!editable}
+                    onPress={() => {
+                      setDropSaleItemId(it.saleItemId);
+                      setDropQty(String(remaining));
+                    }}>
                     <Text style={styles.rowTitle} numberOfLines={2}>
                       {label}
                     </Text>
                     <Text style={styles.meta}>
                       Livré {formatQuantity(it.quantityDelivered)} · Reste {formatQuantity(remaining)}
                     </Text>
-                  </View>
-                </Pressable>
+                  </Pressable>
+                  {lineDrops.map((drop) => {
+                    const who = deliveryDropWho(drop);
+                    return (
+                      <View key={drop.id} style={styles.dropCard}>
+                        <View style={styles.dropCardTop}>
+                          <Text style={styles.dropQty}>
+                            {formatQuantity(Number(drop.quantity))}
+                          </Text>
+                          <Text style={styles.dropWhen} numberOfLines={1}>
+                            {formatDateTime(drop.createdAt)}
+                          </Text>
+                        </View>
+                        {who ? (
+                          <Text style={styles.dropMeta} numberOfLines={1}>
+                            {who}
+                          </Text>
+                        ) : null}
+                        {drop.department?.name ? (
+                          <Text style={styles.dropMeta} numberOfLines={1}>
+                            {drop.department.name}
+                          </Text>
+                        ) : null}
+                        {drop.stop?.address?.trim() ? (
+                          <Text style={styles.dropMeta} numberOfLines={2}>
+                            {drop.stop.address.trim()}
+                          </Text>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
               );
             }}
           />
@@ -592,8 +612,6 @@ const styles = StyleSheet.create({
   detailHeader: { gap: 4, marginBottom: Spacing.three },
   detailTitle: { fontSize: 20, fontWeight: '700', color: BrandColors.text },
   lineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: Spacing.two,
     backgroundColor: BrandColors.surface,
     borderRadius: 12,
@@ -603,8 +621,33 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.two,
   },
   lineRowSelected: { borderColor: BrandColors.primary },
-  rowInfo: { flex: 1, gap: 2 },
+  rowInfo: { gap: 4 },
   rowTitle: { fontWeight: '600', color: BrandColors.text },
+  dropCard: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: BrandColors.border,
+    borderRadius: 10,
+    backgroundColor: BrandColors.bg,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  dropCardTop: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  dropQty: { fontSize: 14, fontWeight: '800', color: BrandColors.text, flexShrink: 0 },
+  dropWhen: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: BrandColors.primary,
+    flexShrink: 1,
+    textAlign: 'right',
+  },
+  dropMeta: { fontSize: 12, color: BrandColors.textMuted, fontWeight: '600' },
   footer: { padding: Spacing.three, gap: Spacing.two, backgroundColor: BrandColors.bg },
   footerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   secondaryBtn: {
@@ -632,8 +675,6 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.55 },
   executorBlock: { marginTop: Spacing.two, gap: 6 },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  dropsBlock: { marginTop: Spacing.two, gap: 4 },
-  dropLine: { fontSize: 13, color: BrandColors.text, fontWeight: '600' },
   deptChip: {
     borderWidth: 1,
     borderColor: BrandColors.borderStrong,

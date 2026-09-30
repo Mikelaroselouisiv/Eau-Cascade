@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useState, type ComponentProps } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ChipScroll } from '@/components/ChipScroll';
@@ -10,6 +11,7 @@ import { DashboardDateFilter } from '@/components/monitor/DashboardDateFilter';
 import { RegisterSessionsPanel } from '@/components/monitor/RegisterSessionsPanel';
 import { ProductionSessionsPanel } from '@/components/monitor/ProductionSessionsPanel';
 import { RevenueTrendChart } from '@/components/monitor/RevenueTrendChart';
+import { SyntheseFloorPanel } from '@/components/monitor/SyntheseFloorPanel';
 import { RefreshableScroll } from '@/components/RefreshableScroll';
 import { Screen } from '@/components/Screen';
 import { BrandColors } from '@/constants/brand';
@@ -20,26 +22,22 @@ import { getDashboardSummaryRange } from '@/services/api';
 import type { DashboardBalanceSnapshot } from '@/types/api';
 import { loadDashboardSalesSeries, type SalesSeriesPoint } from '@/utils/dashboard-series';
 import {
-  addDaysYmd,
   businessTodayYmd,
   dashboardPresetRange,
+  recentHistoryMinYmd,
   type DashboardSeriesGrain,
 } from '@/utils/datetime';
 
 export default function SyntheseScreen() {
-  const { can, canPerm } = useAuth();
+  const { can, canPerm, user } = useAuth();
   const canSeeUnlimitedRange = can(['ADMIN']) || canPerm('reports.view');
   const canSeeSynthesis =
     canSeeUnlimitedRange ||
     canPerm('dashboard.synthesis') ||
     canPerm('sales.recent_totals');
-  const salesRecentMinYmd = canSeeUnlimitedRange ? null : addDaysYmd(businessTodayYmd(), -1);
+  const salesRecentMinYmd = canSeeUnlimitedRange ? null : recentHistoryMinYmd();
   const { companyId, companies, setCompanyId, ready, lockedToSession } = useCompanyScope();
-  const [range, setRange] = useState(() =>
-    salesRecentMinYmd
-      ? { dateFrom: salesRecentMinYmd, dateTo: businessTodayYmd() }
-      : dashboardPresetRange('week'),
-  );
+  const [range, setRange] = useState(() => dashboardPresetRange('week'));
   const [grain, setGrain] = useState<DashboardSeriesGrain>('day');
   const [snapshot, setSnapshot] = useState<DashboardBalanceSnapshot | null>(null);
   const [series, setSeries] = useState<SalesSeriesPoint[]>([]);
@@ -55,34 +53,55 @@ export default function SyntheseScreen() {
       : range.dateFrom;
   const dateTo = salesRecentMinYmd && range.dateTo > todayYmd ? todayYmd : range.dateTo;
 
-  const load = useCallback(async () => {
+  const loadFinance = useCallback(async () => {
     if (!canSeeSynthesis || companyId == null) return;
     try {
       setError(null);
       const [snap, points] = await Promise.all([
         getDashboardSummaryRange({ companyId, dateFrom, dateTo }),
-        loadDashboardSalesSeries({ companyId, dateFrom, dateTo, grain: salesRecentMinYmd ? 'day' : grain }),
+        loadDashboardSalesSeries({
+          companyId,
+          dateFrom,
+          dateTo,
+          grain,
+        }),
       ]);
       setSnapshot(snap);
       setSeries(points);
-      setSeriesGrain(salesRecentMinYmd ? 'day' : grain);
+      setSeriesGrain(grain);
     } catch {
-      setError('Impossible de charger la synthèse');
+      setError('Impossible de charger les chiffres');
       setSnapshot(null);
       setSeries([]);
     }
-  }, [canSeeSynthesis, companyId, dateFrom, dateTo, grain, salesRecentMinYmd]);
+  }, [canSeeSynthesis, companyId, dateFrom, dateTo, grain]);
 
   useEffect(() => {
     if (!ready || view !== 'overview') return;
-    void load();
-  }, [load, ready, view]);
+    const timer = setTimeout(() => void loadFinance(), 0);
+    return () => clearTimeout(timer);
+  }, [loadFinance, ready, view]);
+
+  const skipNextFocusRefresh = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (!ready || view !== 'overview') return;
+      if (skipNextFocusRefresh.current) {
+        skipNextFocusRefresh.current = false;
+        return;
+      }
+      setRefreshKey((key) => key + 1);
+      void loadFinance();
+    }, [loadFinance, ready, view]),
+  );
 
   async function onRefresh() {
     setRefreshing(true);
     try {
-      if (view === 'overview') await load();
-      else {
+      if (view === 'overview') {
+        setRefreshKey((key) => key + 1);
+        await loadFinance();
+      } else {
         setRefreshKey((key) => key + 1);
         await new Promise((resolve) => setTimeout(resolve, 400));
       }
@@ -124,18 +143,15 @@ export default function SyntheseScreen() {
           </ChipScroll>
         ) : null}
 
-        <DashboardDateFilter
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          onChange={(nextFrom, nextTo) => setRange({ dateFrom: nextFrom, dateTo: nextTo })}
-          minYmd={salesRecentMinYmd}
-        />
         <ChipScroll contentStyle={styles.viewSwitch}>
           <ViewSwitchButton
-            icon="pie-chart-outline"
-            label="Aperçu"
+            icon="pulse-outline"
+            label="Terrain"
             active={view === 'overview'}
-            onPress={() => setView('overview')}
+            onPress={() => {
+              setView('overview');
+              setRefreshKey((key) => key + 1);
+            }}
           />
           <ViewSwitchButton
             icon="storefront-outline"
@@ -156,33 +172,79 @@ export default function SyntheseScreen() {
             onPress={() => setView('audit')}
           />
         </ChipScroll>
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        {view !== 'overview' ? (
+          <DashboardDateFilter
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onChange={(nextFrom, nextTo) => setRange({ dateFrom: nextFrom, dateTo: nextTo })}
+            minYmd={salesRecentMinYmd}
+          />
+        ) : null}
+
+        {error && view !== 'overview' ? <Text style={styles.error}>{error}</Text> : null}
         {ready && companyId == null ? (
           <Text style={styles.error}>Aucune entreprise disponible pour le monitoring.</Text>
         ) : null}
 
         {view === 'overview' ? (
           <>
-            {snapshot ? (
-              <View style={styles.kpiGrid}>
-                <KpiCard label="CA" value={snapshot.sales} money />
-                <KpiCard label="Sorties" value={snapshot.totalOutflows} money tone="warn" />
-                <KpiCard
-                  label="Résultat"
-                  value={snapshot.balance}
-                  money
-                  tone={snapshot.balance >= 0 ? 'ok' : 'warn'}
-                  hint={snapshot.trend}
-                />
-                <KpiCard label="Dépenses manuelles" value={snapshot.manualExpenses} money />
-              </View>
-            ) : ready && companyId != null && !error ? (
-              <Text style={styles.empty}>Chargement…</Text>
+            {companyId != null ? (
+              <SyntheseFloorPanel
+                companyId={companyId}
+                user={user}
+                refreshKey={refreshKey}
+                canSeeQueue={canPerm('deliveries.view')}
+                canSeeRegisters={
+                  canPerm('dashboard.view') ||
+                  canPerm('dashboard.synthesis') ||
+                  canPerm('stores.manage')
+                }
+                canSeeStock={
+                  canPerm('stock.view') || canPerm('stock.global') || canPerm('products.view')
+                }
+                canSeeSales={
+                  canPerm('sales.view') ||
+                  canPerm('sales.recent_totals') ||
+                  canPerm('reports.view')
+                }
+                canSeeProduction={
+                  canPerm('dashboard.view') ||
+                  canPerm('dashboard.synthesis') ||
+                  canPerm('stores.manage') ||
+                  canPerm('production.use')
+                }
+              />
             ) : null}
 
-            {snapshot ? (
-              <>
-                {salesRecentMinYmd ? null : (
+            <View style={styles.financeBlock}>
+              <Text style={styles.financeTitle}>Chiffres</Text>
+              <DashboardDateFilter
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                onChange={(nextFrom, nextTo) => setRange({ dateFrom: nextFrom, dateTo: nextTo })}
+                minYmd={salesRecentMinYmd}
+              />
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+              {snapshot ? (
+                <View style={styles.kpiGrid}>
+                  <KpiCard label="CA" value={snapshot.sales} money />
+                  <KpiCard label="Sorties" value={snapshot.totalOutflows} money tone="warn" />
+                  <KpiCard
+                    label="Résultat"
+                    value={snapshot.balance}
+                    money
+                    tone={snapshot.balance >= 0 ? 'ok' : 'warn'}
+                    hint={snapshot.trend}
+                  />
+                  <KpiCard label="Dépenses manuelles" value={snapshot.manualExpenses} money />
+                </View>
+              ) : ready && companyId != null && !error ? (
+                <Text style={styles.empty}>Chargement…</Text>
+              ) : null}
+
+              {snapshot ? (
+                <>
                   <ChipScroll>
                     <Pressable
                       onPress={() => setGrain('day')}
@@ -199,10 +261,10 @@ export default function SyntheseScreen() {
                       </Text>
                     </Pressable>
                   </ChipScroll>
-                )}
-                <RevenueTrendChart rows={series} grain={seriesGrain} />
-              </>
-            ) : null}
+                  <RevenueTrendChart rows={series} grain={seriesGrain} />
+                </>
+              ) : null}
+            </View>
           </>
         ) : null}
 
@@ -307,4 +369,12 @@ const styles = StyleSheet.create({
   viewButtonActive: { backgroundColor: BrandColors.primary },
   viewButtonText: { color: BrandColors.textMuted, fontSize: 12, fontWeight: '700' },
   viewButtonTextActive: { color: '#fff' },
+  financeBlock: {
+    gap: Spacing.three,
+    marginTop: Spacing.two,
+    paddingTop: Spacing.three,
+    borderTopWidth: 1,
+    borderTopColor: BrandColors.border,
+  },
+  financeTitle: { color: BrandColors.textMuted, fontSize: 13, fontWeight: '800' },
 });

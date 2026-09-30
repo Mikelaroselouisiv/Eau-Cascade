@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
+import { ChipScroll } from '@/components/ChipScroll';
 import { ModalShell } from '@/components/ModalShell';
+import { DashboardDateFilter } from '@/components/monitor/DashboardDateFilter';
 import { BrandColors } from '@/constants/brand';
 import { Spacing } from '@/constants/theme';
 import {
@@ -66,7 +68,23 @@ export function ProductionWorkersPanel({
   const [editCoef, setEditCoef] = useState('');
   const [editDeptId, setEditDeptId] = useState<number | ''>(departmentId);
   const [editError, setEditError] = useState('');
+  const [listDeptId, setListDeptId] = useState<number | null>(null);
   const catalog = op === 'issue' ? rawMaterials : finishedGoods;
+
+  function plantName(id: number) {
+    return plants.find((p) => p.id === id)?.name ?? '';
+  }
+
+  const visibleWorkers = useMemo(() => {
+    const nameOf = (id: number) => plants.find((p) => p.id === id)?.name ?? '';
+    const rows = listDeptId == null ? workers : workers.filter((w) => w.departmentId === listDeptId);
+    return [...rows].sort((a, b) => {
+      const dept = nameOf(a.departmentId).localeCompare(nameOf(b.departmentId), 'fr')
+        || a.departmentId - b.departmentId;
+      if (dept !== 0) return dept;
+      return a.name.localeCompare(b.name, 'fr');
+    });
+  }, [listDeptId, plants, workers]);
 
   const reload = useCallback(async () => {
     const plantIds = plants.length ? plants.map((p) => p.id) : [departmentId];
@@ -88,6 +106,17 @@ export function ProductionWorkersPanel({
     setQty({});
     void reload().catch((e) => onMessage(formatApiError(e, 'Chargement impossible.')));
   }, [departmentId, reload, onMessage]);
+
+  useEffect(() => {
+    if (listDeptId != null && !plants.some((p) => p.id === listDeptId)) {
+      setListDeptId(null);
+    }
+  }, [listDeptId, plants]);
+
+  useEffect(() => {
+    if (workerId !== '' && visibleWorkers.some((w) => w.id === workerId)) return;
+    setWorkerId(visibleWorkers[0]?.id ?? '');
+  }, [visibleWorkers, workerId]);
 
   async function onCreate() {
     const name = newName.trim();
@@ -234,15 +263,32 @@ export function ProductionWorkersPanel({
           </Pressable>
         ) : null}
       </View>
-      {workers.length === 0 ? <Text style={styles.meta}>Aucun ouvrier</Text> : null}
-      {workers.map((w) => {
+      {plants.length > 1 ? (
+        <ChipScroll contentStyle={{ marginBottom: 10 }}>
+          <Pressable
+            onPress={() => setListDeptId(null)}
+            style={[styles.chip, listDeptId == null && styles.chipActive]}>
+            <Text style={[styles.chipText, listDeptId == null && styles.chipTextActive]}>Tous</Text>
+          </Pressable>
+          {plants.map((p) => (
+            <Pressable
+              key={p.id}
+              onPress={() => setListDeptId(p.id)}
+              style={[styles.chip, listDeptId === p.id && styles.chipActive]}>
+              <Text style={[styles.chipText, listDeptId === p.id && styles.chipTextActive]}>{p.name}</Text>
+            </Pressable>
+          ))}
+        </ChipScroll>
+      ) : null}
+      {visibleWorkers.length === 0 ? <Text style={styles.meta}>Aucun ouvrier</Text> : null}
+      {visibleWorkers.map((w) => {
         const row = (
           <>
             <Text style={{ color: BrandColors.text, fontWeight: '600' }}>{w.name}</Text>
             <Text style={styles.meta}>
               {canManageWorkers
-                ? `${plants.find((p) => p.id === w.departmentId)?.name ?? ''} · ${w.phone} · ${ymdFromIso(w.startedAt)} · ${formatMoney(w.payrollCoefficient)} · MP ${formatQuantity(w.sessionIssuedQty ?? 0)} · PF ${formatQuantity(w.sessionQuantity ?? 0)}`
-                : [plants.find((p) => p.id === w.departmentId)?.name, w.phone].filter(Boolean).join(' · ')}
+                ? `${plantName(w.departmentId)} · ${w.phone} · ${ymdFromIso(w.startedAt)} · ${formatMoney(w.payrollCoefficient)} · MP ${formatQuantity(w.sessionIssuedQty ?? 0)} · PF ${formatQuantity(w.sessionQuantity ?? 0)}`
+                : [plantName(w.departmentId), w.phone].filter(Boolean).join(' · ')}
             </Text>
           </>
         );
@@ -279,7 +325,7 @@ export function ProductionWorkersPanel({
         </Pressable>
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-        {workers.map((w) => (
+        {visibleWorkers.map((w) => (
           <Pressable
             key={w.id}
             onPress={() => setWorkerId(w.id)}
@@ -430,20 +476,13 @@ export function ProductionWorkersPanel({
                   </Text>
                 </>
               )}
-              <TextInput
-                style={styles.qtyInput}
-                value={dateFrom}
-                onChangeText={(v) => {
-                  setDateFrom(v);
-                  void openFiche(fiche.id, v, dateTo);
-                }}
-              />
-              <TextInput
-                style={styles.qtyInput}
-                value={dateTo}
-                onChangeText={(v) => {
-                  setDateTo(v);
-                  void openFiche(fiche.id, dateFrom, v);
+              <DashboardDateFilter
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                onChange={(from, to) => {
+                  setDateFrom(from);
+                  setDateTo(to);
+                  void openFiche(fiche.id, from, to);
                 }}
               />
               <Text style={{ color: BrandColors.text }}>
