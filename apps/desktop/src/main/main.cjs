@@ -6,6 +6,7 @@ const localDb = require('./local-db.cjs');
 const { initUpdater } = require('./updater.cjs');
 const { getAppEdition } = require('./edition.cjs');
 const { ensureServerStack } = require('./server-bootstrap.cjs');
+const { restoreKeyboardFocus, registerKeyboardFocusIpc } = require('./keyboard-focus.cjs');
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
@@ -55,6 +56,16 @@ function createWindow() {
     },
   });
 
+  mainWindow.on('focus', () => {
+    if (!mainWindow.isDestroyed()) {
+      try {
+        mainWindow.webContents.focus();
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
   if (isDev) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
     // DevTools: ouvrir avec Ctrl+Shift+I (Windows/Linux) ou Cmd+Option+I (macOS).
@@ -92,7 +103,15 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('localdb:cacheGet', (_e, key) => localDb.cacheGet(key));
 
-  ipcMain.handle('printer:print-receipt', async (_event, saleData) => printReceipt(saleData));
+  registerKeyboardFocusIpc(ipcMain, BrowserWindow, dialog);
+
+  ipcMain.handle('printer:print-receipt', async (event, saleData) => {
+    try {
+      return await printReceipt(saleData);
+    } finally {
+      restoreKeyboardFocus(BrowserWindow.fromWebContents(event.sender));
+    }
+  });
   ipcMain.handle('printer:list', async () => {
     const win = BrowserWindow.getAllWindows()[0];
     if (!win) return [];
@@ -108,11 +127,15 @@ app.whenReady().then(async () => {
   if (getAppEdition() === 'server' && !isDev) {
     const stack = await ensureServerStack();
     if (!stack.ok) {
-      await dialog.showMessageBox({
+      const win = BrowserWindow.getAllWindows()[0];
+      const opts = {
         type: 'error',
         title: 'Serveur local',
         message: stack.message || 'Impossible de démarrer le serveur local.',
-      });
+      };
+      if (win && !win.isDestroyed()) await dialog.showMessageBox(win, opts);
+      else await dialog.showMessageBox(opts);
+      restoreKeyboardFocus(win);
     }
   }
 

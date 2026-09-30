@@ -11,6 +11,9 @@ declare global {
     desktopApp?: {
       platform: string;
       getEdition?: () => Promise<'server' | 'remote' | string>;
+      confirmSync: (message: string) => boolean;
+      alertSync: (message: string) => void;
+      restoreKeyboardFocus: () => void;
       printReceipt?: (saleData: {
         /** Pour nom de fichier PDF (réimpression / export). */
         saleId?: number;

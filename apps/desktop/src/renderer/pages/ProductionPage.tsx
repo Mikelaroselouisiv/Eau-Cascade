@@ -19,7 +19,7 @@ import type {
 } from '../types/api';
 import { useAuth } from '../context/AuthContext';
 import { getPosDeviceId, getPosDeviceName } from '../services/pos-device';
-import { departmentsForUser, productionPlantsForUser } from '../utils/user-scope';
+import { productionPlantsForUser } from '../utils/user-scope';
 import { RegisterStockCountForm } from '../components/RegisterStockCountForm';
 import { ProductionOutflowSection } from '../components/ProductionOutflowSection';
 import { ProductionWorkersSection } from '../components/ProductionWorkersSection';
@@ -63,7 +63,6 @@ export function ProductionPage() {
   const [pane, setPane] = useState<'outflow' | 'workers' | 'carriers'>('outflow');
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [allDepartments, setAllDepartments] = useState<Department[]>([]);
   const [companyId, setCompanyId] = useState<number | ''>('');
   const [departmentId, setDepartmentId] = useState<number | ''>('');
@@ -98,14 +97,11 @@ export function ProductionPage() {
   useEffect(() => {
     if (companyId === '') {
       setAllDepartments([]);
-      setDepartments([]);
       return;
     }
     void getDepartments(companyId)
       .then((rows) => {
         setAllDepartments(rows);
-        const scoped = departmentsForUser(rows, user);
-        setDepartments(scoped);
         const visiblePlants = productionPlantsForUser(rows, user);
         const firstPlant = visiblePlants[0];
         setDepartmentId((prev) =>
@@ -114,7 +110,6 @@ export function ProductionPage() {
       })
       .catch(() => {
         setAllDepartments([]);
-        setDepartments([]);
       });
   }, [companyId, user]);
 

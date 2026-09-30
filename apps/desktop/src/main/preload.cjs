@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld('desktopApp', {
   printReceipt: (saleData) => ipcRenderer.invoke('printer:print-receipt', saleData),
   listPrinters: () => ipcRenderer.invoke('printer:list'),
   getEdition: () => ipcRenderer.invoke('app:get-edition'),
+  confirmSync: (message) => ipcRenderer.sendSync('app:confirm-sync', message),
+  alertSync: (message) => ipcRenderer.sendSync('app:alert-sync', message),
+  restoreKeyboardFocus: () => ipcRenderer.sendSync('app:restore-keyboard-focus'),
   localDb: {
     outboxEnqueue: (payload) => ipcRenderer.invoke('localdb:outboxEnqueue', payload),
     outboxList: () => ipcRenderer.invoke('localdb:outboxList'),

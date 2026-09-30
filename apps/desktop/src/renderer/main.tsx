@@ -4,6 +4,9 @@ import './index.css';
 import App from './App';
 import { getAppEdition } from './config/edition';
 import { initApi } from './services/api';
+import { patchNativeDialogs } from './lib/patchNativeDialogs';
+
+patchNativeDialogs();
 
 function Bootstrap() {
   const [ready, setReady] = useState(false);
